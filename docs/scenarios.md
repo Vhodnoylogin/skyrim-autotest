@@ -51,8 +51,15 @@ profile; originals are never written. `poseOnly:true` is a narrower motion probe
 `postSteps` extends the built-in probe with generic assertions. Exact typed
 objects `{"$state":"probeObject"}` and `{"$state":"id"}` are substituted in
 args. There is no string interpolation, expression evaluation or arbitrary state
-access. After a load/generation transition, dynamic reference substitutions are
-invalid: submit another fixture/scenario rather than reusing a prior FormID.
+access. After a load/generation transition, typed dynamic reference substitutions fail
+closed: submit another fixture/scenario rather than reusing a prior FormID.
+The spawned reference remains live throughout postSteps and is discarded by
+owned game shutdown, without a later Delete call that could target a reused ID.
+Typed substitutions validate contiguous DevBench lifecycle events; event gaps
+and unreconciled racing head counters invalidate the reference. Explicit game
+loads, arbitrary console execution and known Papyrus world-changing functions
+in postSteps invalidate it before mutation. Literal manually copied FormIDs do
+not receive this typed-variable protection; never reuse them across a load.
 
 Example post-step: inspect world_observer with
 `{"kind":"world_observer","physics":{"refs":[{"$state":"probeObject"}]}}`.

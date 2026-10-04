@@ -1,6 +1,6 @@
 # Validation and scope
 
-The extracted independent source passes 42 regression checks: original recovery,
+The extracted independent source passes 53 regression checks: original recovery,
 PID reuse, ancestry and delayed-modal checks, plus explicit configuration,
 external runtime policy, staging confinement, durable config recovery, portable
 guardian imports, fixture validation before mutation, queue independence, bounded
@@ -9,7 +9,7 @@ No test in that suite launches Skyrim or SteamVR.
 
 Fresh ZIP extraction and standard wheel installation passed 12 smoke checks
 from an unrelated working directory and an isolated Python process, including
-the full 42-test extracted suite. The native C++ lease harness also passed: a
+the full 53-test extracted suite. The native C++ lease harness also passed: a
 complete frame survives a partial read and original expiry releases input.
 Regression mutex tests use their own real Windows mutex namespace, so they
 cannot contend with an independently running game test.
@@ -101,6 +101,36 @@ its message queue with PeekMessageW before an owned-thread attach attempt.
 An explicit allowBackgroundVR option can empirically qualify the same physical
 probe without treating focus as a mandatory assumption. It is restricted to the
 physical backend, records each failed focus request, and preserves every existing
-controller/world outcome assertion. It is not enabled by default and is not yet
-claimed live-qualified. Five regressions cover strict default failure, recorded
+controller/world outcome assertion. It is not enabled by default; the later run
+below qualifies this mode. Five regressions cover strict default failure, recorded
 opt-in semantics, backend gating before mutation, and scenario option validation.
+
+Background physical qualification and retained combined failures: session
+20261004-224650-11b401 passed all14 unchanged physical hand/grip/hold/release
+checks with both foreground requests denied. This positively qualifies physical
+input in that explicit background mode, but the complete run failed later. Its
+own cleanup verified739 restoration paths; a later comparison made during
+another live session is not independent before/after evidence for this run.
+
+Updated-distribution recovery fault225005-d96d1c: independent guardian reported
+failed/done/restored, and738 paths were independently compared with zero errors;
+source save-pair hashes were unchanged. The fault intentionally terminates the
+executor after-ready; no assertion is made about the PTY wrapper exit code.
+
+Corrected failure attribution for224650-11b401,225250-e074c8 and225925-02925d:
+the physical probe itself called Disable/Delete on its fixture before postSteps.
+The observer correctly reported the deleted/disabled reference and unavailable
+physics; missing bodies cannot be attributed solely to a Get3D/body getter.
+Run225925's739 restoration paths were independently verified with zero errors.
+
+Fixture lifetime now spans postSteps: the copied session's spawned entity stays
+live until owned game shutdown; there is no late Delete of a potentially reused
+FormID after a reload. Default no-continuation cleanup remains, but checks its
+reference lifetime first. Typed probeObject substitutions check the contiguous
+DevBench lifecycle event stream and fail closed on load/new-game transitions,
+event gaps, stream resets or an unreconciled racing head. Explicit world-changing
+post-step requests invalidate the variable before mutation. The cursor is captured
+before spawning and immediately reconciled after creation, so a concurrent load
+cannot be adopted as the newly spawned reference's baseline. Eleven additional
+regressions cover live continuation, immediate default cleanup, stale-ID refusal,
+world-changing command classification and event cursor/gap/race behavior.

@@ -88,7 +88,13 @@ def execute(session, scenario):
         from .vr_probe import execute as probe
         probe(session, scenario)
         if scenario.get('postSteps'):
-            execute(session, {'schemaVersion': 1, 'steps': scenario['postSteps']})
+            session.state['postStepsActive'] = True
+            session.save()
+            try:
+                execute(session, {'schemaVersion': 1, 'steps': scenario['postSteps']})
+            finally:
+                session.state['postStepsActive'] = False
+                session.save()
         return
     for index, step in enumerate(scenario['steps']):
         name = step['name']
@@ -105,6 +111,11 @@ def execute(session, scenario):
                 fail('Step deadline exceeded before request')
                 raise TimeoutError('Step deadline exceeded: ' + name)
             try:
+                if uses_probe_reference(step.get('args', {})):
+                    session.validate_probe_reference(timeout=min(remaining, 3))
+                    remaining = end - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError('Step deadline exceeded during reference validation')
                 result = session.tool(step['tool'], resolve_args(step.get('args', {}), session.state), timeout=min(remaining, 12))
             except Exception as error:
                 fail('Tool request failed: ' + str(error))
@@ -137,6 +148,8 @@ def resolve_args(value, state):
             # Only explicitly documented scenario output may be referenced.
             if path not in ("probeObject", "id"):
                 raise ValueError("Unsupported state reference: " + str(path))
+            if path == 'probeObject' and state.get('probeObjectLive') is False:
+                raise ValueError('Probe reference was deleted or invalidated by a world change')
             return state[path]
         return {k: resolve_args(v, state) for k, v in value.items()}
     if isinstance(value, list):
@@ -184,3 +197,11 @@ def validate_refs(value):
     elif isinstance(value, list):
         for child in value:
             validate_refs(child)
+
+
+def uses_probe_reference(value):
+    if isinstance(value, dict):
+        return value == {'$state': 'probeObject'} or any(uses_probe_reference(child) for child in value.values())
+    if isinstance(value, list):
+        return any(uses_probe_reference(child) for child in value)
+    return False

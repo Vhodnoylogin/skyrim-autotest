@@ -216,10 +216,10 @@ def execute(session, scenario):
         # Spawn one owned test object, independent of whatever personal scene was saved.
         # Build physics at the target position rather than moving an already active
         # rigid body whose render and collision transforms may temporarily diverge.
+        cursor = session.capture_probe_cursor()
         obj = papyrus('ObjectReference', 'PlaceAtMe', [{'form': scenario['object']}, 1, True, True], '0x14')
         ref = obj['formId']
-        session.state['probeObject'] = ref
-        session.save()
+        session.bind_probe_reference(ref, cursor)
         player_pos = [papyrus('ObjectReference', 'GetPosition' + axis, target='0x14') for axis in 'XYZ']
         # Place within the palm's near cast. The small forward offset avoids forcing
         # a contact impulse before the grip transition.
@@ -358,8 +358,7 @@ def execute(session, scenario):
         if dropped_3d is not True:
             raise AssertionError('Released test reference is not in the loaded world; pickup/equip is not a drop')
         record('released reference remains in the loaded world', {'form': ref, 'loaded3D': dropped_3d})
-        papyrus('ObjectReference', 'Disable', [False], ref)
-        papyrus('ObjectReference', 'Delete', target=ref)
+        finish_probe_reference(session, scenario, papyrus, ref)
     finally:
         stop_pose()
     if body_distance < 5:
@@ -380,3 +379,17 @@ def ensure_owned_focus(session, scenario, checkpoint):
         session.log('background-vr-attempt', checkpoint=checkpoint, foreground=result,
                     physicalAssertionsRequired=True, acceptedAsInputProof=False)
     return result
+
+
+def finish_probe_reference(session, scenario, papyrus, ref):
+    if scenario.get('postSteps'):
+        # The continuation owns this exact live entity. The copied, non-saving
+        # session is closed afterwards; never delete its old FormID after a load.
+        session.save()
+        session.log('probe-fixture-retained', form=ref, cleanup='owned-game-close')
+        return
+    session.validate_probe_reference()
+    papyrus('ObjectReference', 'Disable', [False], ref)
+    papyrus('ObjectReference', 'Delete', target=ref)
+    session.state['probeObjectLive'] = False
+    session.save()

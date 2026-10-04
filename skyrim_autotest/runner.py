@@ -328,7 +328,61 @@ class Session:
             self.log('driver', action=action, result=result)
             return result
 
+    def invalidate_probe_reference(self, reason):
+        self.state['probeObjectLive'] = False
+        self.save()
+        self.log('probe-reference-invalidated', reason=reason)
+
+    def capture_probe_cursor(self):
+        envelope = request(self.state['port'], 'api/events', timeout=3)
+        events = envelope.get('events')
+        if not isinstance(events, list) or any(not isinstance(event, dict) or type(event.get('seq')) is not int for event in events):
+            raise Blocked('Cannot establish probe reference lifecycle cursor')
+        return max((event['seq'] for event in events), default=0)
+
+    def bind_probe_reference(self, ref, cursor):
+        # Cursor was observed before creation, so a load while PlaceAtMe returns
+        # cannot be silently adopted as the new reference's generation.
+        self.state.update(probeObject=ref, probeObjectLive=True, probeEventCursor=cursor)
+        self.save()
+        self.validate_probe_reference()
+
+    def validate_probe_reference(self, timeout=3):
+        if not self.state.get('probeObjectLive') or 'probeEventCursor' not in self.state:
+            raise Blocked('Probe reference is unavailable or invalidated')
+        cursor = self.state['probeEventCursor']
+        deadline = time.monotonic() + timeout
+        try:
+            # Since() and HeadSeq() are fetched separately by the producer.
+            # A leading head is not evidence that its events were observed.
+            for attempt in range(3):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise Blocked('Probe lifecycle check exceeded its deadline')
+                envelope = request(self.state['port'], 'api/events?since=' + str(cursor), timeout=min(remaining, 3))
+                events, head = envelope.get('events'), envelope.get('headSeq')
+                if not isinstance(events, list) or type(head) is not int or head < cursor:
+                    raise Blocked('Probe lifecycle stream reset or is malformed')
+                for event in events:
+                    if not isinstance(event, dict) or type(event.get('seq')) is not int or event['seq'] != cursor + 1:
+                        raise Blocked('Probe lifecycle event gap; reference generation is unknown')
+                    cursor = event['seq']
+                    payload = event.get('data', {})
+                    lifecycle = payload.get('event', payload.get('type')) if isinstance(payload, dict) else None
+                    if event.get('topic') == 'lifecycle' and lifecycle in ('preLoadGame', 'postLoadGame', 'newGame'):
+                        raise Blocked('Probe reference invalidated by a world lifecycle transition')
+                self.state['probeEventCursor'] = cursor
+                self.save()
+                if head <= cursor:
+                    return
+            raise Blocked('Unseen lifecycle head could not be reconciled within the bound')
+        except Exception as error:
+            self.invalidate_probe_reference(str(error))
+            raise
+
     def tool(self, name, args, timeout=12):
+        if self.state.get('postStepsActive') and changes_reference_world(name, args):
+            self.invalidate_probe_reference('potential world-changing request: ' + name)
         if name == 'driver':
             return self.driver_tool(args)
         health = request(self.state['port'], 'api/health', timeout=3)
@@ -810,6 +864,19 @@ def recover():
                 configure(caller)
     finally:
         configure(caller)
+
+
+def changes_reference_world(name, args):
+    if name == 'game':
+        return args.get('action') not in ('status', 'capabilities', 'save')
+    if name == 'console':
+        # Arbitrary console commands/batch files may perform a load. Invalidate
+        # conservatively rather than attempting to parse an unsafe command text.
+        return args.get('action') == 'exec'
+    if name == 'papyrus' and args.get('action') == 'call':
+        script, function = args.get('script'), args.get('function')
+        return (script == 'Game' and function in ('LoadGame', 'StartNewGame', 'QuitToMainMenu')) or (script == 'ObjectReference' and function in ('MoveTo', 'MoveToNode', 'Delete', 'DeleteWhenAble'))
+    return False
 
 
 def guardian_command(directory):
