@@ -1,6 +1,6 @@
 # Validation and scope
 
-The extracted independent source passes 34 regression checks: original recovery,
+The extracted independent source passes 35 regression checks: original recovery,
 PID reuse, ancestry and delayed-modal checks, plus explicit configuration,
 external runtime policy, staging confinement, durable config recovery, portable
 guardian imports, fixture validation before mutation, queue independence, bounded
@@ -9,7 +9,7 @@ No test in that suite launches Skyrim or SteamVR.
 
 Fresh ZIP extraction and standard wheel installation passed 12 smoke checks
 from an unrelated working directory and an isolated Python process, including
-the full 34-test extracted suite. The native C++ lease harness also passed: a
+the full 35-test extracted suite. The native C++ lease harness also passed: a
 complete frame survives a partial read and original expiry releases input.
 Regression mutex tests use their own real Windows mutex namespace, so they
 cannot contend with an independently running game test.
@@ -76,5 +76,5 @@ activating a completed historical session's saved configuration before checking
 is not observer/physics evidence. Recovery now skips completed records before
 constructing sessions, freezes its original scan directory, restores abandoned
 sessions under their durable environment, and restores the caller configuration
-in `finally` including exception paths. Three regressions cover completed old
+in `finally` including exception paths. Four regressions cover live-owner refusal, completed old
 runs, multiple abandoned runs with a different runtime, and failed recovery.

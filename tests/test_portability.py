@@ -160,6 +160,19 @@ class RecoveryConfigurationTests(unittest.TestCase):
                 runner.recover()
         self.assertEqual(config.P.snapshot(),caller)
         self.assertEqual(runner.ROOT,Path(caller['runtime']))
+    def test_live_owner_blocks_recovery_without_activating_old_environment(self):
+        import contextlib
+        old = config.P.snapshot()
+        old['runtime'] = str(self.root/'old-runtime')
+        self.state_file('live-owner',False,old)
+        caller = self.selected_configuration()
+        with patch.object(runner.native,'SessionMutex',return_value=contextlib.nullcontext()),patch.object(runner.native,'alive',return_value=True),patch.object(runner,'Session') as session:
+            with self.assertRaisesRegex(runner.Blocked,'Runner is still alive'):
+                runner.recover()
+            session.assert_not_called()
+        self.assertEqual(config.P.snapshot(),caller)
+        self.assertEqual(runner.RUNS,Path(caller['runtime'])/'runs')
+
 
 class DeadlineTests(unittest.TestCase):
     class Session:
