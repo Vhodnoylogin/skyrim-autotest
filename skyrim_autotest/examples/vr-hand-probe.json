@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "name": "Virtual hand, VRIK and HIGGS integration",
+  "kind": "vr-hand-probe",
+  "cell": "QASmoke",
+  "object": "0x0006F993",
+  "diagnoseScriptedGrab": true,
+  "scope": "Settled dynamic non-equippable firewood fixture; calibrated hand approaches the floor object. NearCastRadius=0.5 m is a temporary fixture setting, VRIK unchanged. Requires exact reference held continuously, empty hand after release and reference still loaded in the world.",
+  "runtimeHiggs": {
+    "NearCastRadius": 0.5
+  },
+  "fixture": {
+    "saveStem": "REPLACE_WITH_YOUR_FIXTURE",
+    "essSha256": "REPLACE_WITH_SHA256",
+    "skseSha256": "REPLACE_WITH_SHA256"
+  }
+}

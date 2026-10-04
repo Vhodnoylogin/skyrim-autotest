@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "name": "Fresh Skyrim VR and DevBench startup",
+  "scope": "Startup and capability discovery only; does not claim hand interaction coverage.",
+  "steps": [
+    {
+      "name": "Runtime state",
+      "tool": "inspect",
+      "args": {
+        "kind": "state"
+      },
+      "assert": [
+        {
+          "path": "version",
+          "equals": "1.22.0"
+        },
+        {
+          "path": "vr",
+          "equals": true
+        }
+      ]
+    },
+    {
+      "name": "Input capabilities",
+      "tool": "input",
+      "args": {
+        "action": "capabilities"
+      },
+      "assert": [
+        {
+          "path": "capabilities.vrTrackedSet.ready",
+          "equals": true
+        }
+      ]
+    },
+    {
+      "name": "Virtual tracked devices",
+      "tool": "input",
+      "args": {
+        "device": "vrTrackedSet",
+        "action": "observe"
+      },
+      "assert": [
+        {
+          "path": "frame.hmd.valid",
+          "equals": true
+        },
+        {
+          "path": "frame.left.valid",
+          "equals": true
+        },
+        {
+          "path": "frame.right.valid",
+          "equals": true
+        }
+      ]
+    },
+    {
+      "name": "Loaded mods",
+      "tool": "inspect",
+      "args": {
+        "kind": "mods"
+      },
+      "observe": true
+    },
+    {
+      "name": "Menus",
+      "tool": "menu",
+      "args": {
+        "action": "list"
+      },
+      "observe": true
+    }
+  ]
+}

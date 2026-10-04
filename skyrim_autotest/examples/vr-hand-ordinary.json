@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "name": "Virtual hand, VRIK and HIGGS integration",
+  "kind": "vr-hand-probe",
+  "cell": "QASmoke",
+  "object": "0x0006F993",
+  "diagnoseScriptedGrab": true,
+  "scope": "Exploratory ordinary-radius variant of the settled dynamic firewood fixture; not qualified by the grip acceptance runs.",
+  "fixture": {
+    "saveStem": "REPLACE_WITH_YOUR_FIXTURE",
+    "essSha256": "REPLACE_WITH_SHA256",
+    "skseSha256": "REPLACE_WITH_SHA256"
+  }
+}

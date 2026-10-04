@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "name": "Physical pose reaches VRIK skeletons",
+  "kind": "vr-hand-probe",
+  "cell": "QASmoke",
+  "object": "0x0001397E",
+  "scope": "Assert both skeleton hand positions respond to a physical SteamVR pose shift. No HIGGS grip/release claim; diagnostic capture is not a visual pass.",
+  "poseOnly": true,
+  "fixture": {
+    "saveStem": "REPLACE_WITH_YOUR_FIXTURE",
+    "essSha256": "REPLACE_WITH_SHA256",
+    "skseSha256": "REPLACE_WITH_SHA256"
+  }
+}

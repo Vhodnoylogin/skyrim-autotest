@@ -1,0 +1,36 @@
+# Configuration contract (schemaVersion 1)
+
+Configuration is a JSON object supplied using `--config`. Relative paths resolve
+against the config file's directory, never the working directory. Unknown fields
+are rejected. No path value includes credentials; only `bridge_token` names a
+file whose content is read immediately before an authenticated request.
+
+| Field | Meaning |
+|---|---|
+| runtime | External writable backups/dependencies/queue/results root; outside Git and live MO2/game directories |
+| mo2 | Installation folder |
+| mo2_exe / mo2_ini | Optional explicit overrides; otherwise ModOrganizer.exe / ModOrganizer.ini in mo2 |
+| game | Skyrim VR installation root |
+| mods / profiles / overwrite | Explicit MO2 instance directories |
+| bridge_token | MO2 API Bridge token file path |
+| bridge_port | Local API port, default 8930, integer 1..65535 |
+| openvr_paths | Actual openvrpaths.vrpath file, used to discover runtime/config/logs |
+| skse_logs | External SKSE log directory |
+| fixture_dir | Optional external authorized save-pair directory; if absent/null use selected source profile's saves |
+| required_mods | Nonempty exact MO2 directory names; default DevBench, VRIK Player Avatar and HIGGS - Enhanced VR Interaction |
+| extra_files | Explicit paths to regular files that may change; existence/content snapshotted before launch |
+| staged_plugins | External source files staged into MO2 overwrite before launch, with source/destination/sha256 |
+| devbench_runtime_files | Optional discovery file override list; default LOCALAPPDATA/devbench/vr/runtime.json and overwrite/SKSE/Plugins/devbench/runtime.json |
+
+A staged plugin is `{ "source": "C:/Build/WorldObserver.dll", "destination":
+"SKSE/Plugins/WorldObserver.dll", "sha256": "<64 lower-case hex digits>" }`.
+Destination must be relative and remain under overwrite; existing files are
+backed up/restored, new files removed. Source hashes are verified before setup
+and again at staging. Include the mod's configuration/output files in extra_files
+when they are not already captured under enabled mod directories.
+
+`config-check` validates schema and path policy without launching programs. It
+is not live dependency readiness. `preflight` checks actual configured binaries,
+profile, busy processes, SteamVR input profile, Root Builder stock DLL and
+selected mod configurations. Each run stores its resolved config for recovery.
+Do not move runtime or installed code before recovery finishes.

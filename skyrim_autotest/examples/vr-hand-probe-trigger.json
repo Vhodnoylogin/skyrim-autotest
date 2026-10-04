@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "name": "Physical trigger grab and release with controlled fixture",
+  "kind": "vr-hand-probe",
+  "cell": "QASmoke",
+  "object": "0x0006F993",
+  "diagnoseScriptedGrab": true,
+  "scope": "Exploratory trigger variant of the settled dynamic firewood fixture; not qualified by the grip acceptance runs.",
+  "button": "trigger",
+  "runtimeHiggs": {
+    "NearCastRadius": 0.25
+  },
+  "fixture": {
+    "saveStem": "REPLACE_WITH_YOUR_FIXTURE",
+    "essSha256": "REPLACE_WITH_SHA256",
+    "skseSha256": "REPLACE_WITH_SHA256"
+  }
+}

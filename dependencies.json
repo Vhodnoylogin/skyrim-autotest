@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "storagePolicy": "All third-party programs/source/archives/SDKs live outside Git. Runtime has no third-party Python dependencies.",
+  "required": [
+    {
+      "id": "python",
+      "versionMinimum": "3.11",
+      "source": "https://www.python.org/downloads/windows/"
+    },
+    {
+      "id": "msvc",
+      "source": "https://visualstudio.microsoft.com/downloads/",
+      "component": "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+      "requiredFor": "driver rebuild"
+    },
+    {
+      "id": "skyrim-vr",
+      "observedVersion": "1.4.15.0",
+      "source": "https://store.steampowered.com/app/611670/Skyrim_VR/"
+    },
+    {
+      "id": "sksevr",
+      "observedVersion": "2.0.12",
+      "source": "https://skse.silverlock.org/"
+    },
+    {
+      "id": "mo2",
+      "observedVersion": "2.5.2",
+      "source": "https://github.com/ModOrganizer2/modorganizer/releases/tag/v2.5.2",
+      "sha256": null
+    },
+    {
+      "id": "root-builder",
+      "observedVersion": "5.1.1",
+      "source": "https://www.nexusmods.com/skyrimspecialedition/mods/31720",
+      "sha256": null
+    },
+    {
+      "id": "mo2-api-bridge",
+      "testedInstalledVersion": "2.1.0",
+      "source": "https://github.com/Vhodnoylogin/MO2-ApI-Bridge",
+      "note": "Newer source revisions are not assumed live-qualified."
+    },
+    {
+      "id": "steamvr",
+      "source": "https://store.steampowered.com/app/250820/SteamVR/",
+      "observedVersion": null,
+      "note": "Discover actual installed runtime from openvrpaths.vrpath; record per-run hashes."
+    },
+    {
+      "id": "devbench",
+      "observedVersion": "1.22.0",
+      "source": "https://github.com/alandtse/devbench/releases/tag/v1.22.0",
+      "nexusFileId": 809910,
+      "observedDllSha256": "45b741aca0ce5fcb8c6459958f8c41dbbb51d364c38806bf12132217eec407cb",
+      "note": "GitHub vs Nexus archive packaging hashes need not match; verify DLL."
+    }
+  ],
+  "driver": {
+    "source": "https://github.com/DubiousDuo/VR-Emulator-Driver---SkyrimVR-Devkit",
+    "commit": "dedb8ab33fc46b25ecee191f882951c064422505",
+    "archive": "https://raw.githubusercontent.com/DubiousDuo/VR-Emulator-Driver---SkyrimVR-Devkit/dedb8ab33fc46b25ecee191f882951c064422505/null%20driver.zip",
+    "archiveSha256": "4a4015b710e0b764f4d61ad642e3e3dbba59e5100749e43e7853e1f4e6fe41bd",
+    "upstreamDllSha256": "798a148e3579bb790070d1800b0c753d814acdf46c010984f6c81969fd71b939",
+    "sdkHeader": "https://raw.githubusercontent.com/ValveSoftware/openvr/v1.26.7/headers/openvr_driver.h",
+    "sdkHeaderSha256": "2d0f91ea9bfe0ef1a60d0010f7a8fb8b4ce8bed759803c135ce4f185bdf4a9ab",
+    "rebuildCommand": "python -m skyrim_autotest --config <external JSON> build-driver",
+    "redistribution": "Not included in distributions; preserve external archive licenses and verify permissions before redistributing derived binaries.",
+    "sourceFiles": "skyrim_autotest/driver_sources.json; raw exact-commit files are fetched individually and SHA-256 checked"
+  },
+  "optional": [
+    {
+      "id": "world-observer",
+      "source": "https://github.com/Vhodnoylogin/skyrim-world-observer",
+      "rebuild": "Follow its tools/build.py and hash-pinned dependencies.json, output externally, stage own DLL via staged_plugins."
+    },
+    {
+      "id": "devkit",
+      "source": "https://www.nexusmods.com/skyrimspecialedition/mods/191452",
+      "note": "AHK GUI is not required by this executor."
+    }
+  ],
+  "fixtureDependencies": "VRIK/HIGGS and dependencies of each subject are separately pinned by the test configuration. Supply an authorized hash-pinned ESS/SKSE pair; no private fixture/save distributed."
+}

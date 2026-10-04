@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skyrim-autotest"
+version = "0.1.0"
+description = "Bounded Skyrim VR automated tests with independent recovery"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+readme = "README.md"
+authors = [{name = "Vhodnoylogin"}]
+dependencies = []
+
+[project.scripts]
+skyrim-autotest = "skyrim_autotest.cli:main"
+
+[tool.setuptools]
+packages = ["skyrim_autotest"]
+
+[tool.setuptools.package-data]
+skyrim_autotest = ["*.h", "*.json", "AI_AGENTS.md", "examples/*.json"]
