@@ -64,15 +64,21 @@ def alive(ident):
     return bool(ident and identity(ident['pid']) == {k: ident[k] for k in ('pid', 'birth', 'path')})
 
 
-def focus_owned(ident):
-    """Request foreground for the owned game and report Windows' actual decision."""
+def focus_owned(ident, timeout=3):
+    """Bounded foreground requests; observe success and never touch foreign queues."""
+    import math
+    if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 5:
+        raise ValueError('Owned focus timeout must be finite within (0, 5]')
     if not alive(ident):
         raise RuntimeError('Cannot focus a process whose identity changed')
     U.GetForegroundWindow.restype = W.HWND
     U.GetWindowThreadProcessId.argtypes = [W.HWND, C.POINTER(W.DWORD)]
+    U.GetWindowThreadProcessId.restype = W.DWORD
     U.IsWindowVisible.argtypes = [W.HWND]
-    U.ShowWindow.argtypes = [W.HWND, C.c_int]
+    U.ShowWindowAsync.argtypes = [W.HWND, C.c_int]
     U.SetForegroundWindow.argtypes = [W.HWND]
+    U.AttachThreadInput.argtypes = [W.DWORD, W.DWORD, W.BOOL]
+    K.GetCurrentThreadId.restype = W.DWORD
     found = []
     callback_type = C.WINFUNCTYPE(W.BOOL, W.HWND, W.LPARAM)
     def visit(hwnd, _):
@@ -84,12 +90,50 @@ def focus_owned(ident):
     callback = callback_type(visit)
     U.EnumWindows(callback, 0)
     if not found:
-        return {'requested': False, 'focused': False}
-    U.ShowWindow(found[0], 9)
-    requested = bool(U.SetForegroundWindow(found[0]))
-    pid = W.DWORD()
-    U.GetWindowThreadProcessId(U.GetForegroundWindow(), C.byref(pid))
-    return {'requested': requested, 'focused': pid.value == ident['pid']}
+        return {'requested': False, 'focused': False, 'reason': 'no-owned-visible-window', 'attempts': 0}
+    window = found[0]
+    started = time.monotonic()
+    deadline = started + timeout
+    requested, attempts, attached_attempted = False, 0, False
+    def target_thread():
+        if not alive(ident):
+            return 0
+        pid = W.DWORD()
+        thread = U.GetWindowThreadProcessId(window, C.byref(pid))
+        return thread if pid.value == ident['pid'] and U.IsWindowVisible(window) else 0
+    def focused():
+        pid = W.DWORD()
+        U.GetWindowThreadProcessId(U.GetForegroundWindow(), C.byref(pid))
+        return pid.value == ident['pid'] and alive(ident)
+    while time.monotonic() < deadline:
+        thread = target_thread()
+        if not thread:
+            return {'requested': requested, 'focused': False, 'reason': 'owned-window-identity-changed', 'attempts': attempts}
+        if focused():
+            return {'requested': requested, 'focused': True, 'attempts': attempts}
+        # This API posts the restore request instead of waiting for a possibly
+        # still-loading window. Foreground activation may also settle later.
+        U.ShowWindowAsync(window, 9)
+        requested = bool(U.SetForegroundWindow(window)) or requested
+        attempts += 1
+        if not attached_attempted and time.monotonic() - started >= .5:
+            attached_attempted = True
+            current = K.GetCurrentThreadId()
+            # Only our own live game's input thread may be joined. Never attach
+            # to the unrelated foreground application or inject keyboard events.
+            if current != thread and target_thread() == thread and U.AttachThreadInput(current, thread, True):
+                try:
+                    if target_thread() == thread:
+                        requested = bool(U.SetForegroundWindow(window)) or requested
+                        attempts += 1
+                finally:
+                    U.AttachThreadInput(current, thread, False)
+        if focused():
+            return {'requested': requested, 'focused': True, 'attempts': attempts}
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(.1, remaining))
+    return {'requested': requested, 'focused': False, 'reason': 'foreground-request-deadline', 'attempts': attempts}
 
 
 def processes():

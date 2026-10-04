@@ -1,6 +1,6 @@
 # Validation and scope
 
-The extracted independent source passes 27 regression checks: original recovery,
+The extracted independent source passes 31 regression checks: original recovery,
 PID reuse, ancestry and delayed-modal checks, plus explicit configuration,
 external runtime policy, staging confinement, durable config recovery, portable
 guardian imports, fixture validation before mutation, queue independence, bounded
@@ -9,7 +9,7 @@ No test in that suite launches Skyrim or SteamVR.
 
 Fresh ZIP extraction and standard wheel installation passed 12 smoke checks
 from an unrelated working directory and an isolated Python process, including
-the full 27-test extracted suite. The native C++ lease harness also passed: a
+the full 31-test extracted suite. The native C++ lease harness also passed: a
 complete frame survives a partial read and original expiry releases input.
 Regression mutex tests use their own real Windows mutex namespace, so they
 cannot contend with an independently running game test.
@@ -52,3 +52,20 @@ Upstream scope update: Devkit's author does not plan the full automation API.
 The maintained adapter is now treated as our owned automation-backend candidate;
 its qualification and prototype limitations remain unchanged by that decision.
 See ownership.md for the credited provenance and exact author reply.
+
+Retained combined-run failure: 20261004-222952-4157c4 failed at owned foreground
+acquisition before physical/physics assertions; restoration completed. The
+executor had made one SetForegroundWindow request and immediately checked the
+result. Browser activity during bootstrap is a possible contributor, not an
+established cause. The revised helper uses asynchronous owned-window restoration,
+bounded settling/repeated requests, rechecks process/window identity, and may
+briefly attach only the executor and its own game's threads, always detaching.
+It never attaches to the foreign foreground application's queue, injects keys,
+or changes global foreground policy. A positive API return alone is insufficient;
+Windows' actual foreground PID must match the live owned process. Four mocked
+regressions cover settling, denial/deadline, PID loss and detach-on-error.
+
+API references: [SetForegroundWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow),
+[ShowWindowAsync](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-showwindowasync),
+[AttachThreadInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-attachthreadinput).
+Windows can still deny focus; the probe fails closed in that case.
