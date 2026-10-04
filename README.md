@@ -5,6 +5,10 @@ isolated MO2 profile, synthetic HMD/controller input, result assertions and an
 independent recovery process. No project journal, AI client, shell toolkit, or
 Python third-party package is needed at runtime.
 
+The independently extracted build passed a complete physical-input/world/physics
+scenario and restoration verification on 2026-10-04. See [validation](docs/validation.md)
+for the exact build, measured scope, retained failures and prototype limits.
+
 The automation adapter is maintained here as our own backend. Devkit's author
 has explained that a full automation API is outside that project's planned scope;
 we do not assume this adapter will disappear after upstream changes. It remains

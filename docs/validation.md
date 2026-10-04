@@ -147,3 +147,43 @@ responses within the original step deadline. Every attempt retains identity
 checks and logs; capabilities, mutations, unknown failures and any started-read
 outcomes are not retried. Six regressions cover eligible retry/evidence,
 ineligible calls, unknown outcomes, the absolute deadline and late success.
+
+Complete fresh portable acceptance: session20261004-232801-17bda0 passed all24
+records (21 assertion checks and3 explicit observations). This was extraction11
+of runtime commit1a33c33: ZIP SHA-256
+`a812b6ac680568fb99c2e5278238784fc120ddec404c55c972f4fab79e9bd460`,
+scenario SHA-256
+`8b188b67c0ea2f96e17528c3ddf1442aafbdfcc1d2ee27113d911b9349395eeb`,
+and separately staged Observer DLL SHA-256
+`6d0302e082af7ef2d3fd8f2f019794ff44019e893423f44023fc5f3d289cde28`.
+The exact qualification scenario and authorized save pair remain external;
+distributed examples contain no private save names or paths.
+
+All14 physical hand/grip/hold/release checks passed, followed by capabilities,
+body availability, actual center-of-mass relocation, falling velocity, contact
+events, missing-reference handling and observer load generation2 after reload.
+Measured center-of-mass Z moved99.754234->102.929619 and subsequent velocity
+Z was-2.556703. Body UID changed281->283 with attachment epoch1->2; those values
+describe this session only. The collector returned22 callbacks, including5
+non-speculative, enabled touching records with negative signed separation, with
+no reported busy drops or sequence gap. This proves observed callbacks and
+motion in the declared sampling phases, not final solver impulses or deterministic
+physics. Empty collection cannot establish absence of contact.
+
+Immediately after completion, all739 snapshot paths were independently compared
+with their pre-run state with zero errors, before another session could modify
+the environment. Original fixture save hashes were unchanged and the temporarily
+staged Observer plugin was removed. The run result was passed/restored with no
+restore errors. This qualifies the stated physical background probe and chosen
+observer checks; arbitrary mods, ordinary grab radius, free-form controller
+timing, visual goldens and undeclared filesystem writes remain outside that scope.
+
+Final recovery qualification with the same extraction11 runtime: session
+20261004-233010-420ef0 deliberately terminated the executor after-ready while
+Observer was staged. The independent guardian recorded the expected failed
+test and restored all739 snapshots. Immediate independent comparison reported
+zero errors, original save-pair hashes were unchanged, and no physical checks
+were expected in this fault run. The source uses os._exit(99); no claim is made
+about the outer execution wrapper's child exit code. The final distribution
+changes only documentation after runtime commit1a33c33; all packaged runtime
+Python/header/JSON bytes are compared with the live-qualified extraction11.

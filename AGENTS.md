@@ -27,6 +27,10 @@ installation must remain within the owner's requested scope.
    not success, zero contacts or a false collision. Empty contact events cannot
    prove absence of contact; collection gaps and stale generations invalidate
    such an inference. Tolerances do not make Havok deterministic.
+   For positive physical contact require at least one callback record with
+   signed separation <=0, speculative=false and disabled=false, matched to the
+   exact body/reference and current generation. A speculative proximity event
+   alone is not touching; a contact callback does not prove the final solver result.
    Use typed probeObject variables only within the spawned fixture's lifetime.
    A load, stream gap or world-changing request invalidates that variable.
    Lifecycle validation and the next request are separate operations, so this

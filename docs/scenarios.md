@@ -75,6 +75,12 @@ Use the provider's actual capability, availability, phase, generation and event
 sequence fields for assertions. A collision object or changed bone position is
 not a raw contact. Physics transport uses the provider's declared metadata and
 is not hardwired into the executor.
+For a positive touching assertion, require a current-generation callback record
+for the exact body/reference with signed separation <=0, speculative=false and
+disabled=false. Arm the collector before contact-producing motion, inspect its
+drop/gap/busy metadata and retain events. Speculative proximity alone is not
+touching; empty collection is not absence of contact. Even a touching callback
+does not promise the final solver impulse, settled state or deterministic timing.
 
 Orders contain schemaVersion1, unique id (`[a-z0-9][a-z0-9-]{0,79}`), owner,
 subject, profile and scenario (relative to the order file). Submission pins the
