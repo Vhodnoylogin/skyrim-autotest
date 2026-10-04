@@ -66,7 +66,14 @@
     "sdkHeaderSha256": "2d0f91ea9bfe0ef1a60d0010f7a8fb8b4ce8bed759803c135ce4f185bdf4a9ab",
     "rebuildCommand": "python -m skyrim_autotest --config <external JSON> build-driver",
     "redistribution": "Not included in distributions; preserve external archive licenses and verify permissions before redistributing derived binaries.",
-    "sourceFiles": "skyrim_autotest/driver_sources.json; raw exact-commit files are fetched individually and SHA-256 checked"
+    "sourceFiles": "skyrim_autotest/driver_sources.json; raw exact-commit files are fetched individually and SHA-256 checked",
+    "credits": [
+      "DubiousDuo / DubiousDodo",
+      "ar-zadeh",
+      "Valve"
+    ],
+    "maintenance": "Our owned automation-backend candidate. Devkit author has declined full automation API scope and permitted a credited fork; external original licensing remains independent.",
+    "authorReply": "https://www.nexusmods.com/skyrimspecialedition/mods/191452?tab=posts#comment-176787264"
   },
   "optional": [
     {

@@ -5,6 +5,12 @@ isolated MO2 profile, synthetic HMD/controller input, result assertions and an
 independent recovery process. No project journal, AI client, shell toolkit, or
 Python third-party package is needed at runtime.
 
+The automation adapter is maintained here as our own backend. Devkit's author
+has explained that a full automation API is outside that project's planned scope;
+we do not assume this adapter will disappear after upstream changes. It remains
+a prototype file protocol: versioned ownership, sequence acknowledgements and
+monotonic lease hardening are future interface work. See [ownership and credits](docs/ownership.md).
+
 This is an external developer tool, not an SKSE mod. Skyrim World Observer is an
 optional in-game data provider; install/stage it separately when a scenario uses
 its `inspect` kind. DevBench provides the in-game tool transport. Devkit's AHK

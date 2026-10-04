@@ -47,3 +47,8 @@ guardian completed recovery; all738 snapshot paths were independently compared
 with their pre-run state, with no restoration errors. Original fixture save
 hashes were unchanged. Expected run result is failed, not a passing mod test.
 This run stages no observer plugin; physics acceptance is separately qualified.
+
+Upstream scope update: Devkit's author does not plan the full automation API.
+The maintained adapter is now treated as our owned automation-backend candidate;
+its qualification and prototype limitations remain unchanged by that decision.
+See ownership.md for the credited provenance and exact author reply.
