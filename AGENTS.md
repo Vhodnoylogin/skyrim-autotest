@@ -27,9 +27,16 @@ installation must remain within the owner's requested scope.
    not success, zero contacts or a false collision. Empty contact events cannot
    prove absence of contact; collection gaps and stale generations invalidate
    such an inference. Tolerances do not make Havok deterministic.
+   Use typed probeObject variables only within the spawned fixture's lifetime.
+   A load, stream gap or world-changing request invalidates that variable.
+   Lifecycle validation and the next request are separate operations, so this
+   defensive guard is not an atomic producer-side generation contract.
 6. Run once using `run --profile ... --scenario ...`. Poll only read-only tools
    with finite deadlines. Never blindly repeat spawn/load/console/Papyrus/input
    mutations, silently weaken assertions or automatically rerun failed tests.
+   The executor may repeat a polling world_observer snapshot only when its
+   structured outcome is abandoned_before_start; all attempts keep the same
+   deadline and log. Started reads, unknown failures and mutations remain terminal.
    For explicit unattended physical VR scenarios, allowBackgroundVR:true may
    permit testing while another application has foreground. Use it only with
    the physical file backend, retain recorded focus denial, and require the

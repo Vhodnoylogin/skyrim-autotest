@@ -53,6 +53,15 @@ class Blocked(RuntimeError):
     pass
 
 
+class ToolError(RuntimeError):
+    """A structured error returned by an identity-checked owned tool endpoint."""
+    def __init__(self, tool, args, result):
+        self.tool = tool
+        self.args_value = copy.deepcopy(args)
+        self.result = copy.deepcopy(result)
+        super().__init__(f'{tool}: {result}')
+
+
 def sha(path):
     with Path(path).open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
@@ -396,7 +405,7 @@ class Session:
             raise
         self.log('tool', tool=name, args=args, result=result)
         if isinstance(result, dict) and (result.get('isError') or result.get('error')):
-            raise RuntimeError(f'{name}: {result}')
+            raise ToolError(name, args, result)
         return result
 
     def setup(self):

@@ -24,8 +24,14 @@ non-nullness. Engine tolerances must be explicit in the test's chosen bounds.
 Tools other than `driver` route through the fresh owned game's DevBench endpoint.
 Choose fields from that installed API's actual structured response. `poll:true`
 is allowed only for inspect, menu list/describe, input status/capabilities and
-local driver status. Tool errors fail immediately. Assertions are based on
-returned data, never inferred from requested actions.
+local driver status. Tool errors fail immediately except one bounded case:
+polling an `inspect` `world_observer` snapshot may repeat a structured
+`ok:false,outcome:"abandoned_before_start"` read. This means the producer did not
+start that read; each response and retry remains in the session log. Discovery
+(`action:"capabilities"`), mutations, unknown HTTP/tool errors and reads already
+started are never automatically repeated. All attempts share the original step
+deadline; a late positive result still fails. Assertions are based on returned
+data, never inferred from requested actions.
 
 `tool:"driver"` supports:
 - `args:{"action":"status"}`: local publication state; no hardware ACK.
@@ -60,6 +66,8 @@ and unreconciled racing head counters invalidate the reference. Explicit game
 loads, arbitrary console execution and known Papyrus world-changing functions
 in postSteps invalidate it before mutation. Literal manually copied FormIDs do
 not receive this typed-variable protection; never reuse them across a load.
+Lifecycle validation and a subsequent request are separate operations; they do
+not provide a producer-side atomic generation token for mutations.
 
 Example post-step: inspect world_observer with
 `{"kind":"world_observer","physics":{"refs":[{"$state":"probeObject"}]}}`.

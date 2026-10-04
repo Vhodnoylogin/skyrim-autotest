@@ -83,6 +83,19 @@ def check(value, rule):
     raise ValueError('Assertion needs equals, contains, min or exists')
 
 
+def retryable_observer_read(step, error):
+    from .runner import ToolError
+    args = step.get('args', {})
+    return (isinstance(error, ToolError) and error.tool == 'inspect' and
+            step.get('poll') is True and step.get('tool') == 'inspect' and
+            args.get('kind') == 'world_observer' and
+            args.get('action', 'snapshot') == 'snapshot' and
+            error.args_value.get('kind') == 'world_observer' and
+            error.args_value.get('action', 'snapshot') == 'snapshot' and
+            error.result.get('ok') is False and
+            error.result.get('outcome') == 'abandoned_before_start')
+
+
 def execute(session, scenario):
     if scenario.get('kind') == 'vr-hand-probe':
         from .vr_probe import execute as probe
@@ -118,6 +131,18 @@ def execute(session, scenario):
                         raise TimeoutError('Step deadline exceeded during reference validation')
                 result = session.tool(step['tool'], resolve_args(step.get('args', {}), session.state), timeout=min(remaining, 12))
             except Exception as error:
+                from .runner import ToolError
+                if isinstance(error, ToolError):
+                    result = error.result
+                if retryable_observer_read(step, error):
+                    remaining = end - time.monotonic()
+                    if remaining <= 0:
+                        fail('Observer read abandoned at or after step deadline')
+                        raise TimeoutError('Step deadline exceeded: ' + name) from error
+                    session.log('scenario-read-retry', step=name, result=result,
+                                remainingSeconds=remaining, reason='abandoned_before_start')
+                    time.sleep(min(1, remaining))
+                    continue
                 fail('Tool request failed: ' + str(error))
                 raise
             # Even an affirmative response is not timely evidence if it arrives

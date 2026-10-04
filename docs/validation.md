@@ -1,6 +1,6 @@
 # Validation and scope
 
-The extracted independent source passes 53 regression checks: original recovery,
+The extracted independent source passes 59 regression checks: original recovery,
 PID reuse, ancestry and delayed-modal checks, plus explicit configuration,
 external runtime policy, staging confinement, durable config recovery, portable
 guardian imports, fixture validation before mutation, queue independence, bounded
@@ -9,7 +9,7 @@ No test in that suite launches Skyrim or SteamVR.
 
 Fresh ZIP extraction and standard wheel installation passed 12 smoke checks
 from an unrelated working directory and an isolated Python process, including
-the full 53-test extracted suite. The native C++ lease harness also passed: a
+the full 59-test extracted suite. The native C++ lease harness also passed: a
 complete frame survives a partial read and original expiry releases input.
 Regression mutex tests use their own real Windows mutex namespace, so they
 cannot contend with an independently running game test.
@@ -134,3 +134,16 @@ before spawning and immediately reconciled after creation, so a concurrent load
 cannot be adopted as the newly spawned reference's baseline. Eleven additional
 regressions cover live continuation, immediate default cleanup, stale-ID refusal,
 world-changing command classification and event cursor/gap/race behavior.
+
+Retained combined run232311-1e8ba5 passed all14 physical checks plus actual body
+availability, center-of-mass relocation, falling velocity, contact events and
+missing-reference handling. The whole run failed after its intentional save
+reload: the observer explicitly abandoned a queued read before starting it, and
+the executor treated that structured transient as a terminal tool error. That
+is partial qualification, not a passing complete scenario.
+
+Polling observer snapshots now retries only structured abandoned_before_start
+responses within the original step deadline. Every attempt retains identity
+checks and logs; capabilities, mutations, unknown failures and any started-read
+outcomes are not retried. Six regressions cover eligible retry/evidence,
+ineligible calls, unknown outcomes, the absolute deadline and late success.
