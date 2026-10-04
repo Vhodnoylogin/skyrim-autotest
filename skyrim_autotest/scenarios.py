@@ -94,17 +94,32 @@ def execute(session, scenario):
         session.phase('scenario: ' + name, timeout + 15)
         end = time.monotonic() + timeout
         result = None
+        def fail(reason):
+            session.state['checks'].append({'name': name, 'result': 'failed', 'observation': result, 'reason': reason})
+            session.save()
         while True:
-            result = session.tool(step['tool'], resolve_args(step.get('args', {}), session.state), timeout=min(timeout, 12))
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                fail('Step deadline exceeded before request')
+                raise TimeoutError('Step deadline exceeded: ' + name)
+            try:
+                result = session.tool(step['tool'], resolve_args(step.get('args', {}), session.state), timeout=min(remaining, 12))
+            except Exception as error:
+                fail('Tool request failed: ' + str(error))
+                raise
+            # Even an affirmative response is not timely evidence if it arrives
+            # after the absolute step deadline. Never accept it or retry mutation.
+            if time.monotonic() > end:
+                fail('Step response arrived after deadline')
+                raise TimeoutError('Step response arrived after deadline: ' + name)
             try:
                 passed = all(check(result, rule) for rule in step.get('assert', []))
             except (KeyError, IndexError, TypeError):
                 passed = False
             if passed:
                 break
-            if not step.get('poll') or time.monotonic() >= end:
-                session.state['checks'].append({'name': name, 'result': 'failed', 'observation': result})
-                session.save()
+            if not step.get('poll'):
+                fail('Returned-state assertion failed')
                 raise AssertionError(f'Assertion failed: {name}')
             time.sleep(min(1, max(0, end - time.monotonic())))
         session.state['checks'].append({'name': name, 'result': 'passed' if step.get('assert') else 'observed', 'observation': result})

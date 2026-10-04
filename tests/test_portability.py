@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from skyrim_autotest import config, runner, hardware, queue
-from skyrim_autotest.scenarios import validate, resolve_args, check
+from skyrim_autotest.scenarios import validate, resolve_args, check, execute
 
 class PortabilityTests(unittest.TestCase):
     def setUp(self):
@@ -103,6 +103,38 @@ class PortabilityTests(unittest.TestCase):
             self.assertFalse(check(value, {'max':2}))
         self.assertTrue(check(1, {'min':0}))
         self.assertTrue(check(1, {'max':2}))
+
+class DeadlineTests(unittest.TestCase):
+    class Session:
+        def __init__(self, directory):
+            self.dir = Path(directory)
+            self.state = {'checks':[]}
+            self.calls = []
+        def phase(self, *args):
+            pass
+        def save(self):
+            pass
+        def tool(self, name, args, timeout):
+            self.calls.append(timeout)
+            return {'ok':True}
+    def test_late_passing_response_fails_and_records_observation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = self.Session(directory)
+            scenario = {'steps':[{'name':'bounded state','tool':'inspect','args':{},'timeout':1,'assert':[{'path':'ok','equals':True}]}]}
+            with patch('skyrim_autotest.scenarios.time.monotonic', side_effect=[0,0,2]):
+                with self.assertRaisesRegex(TimeoutError, 'after deadline'):
+                    execute(session, scenario)
+            self.assertEqual(session.calls,[1])
+            self.assertEqual(session.state['checks'],[{'name':'bounded state','result':'failed','observation':{'ok':True},'reason':'Step response arrived after deadline'}])
+    def test_no_tool_call_starts_after_deadline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = self.Session(directory)
+            scenario = {'steps':[{'name':'expired state','tool':'inspect','args':{},'timeout':1,'poll':True,'assert':[{'path':'ok','equals':True}]}]}
+            with patch('skyrim_autotest.scenarios.time.monotonic', side_effect=[0,2]):
+                with self.assertRaisesRegex(TimeoutError, 'deadline exceeded'):
+                    execute(session, scenario)
+            self.assertEqual(session.calls,[])
+            self.assertEqual(session.state['checks'][0]['result'],'failed')
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,6 +1,6 @@
 # Validation and scope
 
-The extracted independent source passes 25 regression checks: original recovery,
+The extracted independent source passes 27 regression checks: original recovery,
 PID reuse, ancestry and delayed-modal checks, plus explicit configuration,
 external runtime policy, staging confinement, durable config recovery, portable
 guardian imports, fixture validation before mutation, queue independence, bounded
@@ -9,7 +9,7 @@ No test in that suite launches Skyrim or SteamVR.
 
 Fresh ZIP extraction and standard wheel installation passed 12 smoke checks
 from an unrelated working directory and an isolated Python process, including
-the full 25-test extracted suite. The native C++ lease harness also passed: a
+the full 27-test extracted suite. The native C++ lease harness also passed: a
 complete frame survives a partial read and original expiry releases input.
 Regression mutex tests use their own real Windows mutex namespace, so they
 cannot contend with an independently running game test.
@@ -40,3 +40,10 @@ background OpenVR observations are not proof of physical scene input. Reliable
 visual goldens require a registered capture provider. A frame command publication
 has no driver ACK; tests must assert the actual game outcome. Runtime dependencies
 are separately installed licensed third-party programs/mods, not bundled files.
+
+Independent live recovery acceptance (2026-10-04): session
+20261004-221841-eb9c93 deliberately exited after-ready with code99. The independent
+guardian completed recovery; all738 snapshot paths were independently compared
+with their pre-run state, with no restoration errors. Original fixture save
+hashes were unchanged. Expected run result is failed, not a passing mod test.
+This run stages no observer plugin; physics acceptance is separately qualified.
