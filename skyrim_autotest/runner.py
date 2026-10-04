@@ -831,6 +831,8 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
             if not file.is_file() or sha(file) != fixture[ext + 'Sha256']:
                 raise Blocked('Missing or changed authorized fixture: ' + str(file))
     input_backend = input_backend or ('driver' if driver_backend == 'file' else 'devbench')
+    if scenario.get('allowBackgroundVR') and (input_backend != 'driver' or driver_backend != 'file'):
+        raise Blocked('allowBackgroundVR requires the physical file-adapter backend')
     if input_backend == 'driver' and driver_backend != 'file':
         raise Blocked('Physical frame control requires the file adapter driver')
     recover()

@@ -1,6 +1,6 @@
 # Validation and scope
 
-The extracted independent source passes 37 regression checks: original recovery,
+The extracted independent source passes 42 regression checks: original recovery,
 PID reuse, ancestry and delayed-modal checks, plus explicit configuration,
 external runtime policy, staging confinement, durable config recovery, portable
 guardian imports, fixture validation before mutation, queue independence, bounded
@@ -9,7 +9,7 @@ No test in that suite launches Skyrim or SteamVR.
 
 Fresh ZIP extraction and standard wheel installation passed 12 smoke checks
 from an unrelated working directory and an isolated Python process, including
-the full 37-test extracted suite. The native C++ lease harness also passed: a
+the full 42-test extracted suite. The native C++ lease harness also passed: a
 complete frame survives a partial read and original expiry releases input.
 Regression mutex tests use their own real Windows mutex namespace, so they
 cannot contend with an independently running game test.
@@ -88,3 +88,19 @@ driver steps, built-in pose/release and cleanup. The hardware writer separately
 serializes file transactions. Deterministic threaded regressions verify the
 shared temporary file cannot race and an expired heartbeat cannot overwrite a
 newly selected pressed frame.
+
+Retained foreground failure: 20261004-224033-9d21d3 staged observer0.2 correctly,
+but Windows denied all31 foreground requests even without concurrent browser
+interaction. All739 snapshot paths restored without mismatches. Focus acquisition
+is not qualified by the mocked tests alone. Read-only diagnostics found a
+foreground ChatGPT window in the interactive Windows session, rather than a
+locked/service desktop. The helper now records owned window handles/classes/titles,
+actual foreground PID/thread and AttachThreadInput success/errors, and initializes
+its message queue with PeekMessageW before an owned-thread attach attempt.
+
+An explicit allowBackgroundVR option can empirically qualify the same physical
+probe without treating focus as a mandatory assumption. It is restricted to the
+physical backend, records each failed focus request, and preserves every existing
+controller/world outcome assertion. It is not enabled by default and is not yet
+claimed live-qualified. Five regressions cover strict default failure, recorded
+opt-in semantics, backend gating before mutation, and scenario option validation.

@@ -10,6 +10,8 @@ def validate(scenario):
     """Reject malformed or observation-only tests before launching or mutating files."""
     if scenario.get('schemaVersion') != 1:
         raise ValueError('Unsupported scenario schema')
+    if 'allowBackgroundVR' in scenario and (type(scenario['allowBackgroundVR']) is not bool or scenario.get('kind') != 'vr-hand-probe'):
+        raise ValueError('allowBackgroundVR is a boolean option for physical vr-hand-probe only')
     fixture = scenario.get('fixture')
     if fixture:
         if not isinstance(fixture, dict) or not re.fullmatch(r'[A-Za-z0-9_-]+', fixture.get('saveStem', '')) or any(not re.fullmatch(r'[0-9a-f]{64}', fixture.get(ext + 'Sha256', '')) for ext in ('ess', 'skse')):

@@ -72,10 +72,7 @@ def execute(session, scenario):
         return session.tool('papyrus', call)['returned']
 
     from . import native
-    focus = native.focus_owned(session.state['game'])
-    session.log('owned-game-focus', result=focus)
-    if not focus['focused']:
-        raise AssertionError('Windows did not grant foreground to the owned game')
+    ensure_owned_focus(session, scenario, 'owned-game-focus')
     papyrus('Game', 'EnablePlayerControls', [True] * 8 + [0])
     time.sleep(.5)
     controls = {name: papyrus('Game', 'Is' + name + 'ControlsEnabled') for name in ('Movement', 'Fighting', 'Looking', 'Activate')}
@@ -301,10 +298,7 @@ def execute(session, scenario):
     if button == 'trigger':
         gripping['right']['controller']['axes'][1] = [1, 0]
     session.phase('prove-controller-grab', 60)
-    focus = native.focus_owned(session.state['game'])
-    session.log('owned-game-focus-before-grab', result=focus)
-    if not focus['focused']:
-        raise AssertionError('Owned game lost foreground before grip')
+    ensure_owned_focus(session, scenario, 'owned-game-focus-before-grab')
     # Give the game a complete neutral interval before the tested rising edge.
     start_pose(copy.deepcopy(moved))
     time.sleep(.5)
@@ -370,3 +364,19 @@ def execute(session, scenario):
         stop_pose()
     if body_distance < 5:
         raise AssertionError('Grip/release finished, but third-person hand movement remains unproved')
+
+
+def ensure_owned_focus(session, scenario, checkpoint):
+    """Background VR is explicit and still requires unchanged physical assertions."""
+    from . import native
+    background = scenario.get('allowBackgroundVR', False)
+    if background and (session.state.get('inputBackend') != 'driver' or session.state.get('driverBackend') != 'file'):
+        raise ValueError('Background VR requires the physical file-adapter backend')
+    result = native.focus_owned(session.state['game'])
+    session.log(checkpoint, result=result)
+    if not result['focused']:
+        if not background:
+            raise AssertionError('Windows did not grant foreground to the owned game')
+        session.log('background-vr-attempt', checkpoint=checkpoint, foreground=result,
+                    physicalAssertionsRequired=True, acceptedAsInputProof=False)
+    return result

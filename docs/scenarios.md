@@ -65,3 +65,15 @@ Orders contain schemaVersion1, unique id (`[a-z0-9][a-z0-9-]{0,79}`), owner,
 subject, profile and scenario (relative to the order file). Submission pins the
 scenario hash; changes require a new id. Ordered -> running -> reported is the
 local queue lifecycle; explicit owner acceptance may close a reported order.
+
+## Explicit background physical VR testing
+
+The default physical probe requires the owned game to acquire Windows foreground.
+Optional `allowBackgroundVR:true` permits the probe to attempt physical testing
+when Windows denies focus, only with driverBackend=file/inputBackend=driver.
+The actual foreground result and owned-window/thread diagnostics are recorded.
+This does not enable background keyboard/UI automation or change Windows policy.
+Both-hand movement, exact-reference grip, stable hold, release and world-presence
+assertions are unchanged. Only their observed outcome can qualify that session;
+background permission, an advancing health frame or frame publication alone is
+not proof. An inactive/paused game must fail its existing response assertions.

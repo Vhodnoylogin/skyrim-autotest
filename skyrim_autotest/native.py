@@ -78,6 +78,9 @@ def focus_owned(ident, timeout=3):
     U.ShowWindowAsync.argtypes = [W.HWND, C.c_int]
     U.SetForegroundWindow.argtypes = [W.HWND]
     U.AttachThreadInput.argtypes = [W.DWORD, W.DWORD, W.BOOL]
+    U.PeekMessageW.argtypes = [C.POINTER(W.MSG), W.HWND, W.UINT, W.UINT, W.UINT]
+    U.GetWindowTextW.argtypes = [W.HWND, W.LPWSTR, C.c_int]
+    U.GetClassNameW.argtypes = [W.HWND, W.LPWSTR, C.c_int]
     K.GetCurrentThreadId.restype = W.DWORD
     found = []
     callback_type = C.WINFUNCTYPE(W.BOOL, W.HWND, W.LPARAM)
@@ -92,6 +95,18 @@ def focus_owned(ident, timeout=3):
     if not found:
         return {'requested': False, 'focused': False, 'reason': 'no-owned-visible-window', 'attempts': 0}
     window = found[0]
+    attachment = {'attempted': False, 'attached': False}
+    windows = []
+    for hwnd in found:
+        title, classname = C.create_unicode_buffer(512), C.create_unicode_buffer(256)
+        U.GetWindowTextW(hwnd, title, len(title))
+        U.GetClassNameW(hwnd, classname, len(classname))
+        windows.append({'hwnd': int(hwnd), 'title': title.value, 'class': classname.value})
+    def result(**values):
+        foreground = U.GetForegroundWindow()
+        pid = W.DWORD()
+        foreground_thread = U.GetWindowThreadProcessId(foreground, C.byref(pid)) if foreground else 0
+        return {**values, 'ownedWindows': windows, 'targetWindow': int(window), 'foreground': {'hwnd': int(foreground or 0), 'pid': int(pid.value), 'thread': int(foreground_thread)}, 'attachment': dict(attachment)}
     started = time.monotonic()
     deadline = started + timeout
     requested, attempts, attached_attempted = False, 0, False
@@ -108,9 +123,9 @@ def focus_owned(ident, timeout=3):
     while time.monotonic() < deadline:
         thread = target_thread()
         if not thread:
-            return {'requested': requested, 'focused': False, 'reason': 'owned-window-identity-changed', 'attempts': attempts}
+            return result(requested=requested, focused=False, reason='owned-window-identity-changed', attempts=attempts)
         if focused():
-            return {'requested': requested, 'focused': True, 'attempts': attempts}
+            return result(requested=requested, focused=True, attempts=attempts)
         # This API posts the restore request instead of waiting for a possibly
         # still-loading window. Foreground activation may also settle later.
         U.ShowWindowAsync(window, 9)
@@ -121,19 +136,29 @@ def focus_owned(ident, timeout=3):
             current = K.GetCurrentThreadId()
             # Only our own live game's input thread may be joined. Never attach
             # to the unrelated foreground application or inject keyboard events.
-            if current != thread and target_thread() == thread and U.AttachThreadInput(current, thread, True):
-                try:
-                    if target_thread() == thread:
-                        requested = bool(U.SetForegroundWindow(window)) or requested
-                        attempts += 1
-                finally:
-                    U.AttachThreadInput(current, thread, False)
+            if current != thread and target_thread() == thread:
+                # Ensure the executor has its own message queue before attaching.
+                message = W.MSG()
+                U.PeekMessageW(C.byref(message), None, 0, 0, 0)
+                attachment.update(attempted=True, executorThread=int(current), gameThread=int(thread))
+                C.set_last_error(0)
+                attached = bool(U.AttachThreadInput(current, thread, True))
+                attachment.update(attached=attached, error=0 if attached else C.get_last_error())
+                if attached:
+                    try:
+                        if target_thread() == thread:
+                            requested = bool(U.SetForegroundWindow(window)) or requested
+                            attempts += 1
+                    finally:
+                        C.set_last_error(0)
+                        detached = bool(U.AttachThreadInput(current, thread, False))
+                        attachment.update(detached=detached, detachError=0 if detached else C.get_last_error())
         if focused():
-            return {'requested': requested, 'focused': True, 'attempts': attempts}
+            return result(requested=requested, focused=True, attempts=attempts)
         remaining = deadline - time.monotonic()
         if remaining > 0:
             time.sleep(min(.1, remaining))
-    return {'requested': requested, 'focused': False, 'reason': 'foreground-request-deadline', 'attempts': attempts}
+    return result(requested=requested, focused=False, reason='foreground-request-deadline', attempts=attempts)
 
 
 def processes():
