@@ -30,6 +30,11 @@ installation must remain within the owner's requested scope.
 6. Run once using `run --profile ... --scenario ...`. Poll only read-only tools
    with finite deadlines. Never blindly repeat spawn/load/console/Papyrus/input
    mutations, silently weaken assertions or automatically rerun failed tests.
+   For explicit unattended physical VR scenarios, allowBackgroundVR:true may
+   permit testing while another application has foreground. Use it only with
+   the physical file backend, retain recorded focus denial, and require the
+   same hand/grip/hold/release/world assertions. It does not authorize background
+   keyboard/UI automation or turn focus/publication into evidence of game input.
    An unknown blocking modal requires a reported blocked/failed result; never
    guess GUI coordinates or accept a prompt by text similarity.
 7. Read runtime/runs/<id>/result.json and returned-state evidence. Success needs
