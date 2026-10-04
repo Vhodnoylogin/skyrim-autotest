@@ -3,9 +3,11 @@ import math
 import time
 from pathlib import Path
 import os
+import threading
 from . import runner
 
 PATH = Path(os.environ['PROGRAMDATA']) / 'SkyrimVR Autotest/frame.txt'
+_PUBLISH_LOCK = threading.RLock()
 
 
 def quaternion(matrix):
@@ -39,6 +41,13 @@ def neutral():
 
 
 def publish(frame):
+    # Session.lock orders frame selection/lease updates. This lock also protects
+    # the file transaction if independent callers publish on separate threads.
+    with _PUBLISH_LOCK:
+        _publish(frame)
+
+
+def _publish(frame):
     values = [int(frame.get('seq', 1)), time.time()+5]
     for role in ('hmd', 'left', 'right'):
         m = frame[role]['matrix']

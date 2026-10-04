@@ -484,10 +484,11 @@ class Session:
                 signature.unlink()
             self.state['driverManifest'] = manifest
             from . import hardware
-            self.snapshot(hardware.PATH)
-            self.state['hardwareFrame'] = hardware.neutral()
-            self.save()
-            hardware.publish(self.state['hardwareFrame'])
+            with self.lock:
+                self.snapshot(hardware.PATH)
+                self.state['hardwareFrame'] = hardware.neutral()
+                self.save()
+                hardware.publish(self.state['hardwareFrame'])
         settings = read_json(info['settings']) if Path(info['settings']).exists() else {}
         settings.setdefault('driver_null', {}).update(enable=True)
         settings.setdefault('steamvr', {}).update(forcedDriver='null', requireHmd=True,

@@ -1,6 +1,6 @@
 # Validation and scope
 
-The extracted independent source passes 35 regression checks: original recovery,
+The extracted independent source passes 37 regression checks: original recovery,
 PID reuse, ancestry and delayed-modal checks, plus explicit configuration,
 external runtime policy, staging confinement, durable config recovery, portable
 guardian imports, fixture validation before mutation, queue independence, bounded
@@ -9,7 +9,7 @@ No test in that suite launches Skyrim or SteamVR.
 
 Fresh ZIP extraction and standard wheel installation passed 12 smoke checks
 from an unrelated working directory and an isolated Python process, including
-the full 35-test extracted suite. The native C++ lease harness also passed: a
+the full 37-test extracted suite. The native C++ lease harness also passed: a
 complete frame survives a partial read and original expiry releases input.
 Regression mutex tests use their own real Windows mutex namespace, so they
 cannot contend with an independently running game test.
@@ -78,3 +78,13 @@ constructing sessions, freezes its original scan directory, restores abandoned
 sessions under their durable environment, and restores the caller configuration
 in `finally` including exception paths. Four regressions cover live-owner refusal, completed old
 runs, multiple abandoned runs with a different runtime, and failed recovery.
+
+Retained setup failure: 20261004-223713-06a43c failed before game launch because
+initial input publication and heartbeat used the same temporary frame file
+concurrently. Restoration completed for733 snapshots. The intended observer
+staging configuration was preserved, but this is not physics evidence. Initial
+frame selection/publication now holds Session.lock, matching heartbeat, generic
+driver steps, built-in pose/release and cleanup. The hardware writer separately
+serializes file transactions. Deterministic threaded regressions verify the
+shared temporary file cannot race and an expired heartbeat cannot overwrite a
+newly selected pressed frame.
