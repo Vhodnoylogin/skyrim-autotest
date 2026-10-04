@@ -104,6 +104,63 @@ class PortabilityTests(unittest.TestCase):
         self.assertTrue(check(1, {'min':0}))
         self.assertTrue(check(1, {'max':2}))
 
+class RecoveryConfigurationTests(unittest.TestCase):
+    setUp = PortabilityTests.setUp
+    tearDown = PortabilityTests.tearDown
+    # Do not inherit the other test cases twice; their own class covers them.
+    def state_file(self, name, done, value):
+        directory = runner.RUNS / name
+        directory.mkdir(parents=True)
+        runner.atomic_json(directory / 'state.json', {'id':name,'done':done,'configuration':value,'owned':[],'runner':None})
+        return directory
+    def selected_configuration(self):
+        value = config.P.snapshot()
+        value['bridge_token'] = str(self.root / 'new-token-file')
+        value['staged_plugins'] = [{'source':str(self.root/'observer.dll'),'destination':'SKSE/Plugins/WorldObserver.dll','sha256':'a'*64}]
+        runner.configure(value)
+        return config.P.snapshot()
+    def test_completed_historical_run_cannot_replace_new_staging_configuration(self):
+        import contextlib
+        old = config.P.snapshot()
+        self.state_file('old-complete', True, old)
+        caller = self.selected_configuration()
+        original_root = runner.ROOT
+        original_runs = runner.RUNS
+        with patch.object(runner.native,'SessionMutex',return_value=contextlib.nullcontext()),patch.object(runner,'Session') as session:
+            runner.recover()
+            session.assert_not_called()
+        self.assertEqual(config.P.snapshot(),caller)
+        self.assertEqual(runner.ROOT,original_root)
+        self.assertEqual(runner.RUNS,original_runs)
+    def test_abandoned_runs_use_own_environment_but_scan_original_runtime(self):
+        import contextlib
+        old = config.P.snapshot()
+        old['runtime'] = str(self.root / 'old-runtime')
+        old['bridge_token'] = str(self.root/'old-token-file')
+        self.state_file('abandoned-a',False,old)
+        self.state_file('abandoned-b',False,old)
+        caller = self.selected_configuration()
+        observations=[]
+        def cleanup(session):
+            observations.append((session.dir.name,config.P.snapshot()))
+        with patch.object(runner.native,'SessionMutex',return_value=contextlib.nullcontext()),patch.object(runner.native,'alive',return_value=False),patch.object(runner.Session,'cleanup',autospec=True,side_effect=cleanup),patch.object(runner.Session,'report'),patch.object(runner.Session,'reopen_mo2'):
+            runner.recover()
+        self.assertEqual([name for name,value in observations],['abandoned-a','abandoned-b'])
+        self.assertTrue(all(value['bridge_token']==old['bridge_token'] and value['runtime']==old['runtime'] for name,value in observations))
+        self.assertEqual(config.P.snapshot(),caller)
+        self.assertEqual(runner.RUNS,Path(caller['runtime'])/'runs')
+    def test_recovery_exception_does_not_leak_abandoned_configuration(self):
+        import contextlib
+        old=config.P.snapshot()
+        old['runtime']=str(self.root/'old-runtime')
+        self.state_file('abandoned',False,old)
+        caller=self.selected_configuration()
+        with patch.object(runner.native,'SessionMutex',return_value=contextlib.nullcontext()),patch.object(runner.native,'alive',return_value=False),patch.object(runner.Session,'cleanup',side_effect=RuntimeError('Restoration failed')):
+            with self.assertRaisesRegex(RuntimeError,'Restoration failed'):
+                runner.recover()
+        self.assertEqual(config.P.snapshot(),caller)
+        self.assertEqual(runner.ROOT,Path(caller['runtime']))
+
 class DeadlineTests(unittest.TestCase):
     class Session:
         def __init__(self, directory):

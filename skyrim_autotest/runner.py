@@ -782,21 +782,33 @@ def guardian(directory):
 
 
 def recover():
-    with native.SessionMutex():
-        for directory in sorted(RUNS.glob('*')):
-            if not (directory / 'state.json').exists():
-                continue
-            session = Session(directory)
-            if session.state.get('done'):
-                continue
-            if native.alive(session.state.get('runner')):
-                raise Blocked('Runner is still alive; refusing recovery takeover')
-            session.state.update(result='failed', reason='Recovered an abandoned session')
-            session.cleanup()
-            session.state['done'] = True
-            session.save()
-            session.report()
-            session.reopen_mo2()
+    # Recovery activates each abandoned session's durable environment only while
+    # restoring that session. Historical runs must not overwrite the next run's
+    # caller-selected configuration, staging list, tokens or runtime root.
+    caller = copy.deepcopy(P.snapshot())
+    scan_root = RUNS.resolve()
+    try:
+        with native.SessionMutex():
+            directories = sorted(scan_root.glob('*'))
+            for directory in directories:
+                file = directory / 'state.json'
+                if not file.exists():
+                    continue
+                state = read_json(file)
+                if state.get('done'):
+                    continue
+                if native.alive(state.get('runner')):
+                    raise Blocked('Runner is still alive; refusing recovery takeover')
+                session = Session(directory, state)
+                session.state.update(result='failed', reason='Recovered an abandoned session')
+                session.cleanup()
+                session.state['done'] = True
+                session.save()
+                session.report()
+                session.reopen_mo2()
+                configure(caller)
+    finally:
+        configure(caller)
 
 
 def guardian_command(directory):

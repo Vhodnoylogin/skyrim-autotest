@@ -1,6 +1,6 @@
 # Validation and scope
 
-The extracted independent source passes 31 regression checks: original recovery,
+The extracted independent source passes 34 regression checks: original recovery,
 PID reuse, ancestry and delayed-modal checks, plus explicit configuration,
 external runtime policy, staging confinement, durable config recovery, portable
 guardian imports, fixture validation before mutation, queue independence, bounded
@@ -9,7 +9,7 @@ No test in that suite launches Skyrim or SteamVR.
 
 Fresh ZIP extraction and standard wheel installation passed 12 smoke checks
 from an unrelated working directory and an isolated Python process, including
-the full 31-test extracted suite. The native C++ lease harness also passed: a
+the full 34-test extracted suite. The native C++ lease harness also passed: a
 complete frame survives a partial read and original expiry releases input.
 Regression mutex tests use their own real Windows mutex namespace, so they
 cannot contend with an independently running game test.
@@ -69,3 +69,12 @@ API references: [SetForegroundWindow](https://learn.microsoft.com/en-us/windows/
 [ShowWindowAsync](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-showwindowasync),
 [AttachThreadInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-attachthreadinput).
 Windows can still deny focus; the probe fails closed in that case.
+
+Configuration isolation correction: the failed 222952 run also exposed recovery
+activating a completed historical session's saved configuration before checking
+`done`, replacing the caller's staged-plugin/token settings. That run therefore
+is not observer/physics evidence. Recovery now skips completed records before
+constructing sessions, freezes its original scan directory, restores abandoned
+sessions under their durable environment, and restores the caller configuration
+in `finally` including exception paths. Three regressions cover completed old
+runs, multiple abandoned runs with a different runtime, and failed recovery.
