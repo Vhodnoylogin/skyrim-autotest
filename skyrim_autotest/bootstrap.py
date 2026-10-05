@@ -83,6 +83,7 @@ def start_new_game(session, cell):
         return ui('GetString', root + '.strCurrentState')
 
     session.phase('gameplay-new-game-menu', 45)
+    session.log('new-game-loaded-plugins', result=session.tool('inspect', {'kind': 'mods'}))
     end = time.monotonic() + 20
     while main_state() != 'Main':
         if time.monotonic() >= end:

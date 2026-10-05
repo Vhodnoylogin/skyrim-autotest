@@ -313,13 +313,27 @@ def execute(session, scenario):
                 axes=[[0, 0], [1 if binding['key']==33 else 0, 0], [0, 0], [0, 0], [0, 0]])
             session.log('vanilla-pickup-binding', binding=binding, exactReference=ref)
             publish(activate, 2)
-            time.sleep(.25)
+            time.sleep(.12)
+            input_observed = observed()
+            actual = input_observed.get(binding['role'], {}).get('controller', {})
+            received = (input_observed.get(binding['role'], {}).get('valid') is True
+                        and type(actual.get('pressed')) is int
+                        and bool(actual['pressed'] & (1 << binding['key'])))
+            session.log('vanilla-pickup-physical-input-observed', binding=binding,
+                        received=received, frame=input_observed,
+                        domain='game-accessed physical OpenVR state, not engine user-event consumption')
+            time.sleep(.13)
             session.tool('driver', {'action': 'release'})
-            time.sleep(.5)
-            current = papyrus('ObjectReference', 'GetItemCount', [base], target='0x14')
-            record('vanilla physical inventory pickup', current > item_count,
+            end = time.monotonic() + 3
+            while True:
+                current = papyrus('ObjectReference', 'GetItemCount', [base], target='0x14')
+                if current > item_count or time.monotonic() >= end:
+                    break
+                time.sleep(.1)
+            record('vanilla physical inventory pickup', received and current > item_count,
                    {'reference': ref, 'crosshair': crosshair, 'selected': selected, 'beforeCount': item_count,
                     'afterCount': current, 'input': 'one mapped physical Vive press/release', 'binding': binding,
+                    'physicalInputObserved': received, 'observedFrame': input_observed,
                     'domain': 'inventory acquisition, not HIGGS physical hold'})
         else:
             # Never activate another target or turn a scripted Activate into input proof.
