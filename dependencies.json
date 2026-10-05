@@ -49,11 +49,11 @@
     },
     {
       "id": "devbench",
-      "observedVersion": "1.22.0",
-      "source": "https://github.com/alandtse/devbench/releases/tag/v1.22.0",
-      "nexusFileId": 809910,
-      "observedDllSha256": "45b741aca0ce5fcb8c6459958f8c41dbbb51d364c38806bf12132217eec407cb",
-      "note": "GitHub vs Nexus archive packaging hashes need not match; verify DLL."
+      "observedVersion": "1.25.0",
+      "source": "https://github.com/alandtse/devbench/releases/tag/v1.25.0",
+      "observedDllSha256": "7807da9ac8403bfd665cf20662be0ba28294b8f83e0296a247540ff7684326ca",
+      "historicalPhysicalQualification": {"version": "1.22.0", "dllSha256": "45b741aca0ce5fcb8c6459958f8c41dbbb51d364c38806bf12132217eec407cb"},
+      "note": "Observed installation is not full acceptance. Stock1.25 object-array introspection crashed in minimal VR; see docs/devbench-compatibility.md for the pinned candidate source correction and live qualification requirement."
     }
   ],
   "driver": {
