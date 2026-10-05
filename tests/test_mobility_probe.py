@@ -26,12 +26,15 @@ class MobilityProbeTests(unittest.TestCase):
             def save(self):pass
             def tool(self,name,args):
                 self.calls.append((name,args))
-                if name=='inspect':return {'cell':{'editorId':'VRPlayroom01'}}
+                if name=='inspect':return ({'cell':{'editorId':'VRPlayroom01'}} if len(self.calls)==1 else
+                                          {'playerLoaded':True,'cell':{'editorId':'RealmLorkhan'}})
                 if name=='menu':return {'openMenus':['HUD Menu']}
         session=Session();scene={'playerLoaded':True,'cell':{'editorId':'RealmLorkhan'}}
         with patch.object(bootstrap,'advance_calibration',return_value=True), \
                 patch.object(bootstrap.vr_probe,'guard_fixture_modal',return_value=False), \
-                patch.object(bootstrap.vr_probe,'wait_test_cell',return_value=scene):
+                patch.object(bootstrap.vr_probe,'wait_test_cell',return_value=scene), \
+                patch.object(bootstrap.time,'monotonic',side_effect=iter(range(100))), \
+                patch.object(bootstrap.time,'sleep'):
             bootstrap.prepare_gameplay(session,{'cell':'RealmLorkhan'})
         self.assertTrue(session.state['gameplayBootstrap']['completed'])
         self.assertEqual(session.state['gameplayBootstrap']['scene'],scene)
@@ -47,7 +50,9 @@ class MobilityProbeTests(unittest.TestCase):
                 return {'cell':{'editorId':'Other'}} if name=='inspect' else {'openMenus':['Main Menu']}
         session=Session()
         with patch.object(bootstrap.vr_probe,'guard_fixture_modal'), \
-                patch.object(bootstrap.vr_probe,'wait_test_cell',return_value={'playerLoaded':True,'cell':{'editorId':'RealmLorkhan'}}):
+                patch.object(bootstrap.vr_probe,'wait_test_cell',return_value={'playerLoaded':True,'cell':{'editorId':'RealmLorkhan'}}), \
+                patch.object(bootstrap.time,'monotonic',side_effect=iter(range(1000))), \
+                patch.object(bootstrap.time,'sleep'):
             with self.assertRaisesRegex(AssertionError,'not ready'):
                 bootstrap.prepare_gameplay(session,{'cell':'RealmLorkhan'})
         self.assertNotIn('gameplayBootstrap',session.state)

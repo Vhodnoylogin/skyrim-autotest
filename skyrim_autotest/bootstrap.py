@@ -164,6 +164,122 @@ def start_new_game(session, cell):
     raise AssertionError('New Game request had no verified fresh world transition')
 
 
+def complete_character_creation(session):
+    """Finish the identified character menu, preserving its current appearance."""
+    from .api_contract import validate_description
+    validate_description('UI', session.tool('papyrus', {'action': 'describe', 'script': 'UI'}),
+                         'globalFunctions', {'GetString': ['string', 'string'],
+                         'GetBool': ['string', 'string'], 'GetInt': ['string', 'string'],
+                         'SetString': ['string', 'string', 'string'],
+                         'InvokeInt': ['string', 'string', 'int']})
+    validate_description('Game', session.tool('papyrus', {'action': 'describe', 'script': 'Game'}),
+                         'globalFunctions', {'GetGameSettingString': ['string']})
+    menu = 'RaceSex Menu'
+    root = '_root.RaceSexMenuBaseInstance.RaceSexPanelsInstance'
+    def ui(function, path, *values):
+        return session.tool('papyrus', {'action': 'call', 'script': 'UI',
+                            'function': function, 'args': [menu, path, *values]})['returned']
+    identity = {'core': ui('GetString', root + '.bottomBar._name'),
+                'stock': ui('GetString', root + '.NameEntryInstance._name')}
+    session.log('startup-waiting-for-input', menu=menu, identity=identity,
+                reason='Character creation must finish before scenario input')
+    core = identity['core'] == 'bottomBar'
+    stock = identity['stock'] == 'NameEntryInstance'
+    if core == stock:
+        raise AssertionError('Unidentified or ambiguous character creation UI')
+    entry = root + ('.textEntry' if core else '.NameEntryInstance')
+    settings = {}
+    for key in ('sRSMConfirm', 'sRSMFinishedWarning', 'sYes', 'sNo'):
+        settings[key] = session.tool('papyrus', {'action': 'call', 'script': 'Game',
+                                   'function': 'GetGameSettingString', 'args': [key]})['returned']
+    session.log('character-creation-settings', values=settings)
+    vr_probe.ensure_owned_focus(session, {}, 'character-creation-owned-focus')
+    if menu not in session.tool('menu', {'action': 'list'}).get('openMenus', []):
+        raise AssertionError('Character menu changed before completion request')
+    ui('InvokeInt', root + '.onDoneClicked', 0)
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        menus = session.tool('menu', {'action': 'list'})
+        if menus.get('messageBoxOpen'):
+            modal = session.tool('menu', {'action': 'describe'})
+            session.log('character-creation-confirmation', result=modal)
+            candidates = [settings[key] for key in ('sRSMConfirm', 'sRSMFinishedWarning')
+                          if isinstance(settings[key], str) and settings[key]]
+            cancel = modal.get('cancelIndex')
+            if (modal.get('bodyText') not in candidates or
+                    modal.get('buttons') != [settings['sYes'], settings['sNo']] or cancel != 1):
+                raise AssertionError('Unclassified character confirmation; no answer sent')
+            fresh = session.tool('menu', {'action': 'describe'})
+            if fresh != modal:
+                raise AssertionError('Character confirmation changed before answer')
+            session.tool('menu', {'action': 'accept', 'index': 0})
+            break
+        time.sleep(.25)
+    else:
+        raise AssertionError('Character completion did not expose its identified confirmation')
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        menus = session.tool('menu', {'action': 'list'})
+        if not menus.get('messageBoxOpen'):
+            shown = (ui('GetBool', entry + '._visible') and ui('GetBool', entry + '.enabled')
+                     if core else ui('GetInt', root + '.Mode') == 0)
+            session.log('character-name-entry', shown=shown, menus=menus)
+            if shown:
+                break
+        time.sleep(.25)
+    else:
+        raise AssertionError('Character confirmation did not expose name entry')
+    ui('SetString', entry + '.TextInputInstance.text', 'Autotest')
+    if ui('GetString', entry + '.TextInputInstance.text') != 'Autotest':
+        raise AssertionError('Character name write not confirmed; no accept sent')
+    ui('InvokeInt', entry + '.onAccept', 0)
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        menus = session.tool('menu', {'action': 'list'})
+        if menu not in menus.get('openMenus', []):
+            session.log('character-creation-completed', name='Autotest', menus=menus)
+            session.state['characterCreationCompleted'] = True
+            return
+        time.sleep(.25)
+    raise AssertionError('Character menu remained open after one verified name acceptance')
+
+
+def wait_gameplay_ready(session, cell, new_game):
+    """Require a quiet startup interval; late menus reset readiness."""
+    deadline = time.monotonic() + 90
+    stable_since = None
+    character_seen = False
+    while time.monotonic() < deadline:
+        menus = session.tool('menu', {'action': 'list'})
+        if menus.get('messageBoxOpen'):
+            vr_probe.guard_fixture_modal(session)
+            stable_since = None
+            continue
+        opened = set(menus.get('openMenus', []))
+        if 'RaceSex Menu' in opened:
+            if not new_game or character_seen:
+                raise AssertionError('Unexpected or repeated character creation menu')
+            character_seen = True
+            complete_character_creation(session)
+            stable_since = None
+            continue
+        scene = session.tool('inspect', {'kind': 'scene'})
+        # Every other visible menu is a readiness gate, not just known startup menus.
+        ready = (scene.get('playerLoaded') and scene.get('cell', {}).get('editorId') != 'VRPlayroom01'
+                 and (not cell or scene.get('cell', {}).get('editorId') == cell)
+                 and not opened.difference({'HUD Menu'}))
+        session.log('gameplay-readiness-observation', scene=scene, menus=menus, ready=bool(ready))
+        if ready:
+            if stable_since is None:
+                stable_since = time.monotonic()
+            if time.monotonic() - stable_since >= 8:
+                return scene, menus
+        else:
+            stable_since = None
+        time.sleep(.5)
+    raise AssertionError('Initialized gameplay is not ready after stable startup/menu checks')
+
+
 def prepare_gameplay(session, scenario):
     """Resolve the declared initial state once, without knowing a subject mod."""
     cell = scenario.get('cell')
@@ -215,15 +331,7 @@ def prepare_gameplay(session, scenario):
         # New-game scripts may post their notification only after cell loading.
         # Re-read the world after answering a classified notification.
         scene = session.tool('inspect', {'kind': 'scene'})
-    menus = session.tool('menu', {'action': 'list'})
-    blocked = {'CalibrationOptionMenu', 'Main Menu', 'Loading Menu', 'RaceSex Menu'}
-    if 'RaceSex Menu' in menus.get('openMenus', []):
-        session.log('new-game-character-menu', menus=menus,
-                    modal=session.tool('menu', {'action': 'describe'}))
-    if (not scene.get('playerLoaded') or scene.get('cell', {}).get('editorId') == 'VRPlayroom01'
-            or (cell and scene.get('cell', {}).get('editorId') != cell)
-            or blocked.intersection(menus.get('openMenus', [])) or menus.get('messageBoxOpen')):
-        raise AssertionError('Initialized gameplay is not ready: ' + json.dumps({'scene': scene, 'menus': menus}))
+    scene, menus = wait_gameplay_ready(session, cell, new_game)
     session.state['gameplayBootstrap'] = {'completed': True, 'cell': cell,
                                           'loadedFixture': bool(fixture), 'startMode': scenario.get('startMode'),
                                           'scene': scene, 'menus': menus}
