@@ -24,7 +24,10 @@ MOBILITY = {
         'EnablePlayerControls': ['bool'] * 8 + ['int'],
         'IsMovementControlsEnabled': [], 'IsFightingControlsEnabled': [],
         'IsLookingControlsEnabled': [], 'IsActivateControlsEnabled': [],
-        'GetCurrentCrosshairRef': [],
+        'GetCurrentCrosshairRef': [], 'GetPlayerGrabbedRef': [],
+    }),
+    'Utility': ('globalFunctions', {
+        'GetINIBool': ['string'], 'GetINIFloat': ['string'],
     }),
 }
 HAND = {

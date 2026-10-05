@@ -307,7 +307,17 @@ def execute(session, scenario):
         time.sleep(.3)
         aim = session.tool('inspect', {'kind': 'world_observer', 'refs': ['0x14']})
         binding = vive_activation(aim)
-        aim_name = 'primaryAim' if binding['role'] == binding['primaryRole'] else 'secondaryAim'
+        # Stock picking follows the dominant aim; the combined activation button
+        # may live on the secondary controller. Input and selection are separate.
+        aim_name = 'primaryAim'
+        settings = {name: papyrus('Utility', 'GetINIBool', [name]) for name in (
+            'bActivateWithBothWands:VRInput', 'bDirectMovementWithWands:VRInput',
+            'bLeftHandedMode:VRInput', 'bEnableTouchpadQuickTeleport:VRInput',
+            'bImmediatelyGrabObjectOnActivate:VR')}
+        settings.update({name: papyrus('Utility', 'GetINIFloat', [name]) for name in (
+            'fThumbstickTeleportActivateZone:VRInput', 'fThumbstickTeleportDeadzone:VRInput')})
+        session.log('vanilla-pickup-live-settings', settings=settings,
+                    domain='read-only live Utility INI API; no player-setting mutation')
         target = aim_fixture_position(aim, aim_name)
         place_owned_fixture(papyrus, ref, target)
         time.sleep(.5)
@@ -315,9 +325,9 @@ def execute(session, scenario):
         crosshair = papyrus('Game', 'GetCurrentCrosshairRef')
         session.log('vanilla-pickup-aim', reference=ref, position=target, before=aim,
                     selected=selected, cachedPapyrusCrosshair=crosshair, fixtureMotionType=4,
-                    placementBasis='actual ' + aim_name + ' local +Y; exact input-hand target required',
-                    binding=binding)
-        exact = exact_device_pick(aim, selected, ref, binding['role'])
+                    placementBasis='actual primaryAim local +Y; exact dominant-hand target required',
+                    binding=binding, settings=settings)
+        exact = exact_device_pick(aim, selected, ref, binding['primaryRole'])
         if exact:
             fresh_binding = vive_activation(selected)
             if fresh_binding != binding:
@@ -343,8 +353,10 @@ def execute(session, scenario):
             time.sleep(.13)
             session.tool('driver', {'action': 'release'})
             end = time.monotonic() + 3
+            grabbed_samples = []
             while True:
                 current = papyrus('ObjectReference', 'GetItemCount', [base], target='0x14')
+                grabbed_samples.append(papyrus('Game', 'GetPlayerGrabbedRef'))
                 if current > item_count or time.monotonic() >= end:
                     break
                 time.sleep(.1)
@@ -352,6 +364,7 @@ def execute(session, scenario):
                    {'reference': ref, 'crosshair': crosshair, 'selected': selected, 'beforeCount': item_count,
                     'afterCount': current, 'input': 'one mapped physical Vive press/release', 'binding': binding,
                     'physicalInputObserved': received, 'observedFrame': input_observed,
+                    'settings': settings, 'nativeGrabbedReferenceSamples': grabbed_samples,
                     'domain': 'inventory acquisition, not HIGGS physical hold'})
         else:
             # Never activate another target or turn a scripted Activate into input proof.
@@ -359,7 +372,8 @@ def execute(session, scenario):
                                             'result': 'unavailable', 'observation': {
                                                 'reference': ref, 'crosshair': crosshair,
                                                 'selected': selected, 'placementSample': aim, 'position': target,
-                                                'reason': 'Exact fixture not selected by the mapped input hand activation ray; input not sent'}})
+                                                'binding': binding, 'settings': settings,
+                                                'reason': 'Exact fixture not selected by the actual dominant-hand activation ray; input not sent'}})
             session.save()
     finally:
         session.tool('driver', {'action': 'release'})
