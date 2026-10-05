@@ -38,3 +38,16 @@ keep the installed original intact and verify restoration. Require actual
 metadata signatures and subsequent gameplay observations. Do not retry a
 connection reset, suppress a crash, substitute unavailable metadata, or count
 source/build tests as a passing game run.
+
+
+## Published maintenance forks
+
+The corrected source is available in a GitHub fork of DevBench, branch
+[fix/vr-typeinfo-array-v125](https://github.com/Vhodnoylogin/devbench/tree/fix/vr-typeinfo-array-v125),
+commit ba6104319b93ca147d7f94e94149402c015954a7. It pins the corrected
+CommonLib dependency in the existing fork, branch
+[fix/typeinfo-array-pointer-v125](https://github.com/Vhodnoylogin/CommonLibSSE-NG/tree/fix/typeinfo-array-pointer-v125),
+commit 9106d402cfc7dcbc5bf7458be6748af19d7fc914.
+DevBench retains its upstream license/credits; the fork is not an upstream
+release. The source correction and native regression are published there;
+generated host dependency locks and test binaries remain external.
