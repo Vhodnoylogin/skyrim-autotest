@@ -5,6 +5,18 @@ from skyrim_autotest import bootstrap, mobility_probe, scenarios
 
 
 class MobilityProbeTests(unittest.TestCase):
+    def test_fixture_position_uses_supported_atomic_native_signature(self):
+        def native(script,function,args,target):
+            self.assertEqual((script,function),('ObjectReference','SetPosition'))
+            self.assertEqual(args,[1,2,3]);self.assertEqual(target,'0xff000801')
+        mobility_probe.place_owned_fixture(native,'0xff000801',[1,2,3])
+
+    def test_fixture_position_cannot_move_player_or_publish_invalid_coordinates(self):
+        for ref,xyz in [('0x14',[1,2,3]),('0x00000014',[1,2,3]),
+                        ('0xff000801',[1,float('nan'),3]),('0xff000801',[1,True,3])]:
+            with self.subTest(ref=ref,xyz=xyz),self.assertRaises(ValueError):
+                mobility_probe.place_owned_fixture(lambda *a,**k:self.fail('must not mutate'),ref,xyz)
+
     def test_common_bootstrap_verifies_world_before_marking_ready(self):
         class Session:
             state={}

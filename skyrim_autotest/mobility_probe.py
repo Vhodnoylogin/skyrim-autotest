@@ -34,6 +34,15 @@ def keyboard_hold(session, key, seconds, sample=None):
         session.tool('input', {'device': 'keyboard', 'action': 'up', 'key': key, 'owner': owner})
 
 
+def place_owned_fixture(papyrus, ref, xyz):
+    """ObjectReference exposes one SetPosition(x,y,z), not per-axis setters."""
+    if not isinstance(ref, str) or int(ref, 16) == 0x14:
+        raise ValueError('Fixture placement must not move the player')
+    if len(xyz) != 3 or any(type(v) not in (int, float) or not math.isfinite(v) for v in xyz):
+        raise ValueError('Fixture position needs three finite coordinates')
+    return papyrus('ObjectReference', 'SetPosition', list(xyz), target=ref)
+
+
 def execute(session, scenario):
     if session.state.get('inputBackend') != 'driver' or session.state.get('driverBackend') != 'file':
         raise ValueError('Mobility probe requires the physical file adapter')
@@ -190,8 +199,7 @@ def execute(session, scenario):
     # One declared fixture placement in front of the neutral right-hand ray.
     target = [origin[0] + 21 * math.cos(heading) + 38 * math.sin(heading),
               origin[1] - 21 * math.sin(heading) + 38 * math.cos(heading), origin[2] + 84]
-    for axis, value in zip('XYZ', target):
-        papyrus('ObjectReference', 'SetPosition' + axis, [value], target=ref)
+    place_owned_fixture(papyrus, ref, target)
     publish(frame)
     try:
         time.sleep(.5)
