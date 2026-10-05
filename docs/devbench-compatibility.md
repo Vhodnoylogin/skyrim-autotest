@@ -28,7 +28,11 @@ Source, SDK, programs, logs and resulting binaries are never copied into this
 repository or the Python runtime distribution. Preserve upstream GPL licensing
 and credits if distributing a derived DevBench binary.
 
-This is a compatibility candidate, not live acceptance. Stage the matching
+This candidate passed the bounded Papyrus metadata checks in eight isolated
+minimal New Game launches on 2026-10-06 (v10 through v17), with restoration.
+The earlier TypeAsString crash was not observed in those attempts. This does
+not establish acceptance for every metadata function or a combined mod scenario.
+Stage the matching
 DLL and PDB as ordinary pinned `staged_plugins` in an authorized isolated run;
 keep the installed original intact and verify restoration. Require actual
 metadata signatures and subsequent gameplay observations. Do not retry a

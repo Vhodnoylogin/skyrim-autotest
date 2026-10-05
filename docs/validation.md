@@ -205,3 +205,31 @@ no repeated load/coc, exact HTTP metadata, identity rechecks, and deadline
 accounting including health requests. All71 executor tests pass. No game was
 launched for this correction. Earlier live acceptance above qualifies its exact
 historical build, not the changed runtime; live confirmation is still pending.
+
+
+## 2026-10-06 common startup and current limits
+
+The executor now handles identified character creation, Realm Begin and
+Speech Broker confirmation dialogs using DevBench structured menu/queue data,
+and requires stable loaded-world/gameplay readiness before subject actions.
+Two separate identical Speech Broker notices were handled in the Core New Game
+qualification. A responding API or an input publication is not readiness.
+Unknown blocking prompts remain failures with their available text/buttons.
+
+The last Core New Game qualification passed all fourteen HIGGS physical
+hand/grip/exact-reference hold/release checks and restored its environment.
+Vanilla controller activation into the player inventory remained unsuccessful;
+this is separate from HIGGS holding. Minimal Realm qualifications also proved
+world loading, movement, keyboard jump and hand movement. Controller jump
+remains an optional failed check. Runtime and copied-profile activation-hand
+fixtures did not establish left-hand selection; missing target coverage is
+unavailable and cannot become a passing pickup assertion.
+
+The metadata compatibility candidate is documented separately in
+[devbench-compatibility.md](devbench-compatibility.md), with its acquisition
+recipe. The current build passed 145 offline regressions and all twelve fresh
+portable/wheel checks. This is not a fresh combined Body Pouches game run.
+Body tests that require HIGGS/structured state can proceed with pinned repaired
+DevBench instrumentation; broad control-chain acceptance remains incomplete.
+No further diagnostic launches were made after the owner stopped them for
+usage-budget reasons. Retained fixtures, reports and raw game code stay external.
