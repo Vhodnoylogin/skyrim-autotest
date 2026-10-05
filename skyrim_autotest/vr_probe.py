@@ -74,16 +74,19 @@ def accept_known_vr_modal(session, modal):
     body = ui('GetString', root + '.Message.text')
     def lines(value):
         return value.replace('\r\n', '\n').replace('\r', '\n') if isinstance(value, str) else None
+    button = root + '.Buttons.Button0'
     observed = {'bodyText': body, 'buttonCount': ui('GetInt', root + '.MessageButtons.length'),
-                'buttonText': ui('GetString', root + '.MessageButtons.0.ButtonText.text'),
-                'buttonDisabled': ui('GetBool', root + '.MessageButtons.0._disabled')}
+                'buttonText': ui('GetString', button + '.ButtonText.text'),
+                'buttonName': ui('GetString', button + '._name'),
+                'buttonDisabled': ui('GetBool', button + '._disabled')}
     session.log('startup-modal-ui-identity', result=observed)
     if (lines(body) != lines(modal['bodyText']) or observed['buttonCount'] != 1
-            or observed['buttonText'] != modal['buttons'][0] or observed['buttonDisabled'] is not False):
+            or observed['buttonText'] != modal['buttons'][0] or observed['buttonName'] != 'Button0'
+            or observed['buttonDisabled'] is not False):
         raise AssertionError('Startup modal visible UI does not match classified single-button notification')
     # VRMessageBox listens to "press"; InitButtons disables handlePress, while
     # handleMousePress dispatches the registered event. handleClick emits "click".
-    ui('InvokeInt', root + '.MessageButtons.0.handleMousePress', 0)
+    ui('InvokeInt', button + '.handleMousePress', 0)
     session.log('startup-modal-button-request', action='visible VR button callback', index=0,
                 body=modal['bodyText'])
 

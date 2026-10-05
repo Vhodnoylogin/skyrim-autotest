@@ -13,7 +13,9 @@ class FakeSession:
                     for function,types in {'GetString':['string','string'],'GetInt':['string','string'],
                                            'GetBool':['string','string'],'InvokeInt':['string','string','int']}.items()]}
             function=args['function'];path=args['args'][1]
-            if function=='GetString':return {'returned':self.body if path.endswith('.Message.text') else self.buttons[0]}
+            if function=='GetString':
+                return {'returned': self.body if path.endswith('.Message.text') else
+                        'Button0' if path.endswith('._name') else self.buttons[0]}
             if function=='GetInt':return {'returned':len(self.buttons)}
             if function=='GetBool':return {'returned':False}
             if function=='InvokeInt':self.accepts.append(args);self.open=False;return {'returned':None}
@@ -27,7 +29,7 @@ class FixtureModalTests(unittest.TestCase):
         session=FakeSession('Speech Broker на связи: fixture startup',['OK'])
         self.assertTrue(guard_fixture_modal(session))
         self.assertEqual(session.accepts,[{'action':'call','script':'UI','function':'InvokeInt',
-                                         'args':['MessageBoxMenu','_root.MessageMenu.MessageButtons.0.handleMousePress',0]}])
+                                         'args':['MessageBoxMenu','_root.MessageMenu.Buttons.Button0.handleMousePress',0]}])
         self.assertFalse(guard_fixture_modal(session))
     def test_unknown_or_choice_prompt_is_not_accepted(self):
         for body,buttons in [('Unknown confirmation',['OK']),('Speech Broker на связи',['Yes','No'])]:
