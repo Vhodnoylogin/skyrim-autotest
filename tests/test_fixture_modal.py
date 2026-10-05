@@ -27,7 +27,7 @@ class FixtureModalTests(unittest.TestCase):
         session=FakeSession('Speech Broker на связи: fixture startup',['OK'])
         self.assertTrue(guard_fixture_modal(session))
         self.assertEqual(session.accepts,[{'action':'call','script':'UI','function':'InvokeInt',
-                                         'args':['MessageBoxMenu','_root.MessageMenu.MessageButtons.0.handleClick',0]}])
+                                         'args':['MessageBoxMenu','_root.MessageMenu.MessageButtons.0.handleMousePress',0]}])
         self.assertFalse(guard_fixture_modal(session))
     def test_unknown_or_choice_prompt_is_not_accepted(self):
         for body,buttons in [('Unknown confirmation',['OK']),('Speech Broker на связи',['Yes','No'])]:

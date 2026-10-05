@@ -81,7 +81,9 @@ def accept_known_vr_modal(session, modal):
     if (lines(body) != lines(modal['bodyText']) or observed['buttonCount'] != 1
             or observed['buttonText'] != modal['buttons'][0] or observed['buttonDisabled'] is not False):
         raise AssertionError('Startup modal visible UI does not match classified single-button notification')
-    ui('InvokeInt', root + '.MessageButtons.0.handleClick', 0)
+    # VRMessageBox listens to "press"; InitButtons disables handlePress, while
+    # handleMousePress dispatches the registered event. handleClick emits "click".
+    ui('InvokeInt', root + '.MessageButtons.0.handleMousePress', 0)
     session.log('startup-modal-button-request', action='visible VR button callback', index=0,
                 body=modal['bodyText'])
 
