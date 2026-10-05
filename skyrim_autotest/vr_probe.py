@@ -58,7 +58,7 @@ def wait_test_cell(session, cell):
 
 
 def accept_known_vr_modal(session, modal):
-    """One physical VR trigger edge after matching the notification and button."""
+    """One physical VR grip edge after matching the notification and button."""
     from .api_contract import validate_description
     from . import hardware
     description = session.tool('papyrus', {'action': 'describe', 'script': 'UI'})
@@ -87,6 +87,7 @@ def accept_known_vr_modal(session, modal):
         raise AssertionError('Startup modal visible UI does not match classified single-button notification')
     if session.state.get('inputBackend') != 'driver' or session.state.get('driverBackend') != 'file':
         raise AssertionError('Known VR startup notification requires physical controller backend')
+    ensure_owned_focus(session, {}, 'startup-modal-owned-focus')
     ui('SetInt', button + '.focused', 1)
     if ui('GetInt', button + '.focused') != 1:
         raise AssertionError('Known startup button could not receive UI focus')
@@ -97,13 +98,14 @@ def accept_known_vr_modal(session, modal):
     try:
         session.tool('driver', {'action': 'publish', 'holdSeconds': 2, 'frame': frame})
         time.sleep(.3)
-        frame['right']['controller'].update(pressed=1 << 33, touched=1 << 33,
-                                            axes=[[0, 0], [1, 0], [0, 0], [0, 0], [0, 0]])
+        frame['right']['controller'].update(pressed=4, touched=4)
         session.tool('driver', {'action': 'publish', 'holdSeconds': 2, 'frame': frame})
-        time.sleep(.15)
+        time.sleep(.2)
+        session.log('startup-modal-controller-observed',
+                    result=session.tool('input', {'device': 'vrTrackedSet', 'action': 'observe'}))
     finally:
         session.tool('driver', {'action': 'release'})
-    session.log('startup-modal-button-request', action='physical right Vive trigger edge', index=0,
+    session.log('startup-modal-button-request', action='physical right Vive grip edge', index=0,
                 body=modal['bodyText'])
 
 

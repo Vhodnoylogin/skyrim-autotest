@@ -12,6 +12,7 @@ class FakeSession:
             if args['action']=='publish' and args['frame']['right']['controller']['pressed']:
                 self.accepts.append(args['frame']['right']['controller']['pressed']);self.open=False
             return {}
+        if name=='input':return {'frame': {}}
         if name=='papyrus':
             if args['action']=='describe':
                 return {'name':'UI','globalFunctions':[
@@ -33,9 +34,9 @@ class FakeSession:
 class FixtureModalTests(unittest.TestCase):
     def test_late_known_message_is_closed_with_exact_body(self):
         session=FakeSession('Speech Broker на связи: fixture startup',['OK'])
-        with patch('skyrim_autotest.vr_probe.time.sleep'):
+        with patch('skyrim_autotest.vr_probe.time.sleep'), patch('skyrim_autotest.vr_probe.ensure_owned_focus'):
             self.assertTrue(guard_fixture_modal(session))
-        self.assertEqual(session.accepts,[1<<33])
+        self.assertEqual(session.accepts,[4])
         self.assertFalse(guard_fixture_modal(session))
     def test_unknown_or_choice_prompt_is_not_accepted(self):
         for body,buttons in [('Unknown confirmation',['OK']),('Speech Broker на связи',['Yes','No'])]:
