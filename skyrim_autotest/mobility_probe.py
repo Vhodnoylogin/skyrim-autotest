@@ -286,6 +286,7 @@ def execute(session, scenario):
     if not isinstance(ref, str):
         raise AssertionError('Vanilla pickup fixture returned no exact reference')
     publish(frame)
+    recorder_started = False
     try:
         end = time.monotonic() + 10
         while not papyrus('ObjectReference', 'Is3DLoaded', target=ref):
@@ -312,6 +313,10 @@ def execute(session, scenario):
             activate[binding['role']]['controller'].update(pressed=1 << binding['key'], touched=1 << binding['key'],
                 axes=[[0, 0], [1 if binding['key']==33 else 0, 0], [0, 0], [0, 0], [0, 0]])
             session.log('vanilla-pickup-binding', binding=binding, exactReference=ref)
+            if scenario.get('recordPickupInput', False):
+                from . import input_activity
+                input_activity.start(session)
+                recorder_started = True
             publish(activate, 2)
             time.sleep(.12)
             input_observed = observed()
@@ -345,6 +350,8 @@ def execute(session, scenario):
             session.save()
     finally:
         session.tool('driver', {'action': 'release'})
+        if recorder_started:
+            input_activity.finish(session)
 
     # HIGGS physical holding is unavailable in a pure Realm profile. It must not be
     # replaced with ObjectReference.Activate/MoveTo or counted as a passing grab.
