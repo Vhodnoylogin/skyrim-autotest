@@ -56,20 +56,20 @@ def vr_pick_envelope(snapshot):
     return picking
 
 
-def right_wand_fixture_position(snapshot, distance=50):
+def primary_aim_fixture_position(snapshot, distance=50):
     picking = vr_pick_envelope(snapshot)
-    node = picking.get('nodes', {}).get('rightWand', {})
+    node = picking.get('nodes', {}).get('primaryAim', {})
     transform = node.get('world', {})
     origin, rotation = transform.get('translation'), transform.get('rotationRowMajor')
     if (node.get('status') != 'available' or not isinstance(origin, list) or len(origin) != 3
             or not isinstance(rotation, list) or len(rotation) != 9
             or any(type(v) not in (int, float) or not math.isfinite(v) for v in origin + rotation)):
-        raise AssertionError('Actual right wand world transform unavailable')
+        raise AssertionError('Actual primary aim world transform unavailable')
     # Skyrim local +Y forward is a placement candidate, never proof of a target.
     direction = [rotation[1], rotation[4], rotation[7]]
     length = math.sqrt(sum(v*v for v in direction))
     if not .9 <= length <= 1.1:
-        raise AssertionError('Right wand forward basis is not a unit direction')
+        raise AssertionError('Primary aim forward basis is not a unit direction')
     return [origin[i] + distance * direction[i] / length for i in range(3)]
 
 
@@ -262,13 +262,14 @@ def execute(session, scenario):
         papyrus('ObjectReference', 'SetMotionType', [4, True], target=ref)
         time.sleep(.3)
         aim = session.tool('inspect', {'kind': 'world_observer', 'refs': ['0x14']})
-        target = right_wand_fixture_position(aim)
+        target = primary_aim_fixture_position(aim)
         place_owned_fixture(papyrus, ref, target)
         time.sleep(.5)
         selected = session.tool('inspect', {'kind': 'world_observer', 'refs': [ref]})
         crosshair = papyrus('Game', 'GetCurrentCrosshairRef')
         session.log('vanilla-pickup-aim', reference=ref, position=target, before=aim,
-                    selected=selected, cachedPapyrusCrosshair=crosshair, fixtureMotionType=4)
+                    selected=selected, cachedPapyrusCrosshair=crosshair, fixtureMotionType=4,
+                    placementBasis='actual PrimaryMagicAimNode local +Y; exact right target still required')
         exact = exact_right_pick(aim, selected, ref)
         if exact:
             activate = copy.deepcopy(frame)
