@@ -403,7 +403,7 @@ def execute(session, scenario):
         # Build physics at the target position rather than moving an already active
         # rigid body whose render and collision transforms may temporarily diverge.
         cursor = session.capture_probe_cursor()
-        obj = papyrus('ObjectReference', 'PlaceAtMe', [{'form': scenario['object']}, 1, True, True], '0x14')
+        obj = papyrus('ObjectReference', 'PlaceAtMe', [{'form': scenario.get('object', '0x0006F993')}, 1, True, True], '0x14')
         ref = obj['formId']
         session.bind_probe_reference(ref, cursor)
         player_pos = [papyrus('ObjectReference', 'GetPosition' + axis, target='0x14') for axis in 'XYZ']
