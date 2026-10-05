@@ -27,6 +27,21 @@ class FakeSession:
     def log(self,*args,**kwargs):pass
 
 class FixtureModalTests(unittest.TestCase):
+    def test_delayed_visible_text_is_read_only_until_matching_native_identity(self):
+        class Delayed(FakeSession):
+            reads=0
+            def tool(self,name,args):
+                if name=='papyrus' and args.get('function')=='GetString' and args['args'][1].endswith('.Message.text'):
+                    self.reads+=1
+                    return {'returned':'Previous notice' if self.reads==1 else self.body}
+                if name=='menu' and args['action']=='accept':
+                    if self.reads<2:raise AssertionError('Premature answer before visible identity')
+                return super().tool(name,args)
+        session=Delayed('Speech Broker на связи',['OK'])
+        with patch('skyrim_autotest.vr_probe.ensure_owned_focus'),patch('skyrim_autotest.vr_probe.time.sleep'):
+            self.assertTrue(guard_fixture_modal(session))
+        self.assertEqual(session.reads,2)
+        self.assertEqual(len(session.accepts),1)
     def test_realm_begin_requires_exact_body_button_and_fresh_character_world(self):
         from skyrim_autotest.vr_probe import classify_startup_modal
         modal={'bodyText':'You find yourself someplace unknown... Somewhere outside of time and space.',

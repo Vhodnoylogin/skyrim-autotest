@@ -82,19 +82,27 @@ def accept_known_vr_modal(session, modal, answered_ids):
                                       'args': ['MessageBoxMenu', path, *values]})['returned']
 
     root = '_root.MessageMenu'
-    body = ui('GetString', root + '.Message.text')
     def lines(value):
         return value.replace('\r\n', '\n').replace('\r', '\n') if isinstance(value, str) else None
     button = root + '.Buttons.Button0'
-    observed = {'bodyText': body, 'buttonCount': ui('GetInt', root + '.MessageButtons.length'),
-                'buttonText': ui('GetString', button + '.ButtonText.text'),
-                'buttonName': ui('GetString', button + '._name'),
-                'buttonDisabled': ui('GetBool', button + '._disabled')}
-    session.log('startup-modal-ui-identity', result=observed)
-    if (lines(body) != lines(modal['bodyText']) or observed['buttonCount'] != 1
-            or observed['buttonText'] != modal['buttons'][0] or observed['buttonName'] != 'Button0'
-            or observed['buttonDisabled'] is not False):
-        raise AssertionError('Startup modal visible UI does not match classified single-button notification')
+    end = time.monotonic() + 3
+    while True:
+        current = session.tool('menu', {'action': 'describe'})
+        if current.get('bodyText') != modal['bodyText'] or current.get('buttons') != modal['buttons']:
+            raise AssertionError('Startup modal changed during visible UI readiness; no answer sent')
+        observed = {'bodyText': ui('GetString', root + '.Message.text'),
+                    'buttonCount': ui('GetInt', root + '.MessageButtons.length'),
+                    'buttonText': ui('GetString', button + '.ButtonText.text'),
+                    'buttonName': ui('GetString', button + '._name'),
+                    'buttonDisabled': ui('GetBool', button + '._disabled')}
+        session.log('startup-modal-ui-identity', result=observed)
+        if (lines(observed['bodyText']) == lines(modal['bodyText']) and observed['buttonCount'] == 1
+                and observed['buttonText'] == modal['buttons'][0] and observed['buttonName'] == 'Button0'
+                and observed['buttonDisabled'] is False):
+            break
+        if time.monotonic() >= end:
+            raise AssertionError('Startup modal visible UI does not match classified single-button notification')
+        time.sleep(.1)
     ensure_owned_focus(session, {}, 'startup-modal-owned-focus')
     current = session.tool('menu', {'action': 'describe'})
     if current.get('bodyText') != modal['bodyText'] or current.get('buttons') != modal['buttons']:
