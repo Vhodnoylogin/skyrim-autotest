@@ -235,6 +235,8 @@ def complete_character_creation(session):
     while time.monotonic() < deadline:
         menus = session.tool('menu', {'action': 'list'})
         if not menus.get('messageBoxOpen'):
+            session.state['lastClosedStartupModal'] = {'bodyText': modal['bodyText'],
+                                                       'buttons': modal['buttons']}
             shown = (ui('GetBool', entry + '._visible') and ui('GetBool', entry + '.enabled')
                      if core else ui('GetInt', root + '.Mode') == 0)
             session.log('character-name-entry', shown=shown, menus=menus)

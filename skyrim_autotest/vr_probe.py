@@ -120,10 +120,20 @@ def accept_known_vr_modal(session, modal, answered_ids):
             raise AssertionError('Native notification identity does not match described modal')
     if not coherent:
         previous = getattr(session, 'state', {}).get('lastClosedStartupModal', {})
+        prior_buttons = previous.get('buttons')
         stale_known_view = (lines(previous.get('bodyText')) == lines(observed['bodyText'])
-                           and previous.get('buttons') == [observed['buttonText']]
-                           and observed['buttonCount'] == 1 and observed['buttonName'] == 'Button0'
+                           and isinstance(prior_buttons, list) and 1 <= len(prior_buttons) <= 2
+                           and observed['buttonCount'] == len(prior_buttons)
+                           and prior_buttons[0] == observed['buttonText']
+                           and observed['buttonName'] == 'Button0'
                            and observed['buttonDisabled'] is False)
+        if stale_known_view:
+            # A closed character confirmation has two buttons. Match every
+            # retained label; a matching first button alone is insufficient.
+            observed['buttonTexts'] = [observed['buttonText']] + [
+                ui('GetString', root + '.Buttons.Button' + str(index) + '.ButtonText.text')
+                for index in range(1, len(prior_buttons))]
+            stale_known_view = observed['buttonTexts'] == prior_buttons
         if not stale_known_view or not before.get('available') or before.get('depth') != 1:
             raise AssertionError('Startup modal visible UI does not match classified single-button notification')
         # This operation answers native queue data, not the displayed movieclip.
