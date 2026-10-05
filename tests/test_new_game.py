@@ -72,8 +72,9 @@ class NewGameTests(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, 'unclassified modal'):
                 bootstrap.prepare_gameplay(session, {'cell': 'RealmLorkhan'})
         self.assertNotIn('gameplayBootstrap', session.state)
-        self.assertEqual(session.logs[-1][0], 'fixture-modal')
-        self.assertEqual(session.logs[-1][1]['result']['buttons'], ['Yes', 'No'])
+        modal = [values for name, values in session.logs if name == 'fixture-modal'][-1]
+        self.assertEqual(modal['result']['buttons'], ['Yes', 'No'])
+        self.assertEqual(session.logs[-1][0], 'startup-waiting-for-input')
 
     def test_new_game_rejects_any_pinned_save_or_undeclared_world(self):
         for value in ({'fixture': {'saveStem': 'anything'}, 'cell': 'RealmLorkhan'}, {}):

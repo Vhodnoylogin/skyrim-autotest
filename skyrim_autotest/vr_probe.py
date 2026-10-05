@@ -57,6 +57,35 @@ def wait_test_cell(session, cell):
                          ('; last readiness error: ' + last_error if last_error else ''))
 
 
+def accept_known_vr_modal(session, modal):
+    """One real VR UI button callback after matching both data and visible UI."""
+    from .api_contract import validate_description
+    description = session.tool('papyrus', {'action': 'describe', 'script': 'UI'})
+    validate_description('UI', description, 'globalFunctions', {
+        'GetString': ['string', 'string'], 'GetInt': ['string', 'string'],
+        'GetBool': ['string', 'string'], 'InvokeInt': ['string', 'string', 'int']})
+
+    def ui(function, path, *values):
+        return session.tool('papyrus', {'action': 'call', 'script': 'UI',
+                                      'function': function,
+                                      'args': ['MessageBoxMenu', path, *values]})['returned']
+
+    root = '_root.MessageMenu'
+    body = ui('GetString', root + '.Message.text')
+    def lines(value):
+        return value.replace('\r\n', '\n').replace('\r', '\n') if isinstance(value, str) else None
+    observed = {'bodyText': body, 'buttonCount': ui('GetInt', root + '.MessageButtons.length'),
+                'buttonText': ui('GetString', root + '.MessageButtons.0.ButtonText.text'),
+                'buttonDisabled': ui('GetBool', root + '.MessageButtons.0._disabled')}
+    session.log('startup-modal-ui-identity', result=observed)
+    if (lines(body) != lines(modal['bodyText']) or observed['buttonCount'] != 1
+            or observed['buttonText'] != modal['buttons'][0] or observed['buttonDisabled'] is not False):
+        raise AssertionError('Startup modal visible UI does not match classified single-button notification')
+    ui('InvokeInt', root + '.MessageButtons.0.handleClick', 0)
+    session.log('startup-modal-button-request', action='visible VR button callback', index=0,
+                body=modal['bodyText'])
+
+
 def guard_fixture_modal(session):
     """A startup message can arrive after the first load-ready observation."""
     menus = session.tool('menu', {'action': 'list'})
@@ -64,16 +93,21 @@ def guard_fixture_modal(session):
         return False
     modal = session.tool('menu', {'action': 'describe'})
     session.log('fixture-modal', result=modal)
+    session.log('startup-waiting-for-input', menu='MessageBoxMenu',
+                bodyText=modal.get('bodyText'), buttons=modal.get('buttons'),
+                reason='Blocking dialog requires an answer; tool responsiveness is not gameplay readiness')
     if len(modal.get('buttons', [])) != 1 or not modal.get('bodyText', '').startswith('Speech Broker на связи'):
         raise AssertionError('Fixture is gated by an unclassified modal: ' + json.dumps(modal))
-    session.tool('menu', {'action': 'accept', 'matchBody': modal['bodyText']})
+    accept_known_vr_modal(session, modal)
     end = time.monotonic() + 3
     while time.monotonic() < end:
         if not session.tool('menu', {'action': 'list'}).get('messageBoxOpen'):
             session.log('fixture-modal-cleared', body=modal['bodyText'])
             return True
         time.sleep(.1)
-    raise AssertionError('Recognized fixture modal did not close')
+    following = session.tool('menu', {'action': 'describe'})
+    session.log('startup-modal-button-not-resolved', before=modal, after=following)
+    raise AssertionError('Recognized fixture modal did not close: ' + json.dumps(following))
 
 
 def execute(session, scenario):
