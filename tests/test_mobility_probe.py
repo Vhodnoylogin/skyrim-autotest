@@ -75,6 +75,25 @@ class MobilityProbeTests(unittest.TestCase):
         after['vrPicking']['devices']['right']={'targetStatus':'none','target':None}
         self.assertFalse(mobility_probe.exact_right_pick(before,after,'0xff000801'))
 
+    def test_combined_activation_does_not_use_dead_or_teleport_zone(self):
+        binding={'event':'Teleport Or Activate','key':32}
+        settings={'fDeadzonePercent:VRInput':.15,
+                  'fThumbstickTeleportActivateZone:VRInput':.6}
+        point=mobility_probe.activation_trackpad(binding,settings)
+        self.assertEqual(point[0],0)
+        self.assertGreater(point[1],.15)
+        self.assertLess(point[1],.6)
+        self.assertEqual(mobility_probe.activation_trackpad({'event':'Activate','key':33},{}),[0,0])
+
+    def test_unknown_or_empty_activation_interval_blocks_physical_input(self):
+        binding={'event':'Teleport Or Activate','key':32}
+        for lower,upper in ((None,.6),(.6,.4),(.6,.6),(.59,.6),(-.1,.6),
+                            (float('nan'),.6),(.15,True),(.15,1.1)):
+            with self.subTest(lower=lower,upper=upper), self.assertRaises(AssertionError):
+                mobility_probe.activation_trackpad(binding,{
+                    'fDeadzonePercent:VRInput':lower,
+                    'fThumbstickTeleportActivateZone:VRInput':upper})
+
     def test_fixture_position_uses_supported_atomic_native_signature(self):
         def native(script,function,args,target):
             self.assertEqual((script,function),('ObjectReference','SetPosition'))

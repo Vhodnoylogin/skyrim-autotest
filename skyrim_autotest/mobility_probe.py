@@ -132,6 +132,23 @@ def vive_activation(snapshot):
     raise AssertionError('No supported physical Vive activation mapping')
 
 
+def activation_trackpad(binding, settings):
+    """Stay outside the live radial deadzone and below teleport activation.
+
+    The qualified VR combined handler requires a non-dead radial coordinate;
+    x=0 selects its central activation strip. A centered [0,0] press is ignored.
+    Values come from the loaded game, never a modification of player settings.
+    """
+    if binding['event'] != 'Teleport Or Activate' or binding['key'] != 32:
+        return [0, 0]
+    lower = settings.get('fDeadzonePercent:VRInput')
+    upper = settings.get('fThumbstickTeleportActivateZone:VRInput')
+    if (any(type(v) not in (int, float) or not math.isfinite(v) for v in (lower, upper))
+            or not 0 <= lower < upper <= 1 or upper-lower < .05):
+        raise AssertionError('No qualified trackpad activation interval; no guessed input')
+    return [0, (lower+upper)/2]
+
+
 def execute(session, scenario):
     if session.state.get('inputBackend') != 'driver' or session.state.get('driverBackend') != 'file':
         raise ValueError('Mobility probe requires the physical file adapter')
@@ -315,7 +332,8 @@ def execute(session, scenario):
             'bLeftHandedMode:VRInput', 'bEnableTouchpadQuickTeleport:VRInput',
             'bImmediatelyGrabObjectOnActivate:VR')}
         settings.update({name: papyrus('Utility', 'GetINIFloat', [name]) for name in (
-            'fThumbstickTeleportActivateZone:VRInput', 'fThumbstickTeleportDeadzone:VRInput')})
+            'fThumbstickTeleportActivateZone:VRInput', 'fThumbstickTeleportDeadzone:VRInput',
+            'fDeadzonePercent:VRInput')})
         session.log('vanilla-pickup-live-settings', settings=settings,
                     domain='read-only live Utility INI API; no player-setting mutation')
         target = aim_fixture_position(aim, aim_name)
@@ -336,9 +354,11 @@ def execute(session, scenario):
                 from . import vr_handler_debug
                 vr_handler_debug.collect(session)
             activate = copy.deepcopy(frame)
+            trackpad = activation_trackpad(binding, settings)
             activate[binding['role']]['controller'].update(pressed=1 << binding['key'], touched=1 << binding['key'],
-                axes=[[0, 0], [1 if binding['key']==33 else 0, 0], [0, 0], [0, 0], [0, 0]])
-            session.log('vanilla-pickup-binding', binding=binding, exactReference=ref)
+                axes=[trackpad, [1 if binding['key']==33 else 0, 0], [0, 0], [0, 0], [0, 0]])
+            session.log('vanilla-pickup-binding', binding=binding, exactReference=ref,
+                        trackpad=trackpad, liveDeadzone=settings['fDeadzonePercent:VRInput'])
             if scenario.get('recordPickupInput', False):
                 from . import input_activity
                 input_activity.start(session)
@@ -369,6 +389,7 @@ def execute(session, scenario):
                     'afterCount': current, 'input': 'one mapped physical Vive press/release', 'binding': binding,
                     'physicalInputObserved': received, 'observedFrame': input_observed,
                     'settings': settings, 'nativeGrabbedReferenceSamples': grabbed_samples,
+                    'requestedTrackpad': trackpad,
                     'nativeGrabbedReferenceDuringPress': grabbed_during_press,
                     'domain': 'inventory acquisition, not HIGGS physical hold'})
         else:
