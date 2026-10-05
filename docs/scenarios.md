@@ -11,6 +11,12 @@ the declared `cell` must be reached by the new-game/alternate-start flow itself.
 The executor does not load a save or use `coc` to establish this initial world.
 Known startup notifications are classified and unknown dialogs retain their
 exact text/buttons before stopping. Character creation remains a readiness gate.
+The common executor records `startup-waiting-for-input` for a blocking message
+box; a responsive API does not clear that gate. Known notifications require a
+matched current identity and observed closure or exact native queue progress
+after one answer. A retained GFx view is accepted only when it matches every
+label of a previously proved closed dialog and one rechecked current native
+notification. This does not establish the appearance of a rendered frame.
 The stock VR and inspected Unobtrusive UI start-menu layouts are supported by
 explicit live NEW-token/state checks; unsupported layouts fail before activation.
 
@@ -18,6 +24,12 @@ For a mobility probe, `controllerJumpRequired:false` keeps the physical jump
 candidate's measured failed/passed result but does not terminate the scenario
 for that optional diagnostic. Do not declare it among required order checks in
 that mode; keyboard jump and physical controller jump remain separate evidence.
+The inventory probe selects its exact owned fixture through the measured dominant
+aim. The loaded activation button can belong to the secondary hand; selection
+and input identities are recorded separately. Live interaction INI settings and
+native grabbed-reference samples are observations only, never setting changes
+or substitutes for the required increase in inventory. `recordPickupInput:true`
+adds an owned raw DevBench event recording with transfer and ownership checks.
 
 A generic scenario contains `name` and nonempty `steps`. Each step needs `name`,
 `tool`, `args` (object), a finite `timeout` in (0,180] seconds (default20), and
