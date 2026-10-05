@@ -187,6 +187,12 @@ def execute(session, scenario):
 
     if scenario.get('observer', True):
         session.phase('mobility-observer', 35)
+        from .api_contract import validate_observer_descriptor
+        extension = session.tool('inspect', {'kind': 'extensions'})
+        descriptor = validate_observer_descriptor(extension)
+        session.log('observer-api-qualified', descriptor=descriptor,
+                    query={'kind': 'world_observer', 'refs': ['0x14']},
+                    schemaSource='registered extension; host core inspect schema is separate')
         value = session.tool('inspect', {'kind': 'world_observer', 'refs': ['0x14']})
         record('mobility observer player available', value.get('ok') is True and
                value.get('refs', [{}])[0].get('status') == 'available', value)

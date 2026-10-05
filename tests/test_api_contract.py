@@ -3,6 +3,16 @@ from skyrim_autotest import api_contract
 
 
 class ApiContractTests(unittest.TestCase):
+    def test_extension_schema_qualifies_refs_independently_of_host_core_inspect(self):
+        descriptor={'readOnly':True,'inputSchema':{'properties':{
+            'kind':{'const':'world_observer'},'refs':{'type':'array','maxItems':16}}}}
+        self.assertEqual(api_contract.validate_observer_descriptor({'extensions':[
+            {'kind':'world_observer','descriptor':descriptor}]}),descriptor)
+    def test_missing_duplicate_or_undeclared_observer_query_stops_before_request(self):
+        for entries in ([],[{'kind':'world_observer','descriptor':{}}],
+                        [{'kind':'world_observer'},{'kind':'world_observer'}]):
+            with self.subTest(entries=entries),self.assertRaises(AssertionError):
+                api_contract.validate_observer_descriptor({'extensions':entries})
     def test_supported_native_signature_is_read_from_live_metadata(self):
         metadata={'name':'ObjectReference','memberFunctions':[
             {'name':'SetPosition','params':[{'type':'Float','name':v} for v in ('afX','afY','afZ')],

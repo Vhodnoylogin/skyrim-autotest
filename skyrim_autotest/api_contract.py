@@ -1,5 +1,18 @@
 """Read live Papyrus signatures before test fixture/input mutations."""
 
+def validate_observer_descriptor(result):
+    entries = [entry for entry in result.get('extensions', []) if entry.get('kind') == 'world_observer']
+    if len(entries) != 1:
+        raise AssertionError('Unique world_observer extension descriptor unavailable')
+    descriptor = entries[0].get('descriptor', {})
+    properties = descriptor.get('inputSchema', {}).get('properties', {})
+    refs = properties.get('refs', {})
+    if (descriptor.get('readOnly') is not True or properties.get('kind', {}).get('const') != 'world_observer'
+            or refs.get('type') != 'array' or refs.get('maxItems', 0) < 1):
+        raise AssertionError('Observer extension does not declare this read-only refs query')
+    return descriptor
+
+
 MOBILITY = {
     'ObjectReference': ('memberFunctions', {
         'GetPositionX': [], 'GetPositionY': [], 'GetPositionZ': [], 'GetAngleZ': [],
