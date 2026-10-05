@@ -171,6 +171,8 @@ def complete_character_creation(session):
                          'globalFunctions', {'GetString': ['string', 'string'],
                          'GetBool': ['string', 'string'], 'GetInt': ['string', 'string'],
                          'SetString': ['string', 'string', 'string'],
+                         'SetBool': ['string', 'string', 'bool'],
+                         'InvokeBool': ['string', 'string', 'bool'],
                          'InvokeInt': ['string', 'string', 'int']})
     validate_description('Game', session.tool('papyrus', {'action': 'describe', 'script': 'Game'}),
                          'globalFunctions', {'GetGameSettingString': ['string']})
@@ -188,6 +190,12 @@ def complete_character_creation(session):
     if core == stock:
         raise AssertionError('Unidentified or ambiguous character creation UI')
     entry = root + ('.textEntry' if core else '.NameEntryInstance')
+    field_identity = {'entry': ui('GetString', entry + '._name'),
+                      'input': ui('GetString', entry + '.TextInputInstance._name')}
+    session.log('character-name-field-identity', result=field_identity)
+    if field_identity != {'entry': 'textEntry' if core else 'NameEntryInstance',
+                          'input': 'TextInputInstance'}:
+        raise AssertionError('Character name field identity unavailable; no completion input sent')
     settings = {}
     for key in ('sRSMConfirm', 'sRSMFinishedWarning', 'sYes', 'sNo', 'sOK', 'sCancel'):
         settings[key] = session.tool('papyrus', {'action': 'call', 'script': 'Game',
@@ -198,6 +206,7 @@ def complete_character_creation(session):
         raise AssertionError('Character menu changed before completion request')
     ui('InvokeInt', root + '.onDoneClicked', 0)
     deadline = time.monotonic() + 15
+    text_entry_requested = False
     while time.monotonic() < deadline:
         menus = session.tool('menu', {'action': 'list'})
         if menus.get('messageBoxOpen'):
@@ -230,6 +239,20 @@ def complete_character_creation(session):
             session.log('character-name-entry', shown=shown, menus=menus)
             if shown:
                 break
+            if not text_entry_requested:
+                if menu not in menus.get('openMenus', []):
+                    raise AssertionError('Character menu closed before verified name entry')
+                # Stock VR may request SteamVR's headset keyboard. Use the
+                # identified movie's own text-entry frontend instead; the native
+                # confirmation already advanced the engine to its naming stage.
+                if core:
+                    ui('InvokeBool', root + '.ShowTextEntry', True)
+                else:
+                    ui('SetBool', root + '.bShowTextEntry', True)
+                ui('InvokeInt', root + '.ShowTextEntryField', 0)
+                text_entry_requested = True
+                session.log('character-name-frontend-request', layout='core' if core else 'stock',
+                            acceptedAsReadinessProof=False)
         time.sleep(.25)
     else:
         raise AssertionError('Character confirmation did not expose name entry')
