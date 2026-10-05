@@ -128,6 +128,12 @@ is retained as `--input-backend devbench` for diagnostics; its hand motion is no
 qualified physical HIGGS interaction. Optional `raw_openvr.py` observations are
 application-specific and cannot attest the game's scene input.
 
+The common executor prepares initialized gameplay before dispatching any scenario:
+recognized startup confirmation, optional pinned save load, declared initial cell
+and verified scene/menu readiness. Orders describe the initial world via `cell`
+and/or `fixture`; they do not script instrument-specific startup UI. Technical
+`gameplay-ready` is distinct from factual subject-test start and results.
+
 The `vr-mobility-probe` diagnostic can run in a minimal Realm world without
 VRIK/HIGGS: it records player movement/jump and game-accessed tracked hands,
 separates physical-controller candidates from keyboard diagnostics, and attempts

@@ -963,6 +963,9 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
             if fault == 'after-ready':
                 os._exit(99)  # Recovery acceptance with the actual game and compositor alive.
             from .scenarios import execute
+            # Common launch/loading is platform work, before subject actions.
+            from .bootstrap import prepare_gameplay
+            prepare_gameplay(session, scenario)
             execute(session, scenario)
             if any(sha(Path(__file__).parent / name) != digest for name, digest in state['executorHashes'].items()):
                 raise Blocked('Executor source changed during the scenario; evidence needs a stable rerun')

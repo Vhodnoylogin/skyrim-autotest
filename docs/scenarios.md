@@ -124,10 +124,17 @@ mobility world is reused afterward. Minimal mode makes no HIGGS hold claim.
 OpenVR tracking reads do not prove rendered hand animation. World probes use
 engine units; tracking matrices use metres. Boolean scope options and safe cell
 IDs are validated before launch. A fixture remains optional and pinned when used.
-Without a save, setup first initializes the fresh world with one declared `coc`
-and an eight-second startup interval, then selects the final cell once. The
-separate phases retain both actions; failed readiness never repeats either.
-With a loaded fixture only the final cell selection is issued.
+Common executor bootstrap runs before scenario dispatch. A scenario declares
+its initial `cell` and/or pinned `fixture`; it does not implement startup UI.
+The platform waits for the identified calibration menu in `VRPlayroom01`, sends
+one bounded physical right-trigger press and observes the menu closing. It then
+loads the pinned save once when provided, observes postLoadGame, selects the
+declared cell once, and requires loaded scene data outside the playroom with no
+calibration/main/loading/race menu or message box. Unknown UI receives no guessed
+input. Readiness failures never replay load/input/coc mutations. The platform
+logs `gameplay-ready` separately from subject assertions. A scenario with neither
+cell nor pinned save cannot dispatch mod-test actions. This common path still
+needs live qualification; API responsiveness alone cannot establish readiness.
 
 The default physical probe requires the owned game to acquire Windows foreground.
 Optional `allowBackgroundVR:true` permits the probe to attempt physical testing

@@ -1,38 +1,102 @@
 import unittest
 from unittest.mock import patch
 
-from skyrim_autotest import mobility_probe, scenarios
+from skyrim_autotest import bootstrap, mobility_probe, scenarios
 
 
 class MobilityProbeTests(unittest.TestCase):
-    def test_fresh_world_setup_is_distinct_from_final_cell_selection(self):
+    def test_common_bootstrap_verifies_world_before_marking_ready(self):
         class Session:
-            def __init__(self): self.events = []
-            def phase(self, name, seconds): self.events.append(name)
-            def tool(self, name, args): self.events.append(args['command'])
-        session = Session()
-        with patch.object(mobility_probe.vr_probe, 'guard_fixture_modal'), \
-                patch.object(mobility_probe.time, 'sleep') as sleep, \
-                patch.object(mobility_probe.vr_probe, 'wait_test_cell', side_effect=AssertionError('not ready')) as ready:
-            with self.assertRaisesRegex(AssertionError, 'not ready'):
-                mobility_probe.enter_world(session, 'RealmLorkhan', False)
-        self.assertEqual(session.events, ['mobility-initialize-fresh-world', 'coc RealmLorkhan',
-                                          'mobility-enter-cell', 'coc RealmLorkhan'])
-        sleep.assert_called_once_with(8)
-        ready.assert_called_once_with(session, 'RealmLorkhan')
+            state={}
+            def __init__(self):self.calls=[]
+            def phase(self,*args):pass
+            def log(self,*args,**kwargs):pass
+            def save(self):pass
+            def tool(self,name,args):
+                self.calls.append((name,args))
+                if name=='inspect':return {'cell':{'editorId':'VRPlayroom01'}}
+                if name=='menu':return {'openMenus':['HUD Menu']}
+        session=Session();scene={'playerLoaded':True,'cell':{'editorId':'RealmLorkhan'}}
+        with patch.object(bootstrap,'advance_calibration',return_value=True), \
+                patch.object(bootstrap.vr_probe,'guard_fixture_modal'), \
+                patch.object(bootstrap.vr_probe,'wait_test_cell',return_value=scene):
+            bootstrap.prepare_gameplay(session,{'cell':'RealmLorkhan'})
+        self.assertTrue(session.state['gameplayBootstrap']['completed'])
+        self.assertEqual(session.state['gameplayBootstrap']['scene'],scene)
+        self.assertEqual([args['command'] for name,args in session.calls if name=='console'],['coc RealmLorkhan'])
 
-    def test_loaded_fixture_has_no_fresh_world_mutation(self):
+    def test_common_bootstrap_does_not_treat_main_menu_as_gameplay(self):
         class Session:
-            def __init__(self): self.commands = []
-            def phase(self, name, seconds): pass
-            def tool(self, name, args): self.commands.append(args['command'])
-        session = Session()
-        with patch.object(mobility_probe.vr_probe, 'guard_fixture_modal'), \
-                patch.object(mobility_probe.time, 'sleep') as sleep, \
-                patch.object(mobility_probe.vr_probe, 'wait_test_cell', return_value={'ready': True}):
-            self.assertEqual(mobility_probe.enter_world(session, 'RealmLorkhan', True), {'ready': True})
-        self.assertEqual(session.commands, ['coc RealmLorkhan'])
-        sleep.assert_not_called()
+            state={}
+            def phase(self,*args):pass
+            def log(self,*args,**kwargs):pass
+            def save(self):pass
+            def tool(self,name,args):
+                return {'cell':{'editorId':'Other'}} if name=='inspect' else {'openMenus':['Main Menu']}
+        session=Session()
+        with patch.object(bootstrap.vr_probe,'guard_fixture_modal'), \
+                patch.object(bootstrap.vr_probe,'wait_test_cell',return_value={'playerLoaded':True,'cell':{'editorId':'RealmLorkhan'}}):
+            with self.assertRaisesRegex(AssertionError,'not ready'):
+                bootstrap.prepare_gameplay(session,{'cell':'RealmLorkhan'})
+        self.assertNotIn('gameplayBootstrap',session.state)
+
+    def test_common_bootstrap_requires_explicit_initial_state(self):
+        with self.assertRaisesRegex(AssertionError,'initial cell or pinned save'):
+            bootstrap.prepare_gameplay(object(),{})
+
+    def test_unknown_startup_screen_does_not_receive_input(self):
+        class Session:
+            def __init__(self): self.calls = []
+            def tool(self, name, args):
+                self.calls.append((name, args))
+                return {'openMenus': ['Main Menu']}
+        session=Session()
+        self.assertFalse(bootstrap.advance_calibration(session))
+        self.assertEqual(len(session.calls), 1)
+
+    def test_calibration_input_requires_playroom_identity(self):
+        class Session:
+            def __init__(self): self.calls=[]
+            def tool(self, name, args):
+                self.calls.append((name,args))
+                return {'openMenus':['CalibrationOptionMenu']} if name=='menu' else {'cell':{'editorId':'Other'}}
+        session=Session()
+        with self.assertRaisesRegex(AssertionError, 'ambiguous'):
+            bootstrap.advance_calibration(session)
+        self.assertFalse(any(name=='driver' for name,_ in session.calls))
+
+    def test_calibration_button_releases_and_requires_observed_menu_transition(self):
+        class Session:
+            state={'inputBackend':'driver','driverBackend':'file'}
+            def __init__(self): self.calls=[];self.menus=0
+            def phase(self,name,seconds):pass
+            def log(self,*args,**kwargs):pass
+            def tool(self,name,args):
+                self.calls.append((name,args))
+                if name=='menu':
+                    self.menus+=1
+                    return {'openMenus':['CalibrationOptionMenu'] if self.menus==1 else ['Main Menu']}
+                if name=='inspect':return {'cell':{'editorId':'VRPlayroom01'}}
+        session=Session()
+        with patch.object(bootstrap.time,'sleep'):
+            self.assertTrue(bootstrap.advance_calibration(session))
+        driver=[args for name,args in session.calls if name=='driver']
+        self.assertEqual([args['action'] for args in driver],['publish','release'])
+        self.assertEqual(driver[0]['frame']['right']['controller']['pressed'],1<<33)
+
+    def test_calibration_sampling_exception_still_releases_button(self):
+        class Session:
+            state={'inputBackend':'driver','driverBackend':'file'}
+            def __init__(self):self.calls=[]
+            def phase(self,*args):pass
+            def log(self,*args,**kwargs):pass
+            def tool(self,name,args):
+                self.calls.append((name,args))
+                return {'openMenus':['CalibrationOptionMenu']} if name=='menu' else {'cell':{'editorId':'VRPlayroom01'}}
+        session=Session()
+        with patch.object(bootstrap.time,'sleep',side_effect=RuntimeError('client interrupted')):
+            with self.assertRaises(RuntimeError):bootstrap.advance_calibration(session)
+        self.assertEqual([args['action'] for name,args in session.calls if name=='driver'],['publish','release'])
 
     def test_minimal_probe_does_not_require_higgs_or_a_save(self):
         scenarios.validate({'schemaVersion': 1, 'kind': 'vr-mobility-probe',

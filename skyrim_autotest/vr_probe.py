@@ -77,7 +77,9 @@ def guard_fixture_modal(session):
 
 
 def execute(session, scenario):
-    if scenario.get('fixture'):
+    initialized = session.state.get('gameplayBootstrap', {})
+    already_ready = initialized.get('completed') and initialized.get('cell') == scenario['cell']
+    if scenario.get('fixture') and not already_ready:
         session.phase('load-pinned-fixture', 120)
         before = session.tool('inspect', {'kind': 'state'})
         session.tool('game', {'action': 'load', 'name': scenario['fixture']['saveStem']})
@@ -91,16 +93,20 @@ def execute(session, scenario):
             time.sleep(1)
         else:
             raise AssertionError('Pinned fixture did not finish loading')
-    session.phase('bootstrap-test-cell', 120)
-    if guard_fixture_modal(session):
-        time.sleep(1)
-    if not scenario.get('fixture'):
+    if already_ready:
+        scene = initialized['scene']
+    else:
+        session.phase('bootstrap-test-cell', 120)
+        if guard_fixture_modal(session):
+            time.sleep(1)
+    if not already_ready and not scenario.get('fixture'):
         # A fresh game's alternate-start quest can change cells after the first
         # coc. Initialize that world, then deliberately enter the test cell.
         session.tool('console', {'action': 'exec', 'command': 'coc ' + scenario['cell']})
         time.sleep(8)
-    session.tool('console', {'action': 'exec', 'command': 'coc ' + scenario['cell']})
-    scene = wait_test_cell(session, scenario['cell'])
+    if not already_ready:
+        session.tool('console', {'action': 'exec', 'command': 'coc ' + scenario['cell']})
+        scene = wait_test_cell(session, scenario['cell'])
     session.state['checks'].append({'name': 'test cell loaded', 'result': 'passed', 'observation': scene})
     session.save()
 

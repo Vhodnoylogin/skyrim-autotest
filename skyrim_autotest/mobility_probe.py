@@ -34,21 +34,6 @@ def keyboard_hold(session, key, seconds, sample=None):
         session.tool('input', {'device': 'keyboard', 'action': 'up', 'key': key, 'owner': owner})
 
 
-def enter_world(session, cell, loaded_fixture):
-    """Initialize a fresh world separately from its final cell selection."""
-    if not loaded_fixture:
-        session.phase('mobility-initialize-fresh-world', 30)
-        vr_probe.guard_fixture_modal(session)
-        session.tool('console', {'action': 'exec', 'command': 'coc ' + cell})
-        # Fresh VR startup/alternate-start initialization can relocate the player.
-        # This is an explicit setup action, not a retry after readiness failure.
-        time.sleep(8)
-    session.phase('mobility-enter-cell', 120)
-    vr_probe.guard_fixture_modal(session)
-    session.tool('console', {'action': 'exec', 'command': 'coc ' + cell})
-    return vr_probe.wait_test_cell(session, cell)
-
-
 def execute(session, scenario):
     if session.state.get('inputBackend') != 'driver' or session.state.get('driverBackend') != 'file':
         raise ValueError('Mobility probe requires the physical file adapter')
@@ -77,7 +62,8 @@ def execute(session, scenario):
         session.tool('driver', {'action': 'publish', 'holdSeconds': seconds, 'frame': frame})
 
     fixture = scenario.get('fixture')
-    if fixture:
+    initialized = session.state.get('gameplayBootstrap', {})
+    if fixture and not initialized.get('loadedFixture'):
         session.phase('mobility-load-fixture', 120)
         before = session.tool('inspect', {'kind': 'state'})
         session.tool('game', {'action': 'load', 'name': fixture['saveStem']})
@@ -94,7 +80,10 @@ def execute(session, scenario):
         else:
             raise AssertionError('Mobility fixture did not finish loading')
     try:
-        scene = enter_world(session, scenario['cell'], bool(fixture))
+        if initialized.get('completed') and initialized.get('cell') == scenario['cell']:
+            scene = initialized['scene']
+        else:
+            raise AssertionError('Common gameplay bootstrap must complete before mobility actions')
     except AssertionError as error:
         record('mobility cell ready', False, {'reason': str(error)})
         raise
