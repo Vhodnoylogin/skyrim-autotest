@@ -15,7 +15,8 @@ class HandlerDiagnosticTests(unittest.TestCase):
                 tables[address]+=1
                 value=0x1000 if not foreign else 0x3000000
                 if changing and tables[address]>1:value+=8
-                return struct.pack('<5Q',*[value]*5)
+                self.assertEqual(size,56)
+                return struct.pack('<7Q',*[value]*7)
             self.assertEqual(size,4096)
             return b'\x90'*size
         return read

@@ -31,8 +31,8 @@ def decode_handlers(read, base):
     handlers = {}
     code = {}
     for name, rva in TABLES.items():
-        table = read(base+rva, 40)
-        addresses = struct.unpack('<5Q', table)
+        table = read(base+rva, 56)
+        addresses = struct.unpack('<7Q', table)
         for address in addresses:
             relative = address-base
             if not 0x1000 <= relative <= 0x1600000-4096:
@@ -41,7 +41,7 @@ def decode_handlers(read, base):
                 data = read(address, 4096)
                 code[relative] = {'rva': hex(relative), 'bytesHex': data.hex(),
                                   'sha256': hashlib.sha256(data).hexdigest()}
-        if read(base+rva, 40) != table:
+        if read(base+rva, 56) != table:
             raise ValueError('Handler table changed during diagnostic read')
         handlers[name] = {'tableRva': hex(rva), 'slots': [hex(a-base) for a in addresses]}
     for relative in HELPERS:

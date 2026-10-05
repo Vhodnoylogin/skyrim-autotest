@@ -367,6 +367,7 @@ def execute(session, scenario):
             time.sleep(.12)
             input_observed = observed()
             grabbed_during_press = papyrus('Game', 'GetPlayerGrabbedRef')
+            selected_during_press = session.tool('inspect', {'kind':'world_observer', 'refs':[ref]})
             actual = input_observed.get(binding['role'], {}).get('controller', {})
             received = (input_observed.get(binding['role'], {}).get('valid') is True
                         and type(actual.get('pressed')) is int
@@ -391,6 +392,7 @@ def execute(session, scenario):
                     'settings': settings, 'nativeGrabbedReferenceSamples': grabbed_samples,
                     'requestedTrackpad': trackpad,
                     'nativeGrabbedReferenceDuringPress': grabbed_during_press,
+                    'selectionDuringPress': selected_during_press,
                     'domain': 'inventory acquisition, not HIGGS physical hold'})
         else:
             # Never activate another target or turn a scripted Activate into input proof.
