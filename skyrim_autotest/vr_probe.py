@@ -58,12 +58,13 @@ def wait_test_cell(session, cell):
 
 
 def accept_known_vr_modal(session, modal):
-    """One real VR UI button callback after matching both data and visible UI."""
+    """One physical VR trigger edge after matching the notification and button."""
     from .api_contract import validate_description
+    from . import hardware
     description = session.tool('papyrus', {'action': 'describe', 'script': 'UI'})
     validate_description('UI', description, 'globalFunctions', {
         'GetString': ['string', 'string'], 'GetInt': ['string', 'string'],
-        'GetBool': ['string', 'string'], 'InvokeInt': ['string', 'string', 'int']})
+        'GetBool': ['string', 'string'], 'SetInt': ['string', 'string', 'int']})
 
     def ui(function, path, *values):
         return session.tool('papyrus', {'action': 'call', 'script': 'UI',
@@ -84,10 +85,25 @@ def accept_known_vr_modal(session, modal):
             or observed['buttonText'] != modal['buttons'][0] or observed['buttonName'] != 'Button0'
             or observed['buttonDisabled'] is not False):
         raise AssertionError('Startup modal visible UI does not match classified single-button notification')
-    # VRMessageBox listens to "press"; InitButtons disables handlePress, while
-    # handleMousePress dispatches the registered event. handleClick emits "click".
-    ui('InvokeInt', button + '.handleMousePress', 0)
-    session.log('startup-modal-button-request', action='visible VR button callback', index=0,
+    if session.state.get('inputBackend') != 'driver' or session.state.get('driverBackend') != 'file':
+        raise AssertionError('Known VR startup notification requires physical controller backend')
+    ui('SetInt', button + '.focused', 1)
+    if ui('GetInt', button + '.focused') != 1:
+        raise AssertionError('Known startup button could not receive UI focus')
+    # UI reads/void calls alone do not prove native menu event delivery. Use the
+    # same leased OpenVR input path as the actual controller gameplay tests.
+    frame = hardware.neutral()
+    frame['right']['matrix'][3] = 0
+    try:
+        session.tool('driver', {'action': 'publish', 'holdSeconds': 2, 'frame': frame})
+        time.sleep(.3)
+        frame['right']['controller'].update(pressed=1 << 33, touched=1 << 33,
+                                            axes=[[0, 0], [1, 0], [0, 0], [0, 0], [0, 0]])
+        session.tool('driver', {'action': 'publish', 'holdSeconds': 2, 'frame': frame})
+        time.sleep(.15)
+    finally:
+        session.tool('driver', {'action': 'release'})
+    session.log('startup-modal-button-request', action='physical right Vive trigger edge', index=0,
                 body=modal['bodyText'])
 
 

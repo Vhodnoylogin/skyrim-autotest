@@ -1,24 +1,30 @@
 """Meaningful safety checks for delayed fixture startup menus; no game launch."""
 import unittest
+from unittest.mock import patch
 from skyrim_autotest.vr_probe import guard_fixture_modal
 
 class FakeSession:
     def __init__(self,body,buttons):
+        self.state={'inputBackend':'driver','driverBackend':'file'}
         self.body=body;self.buttons=buttons;self.open=True;self.accepts=[]
     def tool(self,name,args):
+        if name=='driver':
+            if args['action']=='publish' and args['frame']['right']['controller']['pressed']:
+                self.accepts.append(args['frame']['right']['controller']['pressed']);self.open=False
+            return {}
         if name=='papyrus':
             if args['action']=='describe':
                 return {'name':'UI','globalFunctions':[
                     {'name':function,'params':[{'type':t} for t in types]}
                     for function,types in {'GetString':['string','string'],'GetInt':['string','string'],
-                                           'GetBool':['string','string'],'InvokeInt':['string','string','int']}.items()]}
+                                           'GetBool':['string','string'],'SetInt':['string','string','int']}.items()]}
             function=args['function'];path=args['args'][1]
             if function=='GetString':
                 return {'returned': self.body if path.endswith('.Message.text') else
                         'Button0' if path.endswith('._name') else self.buttons[0]}
             if function=='GetInt':return {'returned':len(self.buttons)}
             if function=='GetBool':return {'returned':False}
-            if function=='InvokeInt':self.accepts.append(args);self.open=False;return {'returned':None}
+            if function=='SetInt':return {'returned':None}
         if args['action']=='list':return {'messageBoxOpen':self.open}
         if args['action']=='describe':return {'bodyText':self.body,'buttons':self.buttons}
         raise AssertionError(args)
@@ -27,9 +33,9 @@ class FakeSession:
 class FixtureModalTests(unittest.TestCase):
     def test_late_known_message_is_closed_with_exact_body(self):
         session=FakeSession('Speech Broker на связи: fixture startup',['OK'])
-        self.assertTrue(guard_fixture_modal(session))
-        self.assertEqual(session.accepts,[{'action':'call','script':'UI','function':'InvokeInt',
-                                         'args':['MessageBoxMenu','_root.MessageMenu.Buttons.Button0.handleMousePress',0]}])
+        with patch('skyrim_autotest.vr_probe.time.sleep'):
+            self.assertTrue(guard_fixture_modal(session))
+        self.assertEqual(session.accepts,[1<<33])
         self.assertFalse(guard_fixture_modal(session))
     def test_unknown_or_choice_prompt_is_not_accepted(self):
         for body,buttons in [('Unknown confirmation',['OK']),('Speech Broker на связи',['Yes','No'])]:
