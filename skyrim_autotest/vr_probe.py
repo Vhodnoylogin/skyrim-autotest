@@ -57,6 +57,17 @@ def wait_test_cell(session, cell):
                          ('; last readiness error: ' + last_error if last_error else ''))
 
 
+def log_modal_queue(session, name):
+    """Temporary read-only diagnostic; never an alternate way to answer a menu."""
+    from . import modal_debug
+    try:
+        value = modal_debug.snapshot(session.state['game'])
+    except Exception as error:
+        value = {'available': False, 'reason': str(error), 'diagnosticOnly': True}
+    session.log(name, result=value)
+    return value
+
+
 def accept_known_vr_modal(session, modal):
     """One deferred native menu answer after matching the notification and button."""
     from .api_contract import validate_description
@@ -90,6 +101,7 @@ def accept_known_vr_modal(session, modal):
         raise AssertionError('Startup modal changed before deferred answer; input not sent')
     # DevBench1.25 documents index:0 as SKSE AddTask, distinct from synchronous
     # matchBody. ACK is retained only as a request; the caller verifies closure.
+    log_modal_queue(session, 'startup-modal-native-queue-before')
     response = session.tool('menu', {'action': 'accept', 'index': 0})
     session.log('startup-modal-button-request', action='deferred native menu answer', index=0,
                 body=modal['bodyText'], response=response, acceptedAsClosureProof=False)
@@ -111,10 +123,12 @@ def guard_fixture_modal(session):
     end = time.monotonic() + 3
     while time.monotonic() < end:
         if not session.tool('menu', {'action': 'list'}).get('messageBoxOpen'):
+            log_modal_queue(session, 'startup-modal-native-queue-after')
             session.log('fixture-modal-cleared', body=modal['bodyText'])
             return True
         time.sleep(.1)
     following = session.tool('menu', {'action': 'describe'})
+    log_modal_queue(session, 'startup-modal-native-queue-after')
     session.log('startup-modal-button-not-resolved', before=modal, after=following)
     raise AssertionError('Recognized fixture modal did not close: ' + json.dumps(following))
 
