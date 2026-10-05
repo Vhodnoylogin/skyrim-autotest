@@ -18,6 +18,7 @@ MOBILITY = {
         'GetPositionX': [], 'GetPositionY': [], 'GetPositionZ': [], 'GetAngleZ': [],
         'GetItemCount': ['form'], 'PlaceAtMe': ['form', 'int', 'bool', 'bool'],
         'SetPosition': ['float', 'float', 'float'],
+        'Is3DLoaded': [], 'SetMotionType': ['int', 'bool'],
     }),
     'Game': ('globalFunctions', {
         'EnablePlayerControls': ['bool'] * 8 + ['int'],

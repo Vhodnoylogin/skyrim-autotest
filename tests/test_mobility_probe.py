@@ -5,6 +5,38 @@ from skyrim_autotest import bootstrap, mobility_probe, scenarios
 
 
 class MobilityProbeTests(unittest.TestCase):
+    def vr_sample(self, sample=1):
+        return {'ok':True,'sessionId':'owned-world','loadGeneration':1,'sampleId':sample,
+                'vrPicking':{'status':'available','phase':'skse_main_thread_task',
+                    'units':'skyrim_engine_units','space':'world',
+                    'nodes':{'rightWand':{'status':'available','world':{
+                        'translation':[14.7,10,84],'rotationRowMajor':[1,0,0,0,1,0,0,0,1]}}},
+                    'devices':{'right':{'targetStatus':'available',
+                        'target':{'form':'0xFF000801','loadGeneration':1}}}}}
+
+    def test_fixture_uses_measured_world_pose_and_requires_exact_fresh_right_target(self):
+        before,after=self.vr_sample(),self.vr_sample(2)
+        self.assertEqual(mobility_probe.right_wand_fixture_position(before),[14.7,60,84])
+        self.assertTrue(mobility_probe.exact_right_pick(before,after,'0xff000801'))
+        self.assertFalse(mobility_probe.exact_right_pick(before,after,'0xff000802'))
+        self.assertFalse(mobility_probe.exact_right_pick(before,before,'0xff000801'))
+        after['sessionId']='later-game'
+        self.assertFalse(mobility_probe.exact_right_pick(before,after,'0xff000801'))
+        after['sessionId']='owned-world';after['loadGeneration']=2
+        self.assertFalse(mobility_probe.exact_right_pick(before,after,'0xff000801'))
+
+    def test_unsafe_pose_or_missing_device_target_cannot_authorize_input(self):
+        for field,value in [('units','openvr_metres'),('space','local'),('status','unavailable')]:
+            before,after=self.vr_sample(),self.vr_sample(2)
+            after['vrPicking'][field]=value
+            self.assertFalse(mobility_probe.exact_right_pick(before,after,'0xff000801'))
+            with self.assertRaises(AssertionError):mobility_probe.right_wand_fixture_position(after)
+        sample=self.vr_sample();sample['vrPicking']['nodes']['rightWand']['world']['translation'][0]=float('nan')
+        with self.assertRaises(AssertionError):mobility_probe.right_wand_fixture_position(sample)
+        before,after=self.vr_sample(),self.vr_sample(2)
+        after['vrPicking']['devices']['right']={'targetStatus':'none','target':None}
+        self.assertFalse(mobility_probe.exact_right_pick(before,after,'0xff000801'))
+
     def test_fixture_position_uses_supported_atomic_native_signature(self):
         def native(script,function,args,target):
             self.assertEqual((script,function),('ObjectReference','SetPosition'))

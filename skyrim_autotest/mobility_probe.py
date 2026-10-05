@@ -43,6 +43,52 @@ def place_owned_fixture(papyrus, ref, xyz):
     return papyrus('ObjectReference', 'SetPosition', list(xyz), target=ref)
 
 
+def vr_pick_envelope(snapshot):
+    """Only current world samples may authorize a physical activation target."""
+    picking = snapshot.get('vrPicking', {})
+    if (snapshot.get('ok') is not True or not snapshot.get('sessionId')
+            or type(snapshot.get('loadGeneration')) is not int or snapshot['loadGeneration'] < 1
+            or type(snapshot.get('sampleId')) is not int
+            or picking.get('status') != 'available'
+            or picking.get('phase') != 'skse_main_thread_task'
+            or picking.get('units') != 'skyrim_engine_units' or picking.get('space') != 'world'):
+        raise AssertionError('Current world VR picking sample unavailable')
+    return picking
+
+
+def right_wand_fixture_position(snapshot, distance=50):
+    picking = vr_pick_envelope(snapshot)
+    node = picking.get('nodes', {}).get('rightWand', {})
+    transform = node.get('world', {})
+    origin, rotation = transform.get('translation'), transform.get('rotationRowMajor')
+    if (node.get('status') != 'available' or not isinstance(origin, list) or len(origin) != 3
+            or not isinstance(rotation, list) or len(rotation) != 9
+            or any(type(v) not in (int, float) or not math.isfinite(v) for v in origin + rotation)):
+        raise AssertionError('Actual right wand world transform unavailable')
+    # Skyrim local +Y forward is a placement candidate, never proof of a target.
+    direction = [rotation[1], rotation[4], rotation[7]]
+    length = math.sqrt(sum(v*v for v in direction))
+    if not .9 <= length <= 1.1:
+        raise AssertionError('Right wand forward basis is not a unit direction')
+    return [origin[i] + distance * direction[i] / length for i in range(3)]
+
+
+def exact_right_pick(before, after, ref):
+    try:
+        vr_pick_envelope(before)
+        picking = vr_pick_envelope(after)
+        identity = picking.get('devices', {}).get('right', {})
+        target = identity.get('target') or {}
+        return (before['sessionId'] == after['sessionId']
+                and before['loadGeneration'] == after['loadGeneration']
+                and after['sampleId'] > before['sampleId']
+                and identity.get('targetStatus') == 'available'
+                and target.get('loadGeneration') == after['loadGeneration']
+                and int(target.get('form', '0'), 16) == int(ref, 16))
+    except (AssertionError, TypeError, ValueError):
+        return False
+
+
 def execute(session, scenario):
     if session.state.get('inputBackend') != 'driver' or session.state.get('driverBackend') != 'file':
         raise ValueError('Mobility probe requires the physical file adapter')
@@ -204,17 +250,26 @@ def execute(session, scenario):
     ref = placed.get('formId') if isinstance(placed, dict) else None
     if not isinstance(ref, str):
         raise AssertionError('Vanilla pickup fixture returned no exact reference')
-    origin = position()
-    heading = math.radians(papyrus('ObjectReference', 'GetAngleZ', target='0x14'))
-    # One declared fixture placement in front of the neutral right-hand ray.
-    target = [origin[0] + 21 * math.cos(heading) + 38 * math.sin(heading),
-              origin[1] - 21 * math.sin(heading) + 38 * math.cos(heading), origin[2] + 84]
-    place_owned_fixture(papyrus, ref, target)
     publish(frame)
     try:
+        end = time.monotonic() + 10
+        while not papyrus('ObjectReference', 'Is3DLoaded', target=ref):
+            if time.monotonic() >= end:
+                raise AssertionError('Vanilla pickup fixture 3D did not load')
+            time.sleep(.1)
+        # Actual installed ObjectReference.psc: Motion_Keyframed=4. This keeps
+        # the inventory fixture from falling; dynamic HIGGS uses a separate object.
+        papyrus('ObjectReference', 'SetMotionType', [4, True], target=ref)
+        time.sleep(.3)
+        aim = session.tool('inspect', {'kind': 'world_observer', 'refs': ['0x14']})
+        target = right_wand_fixture_position(aim)
+        place_owned_fixture(papyrus, ref, target)
         time.sleep(.5)
+        selected = session.tool('inspect', {'kind': 'world_observer', 'refs': [ref]})
         crosshair = papyrus('Game', 'GetCurrentCrosshairRef')
-        exact = isinstance(crosshair, dict) and str(crosshair.get('formId', '')).casefold() == ref.casefold()
+        session.log('vanilla-pickup-aim', reference=ref, position=target, before=aim,
+                    selected=selected, cachedPapyrusCrosshair=crosshair, fixtureMotionType=4)
+        exact = exact_right_pick(aim, selected, ref)
         if exact:
             activate = copy.deepcopy(frame)
             activate['right']['controller'].update(pressed=1 << 33, touched=1 << 33,
@@ -225,7 +280,7 @@ def execute(session, scenario):
             time.sleep(.5)
             current = papyrus('ObjectReference', 'GetItemCount', [base], target='0x14')
             record('vanilla physical inventory pickup', current > item_count,
-                   {'reference': ref, 'crosshair': crosshair, 'beforeCount': item_count,
+                   {'reference': ref, 'crosshair': crosshair, 'selected': selected, 'beforeCount': item_count,
                     'afterCount': current, 'input': 'one right Vive trigger press/release',
                     'domain': 'inventory acquisition, not HIGGS physical hold'})
         else:
@@ -233,6 +288,7 @@ def execute(session, scenario):
             session.state['checks'].append({'name': 'vanilla physical inventory pickup',
                                             'result': 'unavailable', 'observation': {
                                                 'reference': ref, 'crosshair': crosshair,
+                                                'selected': selected, 'placementSample': aim, 'position': target,
                                                 'reason': 'Exact fixture not selected by the vanilla activation ray; input not sent'}})
             session.save()
     finally:
