@@ -5,29 +5,24 @@ from skyrim_autotest.vr_probe import guard_fixture_modal
 
 class FakeSession:
     def __init__(self,body,buttons):
-        self.state={'inputBackend':'driver','driverBackend':'file'}
         self.body=body;self.buttons=buttons;self.open=True;self.accepts=[]
     def tool(self,name,args):
-        if name=='driver':
-            if args['action']=='publish' and args['frame']['right']['controller']['pressed']:
-                self.accepts.append(args['frame']['right']['controller']['pressed']);self.open=False
-            return {}
-        if name=='input':return {'frame': {}}
         if name=='papyrus':
             if args['action']=='describe':
                 return {'name':'UI','globalFunctions':[
                     {'name':function,'params':[{'type':t} for t in types]}
                     for function,types in {'GetString':['string','string'],'GetInt':['string','string'],
-                                           'GetBool':['string','string'],'SetInt':['string','string','int']}.items()]}
+                                           'GetBool':['string','string']}.items()]}
             function=args['function'];path=args['args'][1]
             if function=='GetString':
                 return {'returned': self.body if path.endswith('.Message.text') else
                         'Button0' if path.endswith('._name') else self.buttons[0]}
             if function=='GetInt':return {'returned':len(self.buttons)}
             if function=='GetBool':return {'returned':False}
-            if function=='SetInt':return {'returned':None}
         if args['action']=='list':return {'messageBoxOpen':self.open}
         if args['action']=='describe':return {'bodyText':self.body,'buttons':self.buttons}
+        if args['action']=='accept':
+            self.accepts.append(args);self.open=False;return {'queued':True}
         raise AssertionError(args)
     def log(self,*args,**kwargs):pass
 
@@ -36,7 +31,7 @@ class FixtureModalTests(unittest.TestCase):
         session=FakeSession('Speech Broker на связи: fixture startup',['OK'])
         with patch('skyrim_autotest.vr_probe.time.sleep'), patch('skyrim_autotest.vr_probe.ensure_owned_focus'):
             self.assertTrue(guard_fixture_modal(session))
-        self.assertEqual(session.accepts,[4])
+        self.assertEqual(session.accepts,[{'action':'accept','index':0}])
         self.assertFalse(guard_fixture_modal(session))
     def test_unknown_or_choice_prompt_is_not_accepted(self):
         for body,buttons in [('Unknown confirmation',['OK']),('Speech Broker на связи',['Yes','No'])]:
@@ -54,5 +49,19 @@ class FixtureModalTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError,'does not match'):
             guard_fixture_modal(session)
         self.assertEqual(session.accepts,[])
+    def test_queued_ack_is_not_closure_and_answer_is_not_replayed(self):
+        class StillOpen(FakeSession):
+            def tool(self,name,args):
+                if name=='menu' and args['action']=='accept':
+                    self.accepts.append(args);return {'queued':True}
+                return super().tool(name,args)
+        session=StillOpen('Speech Broker на связи',['OK'])
+        with patch('skyrim_autotest.vr_probe.ensure_owned_focus'), \
+                patch('skyrim_autotest.vr_probe.time.monotonic',side_effect=[0,0,4]), \
+                patch('skyrim_autotest.vr_probe.time.sleep'):
+            with self.assertRaisesRegex(AssertionError,'did not close'):
+                guard_fixture_modal(session)
+        self.assertEqual(session.accepts,[{'action':'accept','index':0}])
+        self.assertTrue(session.open)
 
 if __name__=='__main__':unittest.main()

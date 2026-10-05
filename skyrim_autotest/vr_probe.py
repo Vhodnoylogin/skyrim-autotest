@@ -58,13 +58,12 @@ def wait_test_cell(session, cell):
 
 
 def accept_known_vr_modal(session, modal):
-    """One physical VR grip edge after matching the notification and button."""
+    """One deferred native menu answer after matching the notification and button."""
     from .api_contract import validate_description
-    from . import hardware
     description = session.tool('papyrus', {'action': 'describe', 'script': 'UI'})
     validate_description('UI', description, 'globalFunctions', {
         'GetString': ['string', 'string'], 'GetInt': ['string', 'string'],
-        'GetBool': ['string', 'string'], 'SetInt': ['string', 'string', 'int']})
+        'GetBool': ['string', 'string']})
 
     def ui(function, path, *values):
         return session.tool('papyrus', {'action': 'call', 'script': 'UI',
@@ -85,28 +84,15 @@ def accept_known_vr_modal(session, modal):
             or observed['buttonText'] != modal['buttons'][0] or observed['buttonName'] != 'Button0'
             or observed['buttonDisabled'] is not False):
         raise AssertionError('Startup modal visible UI does not match classified single-button notification')
-    if session.state.get('inputBackend') != 'driver' or session.state.get('driverBackend') != 'file':
-        raise AssertionError('Known VR startup notification requires physical controller backend')
     ensure_owned_focus(session, {}, 'startup-modal-owned-focus')
-    ui('SetInt', button + '.focused', 1)
-    if ui('GetInt', button + '.focused') != 1:
-        raise AssertionError('Known startup button could not receive UI focus')
-    # UI reads/void calls alone do not prove native menu event delivery. Use the
-    # same leased OpenVR input path as the actual controller gameplay tests.
-    frame = hardware.neutral()
-    frame['right']['matrix'][3] = 0
-    try:
-        session.tool('driver', {'action': 'publish', 'holdSeconds': 2, 'frame': frame})
-        time.sleep(.3)
-        frame['right']['controller'].update(pressed=4, touched=4)
-        session.tool('driver', {'action': 'publish', 'holdSeconds': 2, 'frame': frame})
-        time.sleep(.2)
-        session.log('startup-modal-controller-observed',
-                    result=session.tool('input', {'device': 'vrTrackedSet', 'action': 'observe'}))
-    finally:
-        session.tool('driver', {'action': 'release'})
-    session.log('startup-modal-button-request', action='physical right Vive grip edge', index=0,
-                body=modal['bodyText'])
+    current = session.tool('menu', {'action': 'describe'})
+    if current.get('bodyText') != modal['bodyText'] or current.get('buttons') != modal['buttons']:
+        raise AssertionError('Startup modal changed before deferred answer; input not sent')
+    # DevBench1.25 documents index:0 as SKSE AddTask, distinct from synchronous
+    # matchBody. ACK is retained only as a request; the caller verifies closure.
+    response = session.tool('menu', {'action': 'accept', 'index': 0})
+    session.log('startup-modal-button-request', action='deferred native menu answer', index=0,
+                body=modal['bodyText'], response=response, acceptedAsClosureProof=False)
 
 
 def guard_fixture_modal(session):
