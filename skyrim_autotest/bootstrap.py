@@ -260,7 +260,23 @@ def complete_character_creation(session):
     ui('SetString', entry + '.TextInputInstance.text', 'Autotest')
     if ui('GetString', entry + '.TextInputInstance.text') != 'Autotest':
         raise AssertionError('Character name write not confirmed; no accept sent')
-    ui('InvokeInt', entry + '.onAccept', 0)
+    if core:
+        ui('InvokeInt', entry + '.onAccept', 0)
+    else:
+        # Stock VR's NameEntry sprite has no onAccept implementation. Its
+        # headset keyboard delivers the registered ChangeName delegate instead.
+        # SKSE InvokeStringA passes positional values; the delegate's opaque
+        # response id is followed by the one verified name argument.
+        validate_description('UI', session.tool('papyrus', {'action': 'describe', 'script': 'UI'}),
+                             'globalFunctions', {'InvokeStringA': ['string', 'string', 'string[]']})
+        if menu not in session.tool('menu', {'action': 'list'}).get('openMenus', []) or \
+                ui('GetInt', root + '.Mode') != 0 or \
+                ui('GetString', entry + '.TextInputInstance.text') != 'Autotest':
+            raise AssertionError('Stock name entry changed before its native delegate')
+        ui('InvokeStringA', '_global.flash.external.ExternalInterface.call',
+           ['ChangeName', 'autotest-name', 'Autotest'])
+        session.log('character-stock-name-delegate', name='Autotest',
+                    readinessProof=False, reason='Stock VR native keyboard name handler')
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         menus = session.tool('menu', {'action': 'list'})
