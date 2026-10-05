@@ -12,6 +12,9 @@ import struct
 from .modal_debug import ENGINE_SHA
 
 TABLES = {'TeleportHandler': 0x16F20B0, 'ActivateHandler': 0x16F22E8}
+# Fixed callees observed in the exact engine's captured ActivateHandler. These
+# bounded reads explain routing/zones; they never call or modify engine code.
+HELPERS = (0xC4C340, 0xC5A380, 0xC5A650, 0x6CBCE0)
 
 
 def collect(session):
@@ -41,6 +44,10 @@ def decode_handlers(read, base):
         if read(base+rva, 40) != table:
             raise ValueError('Handler table changed during diagnostic read')
         handlers[name] = {'tableRva': hex(rva), 'slots': [hex(a-base) for a in addresses]}
+    for relative in HELPERS:
+        data = read(base+relative, 4096)
+        code[relative] = {'rva': hex(relative), 'bytesHex': data.hex(),
+                          'sha256': hashlib.sha256(data).hexdigest()}
     return {'handlers': handlers, 'code': list(code.values()),
             'available': True, 'diagnosticOnly': True,
             'domain': 'owned engine code snapshot; no handler invocation or consumption proof'}

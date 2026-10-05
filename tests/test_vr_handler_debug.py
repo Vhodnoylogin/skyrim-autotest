@@ -23,7 +23,9 @@ class HandlerDiagnosticTests(unittest.TestCase):
     def test_deduplicates_bounded_code_and_never_invokes_it(self):
         result=vr_handler_debug.decode_handlers(self.reader(),0)
         self.assertTrue(result['diagnosticOnly'])
-        self.assertEqual(len(result['code']),1)
+        self.assertEqual(len(result['code']),1+len(vr_handler_debug.HELPERS))
+        self.assertEqual({int(c['rva'],16) for c in result['code']},
+                         {0x1000, *vr_handler_debug.HELPERS})
         self.assertEqual(len(result['code'][0]['bytesHex']),8192)
 
     def test_foreign_pointer_or_changed_table_is_rejected(self):
