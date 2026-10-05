@@ -5,6 +5,40 @@ from skyrim_autotest import bootstrap, mobility_probe, scenarios
 
 
 class MobilityProbeTests(unittest.TestCase):
+    def test_activation_fixture_is_explicit_and_restores_actual_runtime_setting(self):
+        state=False;calls=[]
+        def papyrus(script,function,args):
+            nonlocal state
+            calls.append((script,function,args))
+            if function=='SetINIBool':state=args[1]
+            else:return state
+        fixture=mobility_probe.ActivationHandFixture(papyrus,lambda *a,**k:None)
+        settings={fixture.name:False};binding={'role':'left','primaryRole':'right'}
+        self.assertFalse(fixture.apply(binding,settings,False))
+        self.assertEqual(calls,[])
+        self.assertTrue(fixture.apply(binding,settings,True))
+        self.assertTrue(state)
+        fixture.restore()
+        self.assertFalse(state)
+        self.assertEqual([c[2][1] for c in calls if c[1]=='SetINIBool'],[True,False])
+
+    def test_partial_runtime_fixture_application_retains_restore_obligation(self):
+        calls=[]
+        def papyrus(script,function,args):
+            calls.append((function,args))
+            return False
+        fixture=mobility_probe.ActivationHandFixture(papyrus,lambda *a,**k:None)
+        with self.assertRaisesRegex(AssertionError,'did not apply'):
+            fixture.apply({'role':'left','primaryRole':'right'},{fixture.name:False},True)
+        fixture.restore()
+        self.assertEqual([a[1] for f,a in calls if f=='SetINIBool'],[True,False])
+
+    def test_runtime_fixture_restore_failure_cannot_be_reported_successful(self):
+        fixture=mobility_probe.ActivationHandFixture(lambda *a:True,lambda *a,**k:None)
+        fixture.original=False
+        with self.assertRaisesRegex(AssertionError,'restoration not verified'):
+            fixture.restore()
+
     def vr_sample(self, sample=1):
         return {'ok':True,'sessionId':'owned-world','loadGeneration':1,'sampleId':sample,
                 'vrPicking':{'status':'available','phase':'skse_main_thread_task',

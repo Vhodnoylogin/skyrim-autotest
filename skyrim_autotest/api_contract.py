@@ -28,6 +28,7 @@ MOBILITY = {
     }),
     'Utility': ('globalFunctions', {
         'GetINIBool': ['string'], 'GetINIFloat': ['string'],
+        'SetINIBool': ['string', 'bool'],
     }),
 }
 HAND = {

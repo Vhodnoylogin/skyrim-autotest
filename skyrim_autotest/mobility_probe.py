@@ -149,6 +149,38 @@ def activation_trackpad(binding, settings):
     return [0, (lower+upper)/2]
 
 
+class ActivationHandFixture:
+    """Explicit self-test runtime setting; retain restoration even on apply error."""
+    name = 'bActivateWithBothWands:VRInput'
+
+    def __init__(self, papyrus, log):
+        self.papyrus, self.log, self.original = papyrus, log, None
+
+    def apply(self, binding, settings, enabled):
+        if not enabled or binding['role']==binding['primaryRole'] or settings[self.name] is not False:
+            return False
+        self.original = False
+        self.papyrus('Utility', 'SetINIBool', [self.name, True])
+        settings[self.name] = self.papyrus('Utility', 'GetINIBool', [self.name])
+        if settings[self.name] is not True:
+            raise AssertionError('Explicit runtime activation-hand fixture did not apply')
+        self.log('vanilla-pickup-runtime-setting-fixture', name=self.name,
+                 before=False, during=True, persisted=False,
+                 authority='explicit self-test scenario activationHandFixture')
+        return True
+
+    def restore(self):
+        if self.original is None:
+            return
+        self.papyrus('Utility', 'SetINIBool', [self.name, self.original])
+        restored = self.papyrus('Utility', 'GetINIBool', [self.name])
+        self.log('vanilla-pickup-runtime-setting-restored', name=self.name,
+                 restored=restored, expected=self.original, persisted=False)
+        if restored is not self.original:
+            raise AssertionError('Runtime activation-hand fixture restoration not verified')
+        self.original = None
+
+
 def execute(session, scenario):
     if session.state.get('inputBackend') != 'driver' or session.state.get('driverBackend') != 'file':
         raise ValueError('Mobility probe requires the physical file adapter')
@@ -312,6 +344,7 @@ def execute(session, scenario):
         raise AssertionError('Vanilla pickup fixture returned no exact reference')
     publish(frame)
     recorder_started = False
+    activation_fixture = ActivationHandFixture(papyrus, session.log)
     try:
         end = time.monotonic() + 10
         while not papyrus('ObjectReference', 'Is3DLoaded', target=ref):
@@ -326,7 +359,6 @@ def execute(session, scenario):
         binding = vive_activation(aim)
         # Stock picking follows the dominant aim; the combined activation button
         # may live on the secondary controller. Input and selection are separate.
-        aim_name = 'primaryAim'
         settings = {name: papyrus('Utility', 'GetINIBool', [name]) for name in (
             'bActivateWithBothWands:VRInput', 'bDirectMovementWithWands:VRInput',
             'bLeftHandedMode:VRInput', 'bEnableTouchpadQuickTeleport:VRInput',
@@ -334,6 +366,11 @@ def execute(session, scenario):
         settings.update({name: papyrus('Utility', 'GetINIFloat', [name]) for name in (
             'fThumbstickTeleportActivateZone:VRInput', 'fThumbstickTeleportDeadzone:VRInput',
             'fDeadzonePercent:VRInput')})
+        fixture_name = 'bActivateWithBothWands:VRInput'
+        if activation_fixture.apply(binding, settings, scenario.get('activationHandFixture', False)):
+            aim = session.tool('inspect', {'kind':'world_observer', 'refs':['0x14']})
+        selection_role = binding['role'] if settings[fixture_name] is True else binding['primaryRole']
+        aim_name = 'primaryAim' if selection_role == binding['primaryRole'] else 'secondaryAim'
         session.log('vanilla-pickup-live-settings', settings=settings,
                     domain='read-only live Utility INI API; no player-setting mutation')
         target = aim_fixture_position(aim, aim_name)
@@ -343,9 +380,9 @@ def execute(session, scenario):
         crosshair = papyrus('Game', 'GetCurrentCrosshairRef')
         session.log('vanilla-pickup-aim', reference=ref, position=target, before=aim,
                     selected=selected, cachedPapyrusCrosshair=crosshair, fixtureMotionType=4,
-                    placementBasis='actual primaryAim local +Y; exact dominant-hand target required',
+                    placementBasis='actual '+aim_name+' local +Y; exact active-hand target required',
                     binding=binding, settings=settings)
-        exact = exact_device_pick(aim, selected, ref, binding['primaryRole'])
+        exact = exact_device_pick(aim, selected, ref, selection_role)
         if exact:
             fresh_binding = vive_activation(selected)
             if fresh_binding != binding:
@@ -409,9 +446,12 @@ def execute(session, scenario):
                                                 'reason': 'Exact fixture not selected by the actual dominant-hand activation ray; input not sent'}})
             session.save()
     finally:
-        session.tool('driver', {'action': 'release'})
-        if recorder_started:
-            input_activity.finish(session)
+        try:
+            session.tool('driver', {'action': 'release'})
+            if recorder_started:
+                input_activity.finish(session)
+        finally:
+            activation_fixture.restore()
 
     # HIGGS physical holding is unavailable in a pure Realm profile. It must not be
     # replaced with ObjectReference.Activate/MoveTo or counted as a passing grab.

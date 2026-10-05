@@ -14,7 +14,7 @@ from .modal_debug import ENGINE_SHA
 TABLES = {'TeleportHandler': 0x16F20B0, 'ActivateHandler': 0x16F22E8}
 # Fixed callees observed in the exact engine's captured ActivateHandler. These
 # bounded reads explain routing/zones; they never call or modify engine code.
-HELPERS = (0xC4C340, 0xC5A380, 0xC5A650, 0x6CBCE0)
+HELPERS = (0xC4C340, 0xC5A380, 0xC5A650, 0x6CBCE0, 0x6A8E40)
 
 
 def collect(session):

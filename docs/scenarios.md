@@ -24,18 +24,27 @@ For a mobility probe, `controllerJumpRequired:false` keeps the physical jump
 candidate's measured failed/passed result but does not terminate the scenario
 for that optional diagnostic. Do not declare it among required order checks in
 that mode; keyboard jump and physical controller jump remain separate evidence.
-The inventory probe selects its exact owned fixture through the measured dominant
-aim. The loaded activation button can belong to the secondary hand; selection
-and input identities are recorded separately. Live interaction INI settings and
-native grabbed-reference samples are observations only, never setting changes
-or substitutes for the required increase in inventory. `recordPickupInput:true`
+The inventory probe selects its exact owned fixture through the actual enabled
+activation-hand aim. The loaded button can belong to the secondary hand while
+`bActivateWithBothWands` forbids that hand; this incompatible configuration must
+not be counted as functioning interaction. Selection and input identities are
+recorded separately. `activationHandFixture:true` explicitly permits our self-test
+to enable that one runtime setting for pickup, observe it, target the actual
+secondary aim, and restore/verify its original value even after a partial apply
+error. It defaults off, does not save INI files and is not a mod-order startup
+transition. Record this fixture scope in the order and verdict; it does not prove
+the unchanged original mapping/configuration supports secondary activation.
+Live settings and native grabbed references never substitute for the required
+increase in inventory. `recordPickupInput:true`
 adds an owned raw DevBench event recording with transfer and ownership checks.
 `recordPickupHandlers:true` is a diagnostic for the hash-qualified VR1.4.15
-engine only: it reads fixed input-handler tables and at most40KiB of their code
+engine only: it reads fixed input-handler tables and at most80KiB of their code
 from the unchanged owned process into external run evidence. No callbacks,
 hooks or memory writes occur. Analyze the retained data offline; code presence
-is not proof that a handler consumed the input. Native grabbing is sampled both
-during the press and after release.
+is not proof that a handler consumed the input. Exact-vtable-guarded runtime flags,
+target handles and physical routing code are sampled before/held/released. These
+raw memory samples are not atomic world evidence. Native grabbing is sampled
+both during the press and after release.
 
 A generic scenario contains `name` and nonempty `steps`. Each step needs `name`,
 `tool`, `args` (object), a finite `timeout` in (0,180] seconds (default20), and
@@ -150,7 +159,7 @@ continue, then the run fails with the complete mismatch list. Tool errors are
 terminal. No scripted player movement or jump substitutes for observed input.
 
 Optional `observer:true` records the current player. A single owned firewood
-reference is placed in the neutral hand-ray fixture; one physical trigger press
+reference is placed in the measured hand-ray fixture; one loaded mapped physical press
 is sent only if the actual crosshair selects that exact reference. Inventory
 pickup is distinct from HIGGS holding. If the ray is unavailable/misses, pickup
 is explicitly unavailable, with no activation sent to an unknown object.
