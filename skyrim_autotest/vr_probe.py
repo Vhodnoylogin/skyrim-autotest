@@ -101,9 +101,11 @@ def accept_known_vr_modal(session, modal, answered_ids):
                 and observed['buttonDisabled'] is False):
             break
         if time.monotonic() >= end:
-            raise AssertionError('Startup modal visible UI does not match classified single-button notification')
+            break
         time.sleep(.1)
-    ensure_owned_focus(session, {}, 'startup-modal-owned-focus')
+    coherent = (lines(observed['bodyText']) == lines(modal['bodyText'])
+                and observed['buttonCount'] == 1 and observed['buttonText'] == modal['buttons'][0]
+                and observed['buttonName'] == 'Button0' and observed['buttonDisabled'] is False)
     current = session.tool('menu', {'action': 'describe'})
     if current.get('bodyText') != modal['bodyText'] or current.get('buttons') != modal['buttons']:
         raise AssertionError('Startup modal changed before deferred answer; input not sent')
@@ -116,6 +118,27 @@ def accept_known_vr_modal(session, modal, answered_ids):
             raise AssertionError('Startup notification identity missing or already answered; no replay')
         if queued[-1]['bodyText'] != modal['bodyText'] or queued[-1]['buttons'] != modal['buttons']:
             raise AssertionError('Native notification identity does not match described modal')
+    if not coherent:
+        previous = getattr(session, 'state', {}).get('lastClosedStartupModal', {})
+        stale_known_view = (lines(previous.get('bodyText')) == lines(observed['bodyText'])
+                           and previous.get('buttons') == [observed['buttonText']]
+                           and observed['buttonCount'] == 1 and observed['buttonName'] == 'Button0'
+                           and observed['buttonDisabled'] is False)
+        if not stale_known_view or not before.get('available') or before.get('depth') != 1:
+            raise AssertionError('Startup modal visible UI does not match classified single-button notification')
+        # This operation answers native queue data, not the displayed movieclip.
+        # Permit only a proved closed prior view and one exact current native box.
+        session.log('startup-modal-stale-closed-view', previous=previous, displayed=observed,
+                    native=before, answerTarget='single current native queue entry',
+                    rendererQualified=False)
+        fresh = session.tool('menu', {'action': 'describe'})
+        again = log_modal_queue(session, 'startup-modal-native-target-recheck')
+        if fresh.get('bodyText') != modal['bodyText'] or fresh.get('buttons') != modal['buttons'] or again != before:
+            raise AssertionError('Native notification target changed before answer; no input sent')
+    ensure_owned_focus(session, {}, 'startup-modal-owned-focus')
+    current = session.tool('menu', {'action': 'describe'})
+    if current.get('bodyText') != modal['bodyText'] or current.get('buttons') != modal['buttons']:
+        raise AssertionError('Startup modal changed after focus; no answer sent')
     response = session.tool('menu', {'action': 'accept', 'index': 0})
     session.log('startup-modal-button-request', action='deferred native menu answer', index=0,
                 body=modal['bodyText'], response=response, acceptedAsClosureProof=False)
@@ -166,6 +189,9 @@ def guard_fixture_modal(session):
             if not session.tool('menu', {'action': 'list'}).get('messageBoxOpen'):
                 log_modal_queue(session, 'startup-modal-native-queue-after')
                 session.log('fixture-modal-cleared', body=modal['bodyText'])
+                if hasattr(session, 'state'):
+                    session.state['lastClosedStartupModal'] = {'bodyText': modal['bodyText'],
+                                                               'buttons': modal['buttons']}
                 if classification == 'realm-new-game-begin':
                     session.state['realmStartupAcknowledged'] = True
                 return True

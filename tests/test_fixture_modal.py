@@ -6,6 +6,7 @@ from skyrim_autotest.vr_probe import guard_fixture_modal
 class FakeSession:
     def __init__(self,body,buttons):
         self.body=body;self.buttons=buttons;self.open=True;self.accepts=[]
+        self.state={}
     def tool(self,name,args):
         if name=='papyrus':
             if args['action']=='describe':
@@ -27,6 +28,20 @@ class FakeSession:
     def log(self,*args,**kwargs):pass
 
 class FixtureModalTests(unittest.TestCase):
+    def test_native_answer_may_target_one_exact_box_behind_proved_closed_stale_view(self):
+        class Stale(FakeSession):
+            def tool(self,name,args):
+                if name=='papyrus' and args.get('function')=='GetString' and args['args'][1].endswith('.Message.text'):
+                    return {'returned':'Speech Broker на связи: old closed box'}
+                return super().tool(name,args)
+        session=Stale('Speech Broker на связи: new native box',['OK'])
+        session.state['lastClosedStartupModal']={'bodyText':'Speech Broker на связи: old closed box','buttons':['OK']}
+        before=self.queue(['A'],session.body)
+        with patch('skyrim_autotest.vr_probe.ensure_owned_focus'), \
+             patch('skyrim_autotest.vr_probe.log_modal_queue',return_value=before), \
+             patch('skyrim_autotest.vr_probe.time.monotonic',side_effect=[0,4,5,5.1]):
+            self.assertTrue(guard_fixture_modal(session))
+        self.assertEqual(len(session.accepts),1)
     def test_delayed_visible_text_is_read_only_until_matching_native_identity(self):
         class Delayed(FakeSession):
             reads=0
