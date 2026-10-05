@@ -27,6 +27,50 @@ def collect(session):
                 diagnosticOnly=True, acceptedAsInputProof=False)
 
 
+def collect_runtime(session, phase):
+    from .runner import atomic_json
+    if phase not in ('held', 'released'):
+        raise ValueError('Unknown fixed handler sampling phase')
+    value = snapshot(session.state['game'], include_code=False)
+    evidence = session.dir / 'evidence' / ('pickup-handler-'+phase+'.json')
+    atomic_json(evidence, value)
+    session.log('vanilla-pickup-runtime-handler-diagnostic', phase=phase,
+                path=str(evidence), diagnosticOnly=True, acceptedAsInputProof=False)
+
+
+def decode_runtime(read, base):
+    def pointer(address):
+        value=struct.unpack('<Q',read(address,8))[0]
+        if not 0x10000 <= value < 0x800000000000:
+            raise ValueError('Invalid owned engine runtime pointer')
+        return value
+    # Actual SKSEVR2.0.12 GameInput.cpp and GameInput.h: PlayerControls singleton,
+    # inputHandlers[kInputHandler_Activate] at0x1A0. Exact vtable is mandatory.
+    controls=pointer(base+0x2F8AAA8)
+    handler=pointer(controls+0x1A0)
+    if pointer(handler) != base+TABLES['ActivateHandler']:
+        raise ValueError('ActivateHandler runtime table is not the qualified engine table')
+    state=read(handler,0x70)
+    player=pointer(base+0x2FEB9F0)
+    picker=pointer(base+0x2FC60C0)
+    vr=pointer(base+0x2FEB9B0)
+    table=pointer(vr)
+    if not base+0x1600000 <= table < base+0x2000000:
+        raise ValueError('VR routing table outside qualified engine')
+    route=pointer(table+0x78)
+    if not base+0x1000 <= route <= base+0x1600000-4096:
+        raise ValueError('VR routing method outside qualified engine')
+    code=read(route,4096)
+    return {'handlerRawHex':state.hex(), 'handlerRawSha256':hashlib.sha256(state).hexdigest(),
+            'handlerFlags':{hex(i):state[i] for i in (8,0x60,0x61,0x62,0x63)},
+            'targetHandles':list(struct.unpack('<3I',read(picker+4,12))),
+            'playerDominantControllerRaw':struct.unpack('<I',read(player+0x6D4,4))[0],
+            'playerVRGrabStateRaw':[struct.unpack('<I',read(player+0xED0+i*0x68,4))[0] for i in (0,1)],
+            'routingCode':{'rva':hex(route-base),'bytesHex':code.hex(),
+                           'sha256':hashlib.sha256(code).hexdigest()},
+            'atomicWorldSample':False,'domain':'bounded read-only raw runtime diagnostic, not gameplay proof'}
+
+
 def decode_handlers(read, base):
     handlers = {}
     code = {}
@@ -53,7 +97,7 @@ def decode_handlers(read, base):
             'domain': 'owned engine code snapshot; no handler invocation or consumption proof'}
 
 
-def snapshot(ident):
+def snapshot(ident, include_code=True):
     from . import native
     if not native.alive(ident) or os.path.basename(ident['path']).casefold() != 'skyrimvr.exe':
         raise ValueError('Handler diagnostic requires unchanged owned game')
@@ -85,13 +129,14 @@ def snapshot(ident):
         raise C.WinError(C.get_last_error())
     try:
         def read(address,size):
-            if not base <= address or address+size > base+0x2200000 or not 0 < size <= 4096:
-                raise ValueError('Handler diagnostic read exceeds engine bounds')
+            if not 0x10000 <= address < address+size < 0x800000000000 or not 0 < size <= 4096:
+                raise ValueError('Handler diagnostic read exceeds bounded user memory')
             buffer=C.create_string_buffer(size); count=C.c_size_t()
             if not kernel.ReadProcessMemory(process,address,buffer,size,C.byref(count)) or count.value!=size:
                 raise C.WinError(C.get_last_error())
             return buffer.raw
-        value=decode_handlers(read,base)
+        value=decode_handlers(read,base) if include_code else {'diagnosticOnly':True,'available':True}
+        value['runtime']=decode_runtime(read,base)
         if not native.alive(ident):
             raise ValueError('Owned engine identity changed during read')
         return {**value,'engineSha256':ENGINE_SHA}

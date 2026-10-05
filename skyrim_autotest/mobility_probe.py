@@ -367,6 +367,8 @@ def execute(session, scenario):
             time.sleep(.12)
             input_observed = observed()
             grabbed_during_press = papyrus('Game', 'GetPlayerGrabbedRef')
+            if scenario.get('recordPickupHandlers', False):
+                vr_handler_debug.collect_runtime(session, 'held')
             selected_during_press = session.tool('inspect', {'kind':'world_observer', 'refs':[ref]})
             actual = input_observed.get(binding['role'], {}).get('controller', {})
             received = (input_observed.get(binding['role'], {}).get('valid') is True
@@ -377,6 +379,9 @@ def execute(session, scenario):
                         domain='game-accessed physical OpenVR state, not engine user-event consumption')
             time.sleep(.13)
             session.tool('driver', {'action': 'release'})
+            if scenario.get('recordPickupHandlers', False):
+                time.sleep(.1)
+                vr_handler_debug.collect_runtime(session, 'released')
             end = time.monotonic() + 3
             grabbed_samples = []
             while True:
