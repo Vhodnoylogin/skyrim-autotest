@@ -30,6 +30,12 @@ and input identities are recorded separately. Live interaction INI settings and
 native grabbed-reference samples are observations only, never setting changes
 or substitutes for the required increase in inventory. `recordPickupInput:true`
 adds an owned raw DevBench event recording with transfer and ownership checks.
+`recordPickupHandlers:true` is a diagnostic for the hash-qualified VR1.4.15
+engine only: it reads fixed input-handler tables and at most40KiB of their code
+from the unchanged owned process into external run evidence. No callbacks,
+hooks or memory writes occur. Analyze the retained data offline; code presence
+is not proof that a handler consumed the input. Native grabbing is sampled both
+during the press and after release.
 
 A generic scenario contains `name` and nonempty `steps`. Each step needs `name`,
 `tool`, `args` (object), a finite `timeout` in (0,180] seconds (default20), and

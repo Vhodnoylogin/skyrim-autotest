@@ -332,6 +332,9 @@ def execute(session, scenario):
             fresh_binding = vive_activation(selected)
             if fresh_binding != binding:
                 raise AssertionError('Loaded activation mapping changed before input; no press sent')
+            if scenario.get('recordPickupHandlers', False):
+                from . import vr_handler_debug
+                vr_handler_debug.collect(session)
             activate = copy.deepcopy(frame)
             activate[binding['role']]['controller'].update(pressed=1 << binding['key'], touched=1 << binding['key'],
                 axes=[[0, 0], [1 if binding['key']==33 else 0, 0], [0, 0], [0, 0], [0, 0]])
@@ -343,6 +346,7 @@ def execute(session, scenario):
             publish(activate, 2)
             time.sleep(.12)
             input_observed = observed()
+            grabbed_during_press = papyrus('Game', 'GetPlayerGrabbedRef')
             actual = input_observed.get(binding['role'], {}).get('controller', {})
             received = (input_observed.get(binding['role'], {}).get('valid') is True
                         and type(actual.get('pressed')) is int
@@ -365,6 +369,7 @@ def execute(session, scenario):
                     'afterCount': current, 'input': 'one mapped physical Vive press/release', 'binding': binding,
                     'physicalInputObserved': received, 'observedFrame': input_observed,
                     'settings': settings, 'nativeGrabbedReferenceSamples': grabbed_samples,
+                    'nativeGrabbedReferenceDuringPress': grabbed_during_press,
                     'domain': 'inventory acquisition, not HIGGS physical hold'})
         else:
             # Never activate another target or turn a scripted Activate into input proof.

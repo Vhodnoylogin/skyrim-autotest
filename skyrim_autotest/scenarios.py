@@ -25,7 +25,7 @@ def validate(scenario):
     if scenario.get('kind') == 'vr-mobility-probe':
         if not re.fullmatch(r'[A-Za-z0-9_]+', scenario.get('cell', '')):
             raise ValueError('Mobility probe needs a safe cell editor id')
-        for key in ('physicalGrab', 'observer', 'keyboardDiagnostics', 'controllerJumpRequired', 'recordPickupInput'):
+        for key in ('physicalGrab', 'observer', 'keyboardDiagnostics', 'controllerJumpRequired', 'recordPickupInput', 'recordPickupHandlers'):
             if key in scenario and type(scenario[key]) is not bool:
                 raise ValueError(key + ' must be boolean')
         return
