@@ -5,6 +5,35 @@ from skyrim_autotest import mobility_probe, scenarios
 
 
 class MobilityProbeTests(unittest.TestCase):
+    def test_fresh_world_setup_is_distinct_from_final_cell_selection(self):
+        class Session:
+            def __init__(self): self.events = []
+            def phase(self, name, seconds): self.events.append(name)
+            def tool(self, name, args): self.events.append(args['command'])
+        session = Session()
+        with patch.object(mobility_probe.vr_probe, 'guard_fixture_modal'), \
+                patch.object(mobility_probe.time, 'sleep') as sleep, \
+                patch.object(mobility_probe.vr_probe, 'wait_test_cell', side_effect=AssertionError('not ready')) as ready:
+            with self.assertRaisesRegex(AssertionError, 'not ready'):
+                mobility_probe.enter_world(session, 'RealmLorkhan', False)
+        self.assertEqual(session.events, ['mobility-initialize-fresh-world', 'coc RealmLorkhan',
+                                          'mobility-enter-cell', 'coc RealmLorkhan'])
+        sleep.assert_called_once_with(8)
+        ready.assert_called_once_with(session, 'RealmLorkhan')
+
+    def test_loaded_fixture_has_no_fresh_world_mutation(self):
+        class Session:
+            def __init__(self): self.commands = []
+            def phase(self, name, seconds): pass
+            def tool(self, name, args): self.commands.append(args['command'])
+        session = Session()
+        with patch.object(mobility_probe.vr_probe, 'guard_fixture_modal'), \
+                patch.object(mobility_probe.time, 'sleep') as sleep, \
+                patch.object(mobility_probe.vr_probe, 'wait_test_cell', return_value={'ready': True}):
+            self.assertEqual(mobility_probe.enter_world(session, 'RealmLorkhan', True), {'ready': True})
+        self.assertEqual(session.commands, ['coc RealmLorkhan'])
+        sleep.assert_not_called()
+
     def test_minimal_probe_does_not_require_higgs_or_a_save(self):
         scenarios.validate({'schemaVersion': 1, 'kind': 'vr-mobility-probe',
                             'cell': 'RealmLorkhan', 'physicalGrab': False,

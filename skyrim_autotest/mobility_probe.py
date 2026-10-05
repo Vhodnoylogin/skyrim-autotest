@@ -34,6 +34,21 @@ def keyboard_hold(session, key, seconds, sample=None):
         session.tool('input', {'device': 'keyboard', 'action': 'up', 'key': key, 'owner': owner})
 
 
+def enter_world(session, cell, loaded_fixture):
+    """Initialize a fresh world separately from its final cell selection."""
+    if not loaded_fixture:
+        session.phase('mobility-initialize-fresh-world', 30)
+        vr_probe.guard_fixture_modal(session)
+        session.tool('console', {'action': 'exec', 'command': 'coc ' + cell})
+        # Fresh VR startup/alternate-start initialization can relocate the player.
+        # This is an explicit setup action, not a retry after readiness failure.
+        time.sleep(8)
+    session.phase('mobility-enter-cell', 120)
+    vr_probe.guard_fixture_modal(session)
+    session.tool('console', {'action': 'exec', 'command': 'coc ' + cell})
+    return vr_probe.wait_test_cell(session, cell)
+
+
 def execute(session, scenario):
     if session.state.get('inputBackend') != 'driver' or session.state.get('driverBackend') != 'file':
         raise ValueError('Mobility probe requires the physical file adapter')
@@ -78,10 +93,11 @@ def execute(session, scenario):
             time.sleep(1)
         else:
             raise AssertionError('Mobility fixture did not finish loading')
-    session.phase('mobility-enter-cell', 120)
-    vr_probe.guard_fixture_modal(session)
-    session.tool('console', {'action': 'exec', 'command': 'coc ' + scenario['cell']})
-    scene = vr_probe.wait_test_cell(session, scenario['cell'])
+    try:
+        scene = enter_world(session, scenario['cell'], bool(fixture))
+    except AssertionError as error:
+        record('mobility cell ready', False, {'reason': str(error)})
+        raise
     record('mobility cell ready', True, scene)
     vr_probe.ensure_owned_focus(session, scenario, 'mobility-owned-focus')
     papyrus('Game', 'EnablePlayerControls', [True] * 8 + [0])

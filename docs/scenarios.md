@@ -124,6 +124,10 @@ mobility world is reused afterward. Minimal mode makes no HIGGS hold claim.
 OpenVR tracking reads do not prove rendered hand animation. World probes use
 engine units; tracking matrices use metres. Boolean scope options and safe cell
 IDs are validated before launch. A fixture remains optional and pinned when used.
+Without a save, setup first initializes the fresh world with one declared `coc`
+and an eight-second startup interval, then selects the final cell once. The
+separate phases retain both actions; failed readiness never repeats either.
+With a loaded fixture only the final cell selection is issued.
 
 The default physical probe requires the owned game to acquire Windows foreground.
 Optional `allowBackgroundVR:true` permits the probe to attempt physical testing
