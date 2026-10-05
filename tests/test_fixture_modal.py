@@ -27,6 +27,20 @@ class FakeSession:
     def log(self,*args,**kwargs):pass
 
 class FixtureModalTests(unittest.TestCase):
+    def test_realm_begin_requires_exact_body_button_and_fresh_character_world(self):
+        from skyrim_autotest.vr_probe import classify_startup_modal
+        modal={'bodyText':'You find yourself someplace unknown... Somewhere outside of time and space.',
+               'buttons':['Begin'],'cancelIndex':-1}
+        session=FakeSession(modal['bodyText'],modal['buttons'])
+        session.state={'newGameStarted':True,'characterCreationCompleted':True}
+        with patch.object(session,'tool',return_value={'playerLoaded':True,'cell':{'editorId':'RealmLorkhan'}}):
+            self.assertEqual(classify_startup_modal(session,modal),'realm-new-game-begin')
+            session.state['gameplayBootstrap']={'completed':True}
+            self.assertIsNone(classify_startup_modal(session,modal))
+            session.state.pop('gameplayBootstrap')
+            self.assertIsNone(classify_startup_modal(session,{**modal,'buttons':['Continue']}))
+        with patch.object(session,'tool',return_value={'playerLoaded':True,'cell':{'editorId':'Other'}}):
+            self.assertIsNone(classify_startup_modal(session,modal))
     def queue(self, ids, body='Speech Broker на связи'):
         return {'available':True,'depth':len(ids),
                 'queued':[{'id':i,'bodyText':body,'buttons':['OK']} for i in ids]}

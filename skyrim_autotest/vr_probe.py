@@ -114,6 +114,28 @@ def accept_known_vr_modal(session, modal, answered_ids):
     return before
 
 
+def classify_startup_modal(session, modal):
+    """Recognize notices, never choices about the subject mod."""
+    if len(modal.get('buttons', [])) != 1:
+        return None
+    if modal.get('bodyText', '').startswith('Speech Broker на связи'):
+        return 'speech-broker-notice'
+    # Realm overrides Skyrim.esm MQ101TempChooseSidesMessage (000947D2).
+    # Verified MESG/DSD pairs, restricted to its fresh character-completed world.
+    realm = {
+        'You find yourself someplace unknown... Somewhere outside of time and space.': ['Begin'],
+        'Вы очутились в неизвестном месте... Где-то вне времени и пространства.': ['Начать']}
+    state = getattr(session, 'state', {})
+    if (realm.get(modal.get('bodyText')) == modal.get('buttons')
+            and modal.get('cancelIndex') == -1 and state.get('newGameStarted')
+            and state.get('characterCreationCompleted') and not state.get('gameplayBootstrap', {}).get('completed')
+            and not state.get('realmStartupAcknowledged')):
+        scene = session.tool('inspect', {'kind': 'scene'})
+        if scene.get('playerLoaded') and scene.get('cell', {}).get('editorId') == 'RealmLorkhan':
+            return 'realm-new-game-begin'
+    return None
+
+
 def guard_fixture_modal(session):
     """A startup message can arrive after the first load-ready observation."""
     menus = session.tool('menu', {'action': 'list'})
@@ -126,14 +148,18 @@ def guard_fixture_modal(session):
         session.log('startup-waiting-for-input', menu='MessageBoxMenu',
                     bodyText=modal.get('bodyText'), buttons=modal.get('buttons'),
                     reason='Blocking dialog requires an answer; tool responsiveness is not gameplay readiness')
-        if len(modal.get('buttons', [])) != 1 or not modal.get('bodyText', '').startswith('Speech Broker на связи'):
+        classification = classify_startup_modal(session, modal)
+        if classification is None:
             raise AssertionError('Fixture is gated by an unclassified modal: ' + json.dumps(modal))
+        session.log('startup-modal-classified', classification=classification)
         before = accept_known_vr_modal(session, modal, answered_ids)
         end = time.monotonic() + 3
         while time.monotonic() < end:
             if not session.tool('menu', {'action': 'list'}).get('messageBoxOpen'):
                 log_modal_queue(session, 'startup-modal-native-queue-after')
                 session.log('fixture-modal-cleared', body=modal['bodyText'])
+                if classification == 'realm-new-game-begin':
+                    session.state['realmStartupAcknowledged'] = True
                 return True
             if before.get('available'):
                 after = log_modal_queue(session, 'startup-modal-native-queue-after')
