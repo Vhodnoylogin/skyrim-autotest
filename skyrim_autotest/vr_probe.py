@@ -68,7 +68,7 @@ def log_modal_queue(session, name):
     return value
 
 
-def accept_known_vr_modal(session, modal):
+def accept_known_vr_modal(session, modal, answered_ids):
     """One deferred native menu answer after matching the notification and button."""
     from .api_contract import validate_description
     description = session.tool('papyrus', {'action': 'describe', 'script': 'UI'})
@@ -101,10 +101,17 @@ def accept_known_vr_modal(session, modal):
         raise AssertionError('Startup modal changed before deferred answer; input not sent')
     # DevBench1.25 documents index:0 as SKSE AddTask, distinct from synchronous
     # matchBody. ACK is retained only as a request; the caller verifies closure.
-    log_modal_queue(session, 'startup-modal-native-queue-before')
+    before = log_modal_queue(session, 'startup-modal-native-queue-before')
+    if before.get('available'):
+        queued = before.get('queued', [])
+        if not queued or queued[-1]['id'] in answered_ids:
+            raise AssertionError('Startup notification identity missing or already answered; no replay')
+        if queued[-1]['bodyText'] != modal['bodyText'] or queued[-1]['buttons'] != modal['buttons']:
+            raise AssertionError('Native notification identity does not match described modal')
     response = session.tool('menu', {'action': 'accept', 'index': 0})
     session.log('startup-modal-button-request', action='deferred native menu answer', index=0,
                 body=modal['bodyText'], response=response, acceptedAsClosureProof=False)
+    return before
 
 
 def guard_fixture_modal(session):
@@ -112,25 +119,42 @@ def guard_fixture_modal(session):
     menus = session.tool('menu', {'action': 'list'})
     if not menus.get('messageBoxOpen'):
         return False
-    modal = session.tool('menu', {'action': 'describe'})
-    session.log('fixture-modal', result=modal)
-    session.log('startup-waiting-for-input', menu='MessageBoxMenu',
-                bodyText=modal.get('bodyText'), buttons=modal.get('buttons'),
-                reason='Blocking dialog requires an answer; tool responsiveness is not gameplay readiness')
-    if len(modal.get('buttons', [])) != 1 or not modal.get('bodyText', '').startswith('Speech Broker на связи'):
-        raise AssertionError('Fixture is gated by an unclassified modal: ' + json.dumps(modal))
-    accept_known_vr_modal(session, modal)
-    end = time.monotonic() + 3
-    while time.monotonic() < end:
-        if not session.tool('menu', {'action': 'list'}).get('messageBoxOpen'):
+    answered_ids = set()
+    for _ in range(8):  # Finite startup work; never repeat one notification id.
+        modal = session.tool('menu', {'action': 'describe'})
+        session.log('fixture-modal', result=modal)
+        session.log('startup-waiting-for-input', menu='MessageBoxMenu',
+                    bodyText=modal.get('bodyText'), buttons=modal.get('buttons'),
+                    reason='Blocking dialog requires an answer; tool responsiveness is not gameplay readiness')
+        if len(modal.get('buttons', [])) != 1 or not modal.get('bodyText', '').startswith('Speech Broker на связи'):
+            raise AssertionError('Fixture is gated by an unclassified modal: ' + json.dumps(modal))
+        before = accept_known_vr_modal(session, modal, answered_ids)
+        end = time.monotonic() + 3
+        while time.monotonic() < end:
+            if not session.tool('menu', {'action': 'list'}).get('messageBoxOpen'):
+                log_modal_queue(session, 'startup-modal-native-queue-after')
+                session.log('fixture-modal-cleared', body=modal['bodyText'])
+                return True
+            if before.get('available'):
+                after = log_modal_queue(session, 'startup-modal-native-queue-after')
+                if after.get('available'):
+                    old_ids = [x['id'] for x in before['queued']]
+                    new_ids = [x['id'] for x in after['queued']]
+                    if new_ids == old_ids[:-1] and after['depth'] == before['depth'] - 1:
+                        answered_ids.add(old_ids[-1])
+                        session.log('startup-notification-answered', notificationId=old_ids[-1],
+                                    remainingDepth=after['depth'], menuStillOpen=True)
+                        if new_ids:
+                            break  # Different queued notification; classify it from scratch.
+                    elif new_ids != old_ids:
+                        raise AssertionError('Startup queue changed outside the single answered notification')
+            time.sleep(.1)
+        else:
+            following = session.tool('menu', {'action': 'describe'})
             log_modal_queue(session, 'startup-modal-native-queue-after')
-            session.log('fixture-modal-cleared', body=modal['bodyText'])
-            return True
-        time.sleep(.1)
-    following = session.tool('menu', {'action': 'describe'})
-    log_modal_queue(session, 'startup-modal-native-queue-after')
-    session.log('startup-modal-button-not-resolved', before=modal, after=following)
-    raise AssertionError('Recognized fixture modal did not close: ' + json.dumps(following))
+            session.log('startup-modal-button-not-resolved', before=modal, after=following)
+            raise AssertionError('Recognized fixture modal did not close: ' + json.dumps(following))
+    raise AssertionError('Recognized startup notification queue exceeded bounded handling')
 
 
 def execute(session, scenario):

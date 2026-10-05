@@ -27,6 +27,49 @@ class FakeSession:
     def log(self,*args,**kwargs):pass
 
 class FixtureModalTests(unittest.TestCase):
+    def queue(self, ids, body='Speech Broker на связи'):
+        return {'available':True,'depth':len(ids),
+                'queued':[{'id':i,'bodyText':body,'buttons':['OK']} for i in ids]}
+    def test_two_identical_notifications_each_answered_once_then_menu_closes(self):
+        class Duplicate(FakeSession):
+            def tool(self,name,args):
+                if name=='menu' and args['action']=='accept':
+                    self.accepts.append(args);self.open=len(self.accepts)<2;return {'queued':True}
+                return super().tool(name,args)
+        session=Duplicate('Speech Broker на связи',['OK'])
+        with patch('skyrim_autotest.vr_probe.ensure_owned_focus'), \
+                patch('skyrim_autotest.vr_probe.log_modal_queue',side_effect=[
+                    self.queue(['A','B']),self.queue(['A']),self.queue(['A']),self.queue([])]):
+            self.assertTrue(guard_fixture_modal(session))
+        self.assertEqual(len(session.accepts),2)
+        self.assertFalse(session.open)
+    def test_unknown_next_notification_is_collected_without_answer(self):
+        class UnknownNext(FakeSession):
+            def tool(self,name,args):
+                if name=='menu' and args['action']=='accept':
+                    self.accepts.append(args);self.body='Unknown choice';return {'queued':True}
+                return super().tool(name,args)
+        session=UnknownNext('Speech Broker на связи',['OK'])
+        before=self.queue(['A'],'Unknown choice');before['queued']+=self.queue(['B'])['queued'];before['depth']=2
+        with patch('skyrim_autotest.vr_probe.ensure_owned_focus'), \
+                patch('skyrim_autotest.vr_probe.log_modal_queue',side_effect=[before,self.queue(['A'],'Unknown choice')]):
+            with self.assertRaisesRegex(AssertionError,'unclassified modal'):
+                guard_fixture_modal(session)
+        self.assertEqual(len(session.accepts),1)
+    def test_unchanged_native_identity_does_not_allow_a_second_answer(self):
+        class StillOpen(FakeSession):
+            def tool(self,name,args):
+                if name=='menu' and args['action']=='accept':
+                    self.accepts.append(args);return {'queued':True}
+                return super().tool(name,args)
+        session=StillOpen('Speech Broker на связи',['OK'])
+        with patch('skyrim_autotest.vr_probe.ensure_owned_focus'), \
+                patch('skyrim_autotest.vr_probe.log_modal_queue',return_value=self.queue(['A'])), \
+                patch('skyrim_autotest.vr_probe.time.monotonic',side_effect=[0,0,4]), \
+                patch('skyrim_autotest.vr_probe.time.sleep'):
+            with self.assertRaisesRegex(AssertionError,'did not close'):
+                guard_fixture_modal(session)
+        self.assertEqual(len(session.accepts),1)
     def test_late_known_message_is_closed_with_exact_body(self):
         session=FakeSession('Speech Broker на связи: fixture startup',['OK'])
         with patch('skyrim_autotest.vr_probe.time.sleep'), patch('skyrim_autotest.vr_probe.ensure_owned_focus'):
