@@ -49,6 +49,32 @@ class Session:
 
 
 class NewGameTests(unittest.TestCase):
+    def test_late_world_modal_is_described_and_cannot_be_gameplay_ready(self):
+        class LateSession:
+            state = {}
+            def __init__(self): self.open = False; self.logs = []
+            def phase(self, *args): pass
+            def save(self): pass
+            def log(self, name, **values): self.logs.append((name, values))
+            def tool(self, name, args):
+                if name == 'inspect': return {'cell': {'editorId': 'RealmLorkhan'}}
+                if name == 'console': return {}
+                if name == 'menu' and args['action'] == 'list':
+                    return {'messageBoxOpen': self.open, 'openMenus': ['HUD Menu']}
+                if name == 'menu' and args['action'] == 'describe':
+                    return {'bodyText': 'Unknown world initialization choice', 'buttons': ['Yes', 'No']}
+                raise AssertionError('Unexpected mutation: ' + name)
+        session = LateSession()
+        def loaded(*args):
+            session.open = True
+            return {'playerLoaded': True, 'cell': {'editorId': 'RealmLorkhan'}}
+        with patch.object(bootstrap.vr_probe, 'wait_test_cell', side_effect=loaded):
+            with self.assertRaisesRegex(AssertionError, 'unclassified modal'):
+                bootstrap.prepare_gameplay(session, {'cell': 'RealmLorkhan'})
+        self.assertNotIn('gameplayBootstrap', session.state)
+        self.assertEqual(session.logs[-1][0], 'fixture-modal')
+        self.assertEqual(session.logs[-1][1]['result']['buttons'], ['Yes', 'No'])
+
     def test_new_game_rejects_any_pinned_save_or_undeclared_world(self):
         for value in ({'fixture': {'saveStem': 'anything'}, 'cell': 'RealmLorkhan'}, {}):
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'New Game'):

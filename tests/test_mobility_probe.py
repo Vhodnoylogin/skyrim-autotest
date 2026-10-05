@@ -30,7 +30,7 @@ class MobilityProbeTests(unittest.TestCase):
                 if name=='menu':return {'openMenus':['HUD Menu']}
         session=Session();scene={'playerLoaded':True,'cell':{'editorId':'RealmLorkhan'}}
         with patch.object(bootstrap,'advance_calibration',return_value=True), \
-                patch.object(bootstrap.vr_probe,'guard_fixture_modal'), \
+                patch.object(bootstrap.vr_probe,'guard_fixture_modal',return_value=False), \
                 patch.object(bootstrap.vr_probe,'wait_test_cell',return_value=scene):
             bootstrap.prepare_gameplay(session,{'cell':'RealmLorkhan'})
         self.assertTrue(session.state['gameplayBootstrap']['completed'])

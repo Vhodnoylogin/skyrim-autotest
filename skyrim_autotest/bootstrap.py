@@ -211,12 +211,17 @@ def prepare_gameplay(session, scenario):
         scene = vr_probe.wait_test_cell(session, cell)
     else:
         scene = session.tool('inspect', {'kind': 'scene'})
+    if vr_probe.guard_fixture_modal(session):
+        # New-game scripts may post their notification only after cell loading.
+        # Re-read the world after answering a classified notification.
+        scene = session.tool('inspect', {'kind': 'scene'})
     menus = session.tool('menu', {'action': 'list'})
     blocked = {'CalibrationOptionMenu', 'Main Menu', 'Loading Menu', 'RaceSex Menu'}
     if 'RaceSex Menu' in menus.get('openMenus', []):
         session.log('new-game-character-menu', menus=menus,
                     modal=session.tool('menu', {'action': 'describe'}))
     if (not scene.get('playerLoaded') or scene.get('cell', {}).get('editorId') == 'VRPlayroom01'
+            or (cell and scene.get('cell', {}).get('editorId') != cell)
             or blocked.intersection(menus.get('openMenus', [])) or menus.get('messageBoxOpen')):
         raise AssertionError('Initialized gameplay is not ready: ' + json.dumps({'scene': scene, 'menus': menus}))
     session.state['gameplayBootstrap'] = {'completed': True, 'cell': cell,
