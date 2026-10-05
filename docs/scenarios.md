@@ -33,6 +33,19 @@ started are never automatically repeated. All attempts share the original step
 deadline; a late positive result still fails. Assertions are based on returned
 data, never inferred from requested actions.
 
+The built-in `vr-hand-probe` has a separate test-cell readiness wait after its
+one-time `coc` command. Only that `inspect kind:scene` wait may repeat HTTP
+500/502/503/504 responses from `api/tool/inspect`, or a structured scene read
+with `ok:false,outcome:"abandoned_before_start"`. These responses are candidate
+readiness failures, not a diagnosis of the server. Each keeps its status/body
+or structured result in the log. All attempts share 90 seconds, including
+owned-process health checks; a late response cannot pass. Matching scene data
+must then remain stable for more than four seconds, with errors or a different
+cell resetting stability. Persistent failure stops and restores the run.
+Health/identity errors, transport loss, malformed responses and other tool
+errors remain terminal. This exception does not repeat `coc`, loading, scenario
+assertions, or a whole run, and does not apply to generic scene assertions.
+
 `tool:"driver"` supports:
 - `args:{"action":"status"}`: local publication state; no hardware ACK.
 - `args:{"action":"release"}`: zero pressed/touched/axes, preserve pose.

@@ -53,6 +53,13 @@ class Blocked(RuntimeError):
     pass
 
 
+class HTTPResponseError(RuntimeError):
+    """Retain status/route/body without inferring the server's failure cause."""
+    def __init__(self, status, route, body):
+        self.status, self.route, self.body = status, route, body
+        super().__init__(f'HTTP {status} {route}: {body}')
+
+
 class ToolError(RuntimeError):
     """A structured error returned by an identity-checked owned tool endpoint."""
     def __init__(self, tool, args, result):
@@ -101,7 +108,7 @@ def request(port, route, body=None, token=None, timeout=12):
             return json.load(response)
     except urllib.error.HTTPError as e:
         detail = e.read().decode('utf-8', errors='replace')
-        raise RuntimeError(f'HTTP {e.code} {route}: {detail}') from None
+        raise HTTPResponseError(e.code, route, detail) from None
 
 
 def set_ini(text, section, key, value):
@@ -389,17 +396,24 @@ class Session:
             self.invalidate_probe_reference(str(error))
             raise
 
-    def tool(self, name, args, timeout=12):
+    def tool(self, name, args, timeout=12, deadline=None):
         if self.state.get('postStepsActive') and changes_reference_world(name, args):
             self.invalidate_probe_reference('potential world-changing request: ' + name)
         if name == 'driver':
             return self.driver_tool(args)
-        health = request(self.state['port'], 'api/health', timeout=3)
+        def bounded_timeout(limit):
+            if deadline is None:
+                return limit
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError('Tool readiness deadline exceeded: ' + name)
+            return min(limit, remaining)
+        health = request(self.state['port'], 'api/health', timeout=bounded_timeout(3))
         if health.get('pid') != self.state['game']['pid'] or not native.alive(self.state['game']):
             raise Blocked('DevBench identity no longer matches the owned game')
         started = time.monotonic()
         try:
-            result = request(self.state['port'], f'api/tool/{name}', args, timeout=timeout)
+            result = request(self.state['port'], f'api/tool/{name}', args, timeout=bounded_timeout(timeout))
         except Exception as e:
             self.log('tool-error', tool=name, args=args, error=str(e), elapsedMs=int((time.monotonic() - started) * 1000))
             raise

@@ -41,6 +41,11 @@ installation must remain within the owner's requested scope.
    The executor may repeat a polling world_observer snapshot only when its
    structured outcome is abandoned_before_start; all attempts keep the same
    deadline and log. Started reads, unknown failures and mutations remain terminal.
+   The built-in cell-readiness wait separately permits scene-only HTTP
+   500/502/503/504 or structured abandoned_before_start reads within its original
+   90 seconds. Preserve every error; require stable matching scene data afterward.
+   Never repeat coc/load or treat a retried error as readiness. Identity/health
+   errors and arbitrary scenario HTTP failures still stop the run.
    For explicit unattended physical VR scenarios, allowBackgroundVR:true may
    permit testing while another application has foreground. Use it only with
    the physical file backend, retain recorded focus denial, and require the

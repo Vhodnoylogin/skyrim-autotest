@@ -5,6 +5,58 @@ import math
 import time
 
 
+def wait_test_cell(session, cell):
+    """Bounded scene-only readiness reads; never repeat the preceding coc."""
+    from .runner import HTTPResponseError, ToolError
+    end = time.monotonic() + 90
+    stable_since = None
+    attempts, retries = 0, 0
+    last_error = None
+    while time.monotonic() < end:
+        attempts += 1
+        try:
+            scene = session.tool('inspect', {'kind': 'scene'}, timeout=12, deadline=end)
+        except Exception as error:
+            # These are candidate readiness failures, not proof of a transient
+            # server condition. They cannot pass unless stable scene data follows.
+            retryable = (
+                isinstance(error, HTTPResponseError) and
+                error.route == 'api/tool/inspect' and
+                error.status in (500, 502, 503, 504)) or (
+                isinstance(error, ToolError) and error.tool == 'inspect' and
+                error.args_value == {'kind': 'scene'} and
+                error.result.get('ok') is False and
+                error.result.get('outcome') == 'abandoned_before_start')
+            if not retryable:
+                raise
+            stable_since = None
+            retries += 1
+            last_error = str(error)
+            details = ({'status': error.status, 'route': error.route, 'body': error.body}
+                       if isinstance(error, HTTPResponseError) else {'result': error.result})
+            session.log('bootstrap-scene-retry', attempt=attempts, error=last_error,
+                        remainingSeconds=max(0, end - time.monotonic()), **details)
+        else:
+            now = time.monotonic()
+            session.log('bootstrap-scene', result=scene, attempt=attempts)
+            if now > end:
+                session.log('bootstrap-scene-timeout', attempts=attempts, retries=retries,
+                            reason='response-after-deadline', lastError=last_error)
+                raise TimeoutError('Test cell response arrived after readiness deadline')
+            if cell.casefold() in json.dumps(scene).casefold():
+                if stable_since is None:
+                    stable_since = now
+                if now - stable_since > 4:
+                    session.log('bootstrap-scene-ready', attempts=attempts, retries=retries)
+                    return scene
+            else:
+                stable_since = None
+        time.sleep(min(1, max(0, end - time.monotonic())))
+    session.log('bootstrap-scene-timeout', attempts=attempts, retries=retries, lastError=last_error)
+    raise AssertionError('Test cell did not load within 90 seconds' +
+                         ('; last readiness error: ' + last_error if last_error else ''))
+
+
 def guard_fixture_modal(session):
     """A startup message can arrive after the first load-ready observation."""
     menus = session.tool('menu', {'action': 'list'})
@@ -48,20 +100,7 @@ def execute(session, scenario):
         session.tool('console', {'action': 'exec', 'command': 'coc ' + scenario['cell']})
         time.sleep(8)
     session.tool('console', {'action': 'exec', 'command': 'coc ' + scenario['cell']})
-    end = time.monotonic() + 90
-    stable_since = None
-    while time.monotonic() < end:
-        scene = session.tool('inspect', {'kind': 'scene'})
-        session.log('bootstrap-scene', result=scene)
-        if scenario['cell'].casefold() in json.dumps(scene).casefold():
-            stable_since = stable_since or time.monotonic()
-            if time.monotonic() - stable_since > 4:
-                break
-        else:
-            stable_since = None
-        time.sleep(1)
-    else:
-        raise AssertionError('Test cell did not load')
+    scene = wait_test_cell(session, scenario['cell'])
     session.state['checks'].append({'name': 'test cell loaded', 'result': 'passed', 'observation': scene})
     session.save()
 

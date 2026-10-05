@@ -187,3 +187,21 @@ were expected in this fault run. The source uses os._exit(99); no claim is made
 about the outer execution wrapper's child exit code. The final distribution
 changes only documentation after runtime commit1a33c33; all packaged runtime
 Python/header/JSON bytes are compared with the live-qualified extraction11.
+
+## 2026-10-05 cell-readiness correction (offline validation)
+
+Three retained launches on two mod scenarios stopped before subject tests at
+an empty HTTP500 `api/tool/inspect` response immediately after `coc QASmoke`.
+The runner prematurely aborted its existing cell-readiness loop. The server
+cause is unknown; this does not establish a mod defect or a transient condition.
+The correction retries only candidate scene-readiness failures under one
+90-second deadline, retaining each error, owned-process checks and the stable
+cell requirement. No mutation or scenario is retried.
+
+Twelve new offline regressions cover recovery after candidate HTTP failures,
+persistent failure, stability reset, wrong cell, error text containing the target
+cell, terminal unknown/identity errors, structured abandonment, late responses,
+no repeated load/coc, exact HTTP metadata, identity rechecks, and deadline
+accounting including health requests. All71 executor tests pass. No game was
+launched for this correction. Earlier live acceptance above qualifies its exact
+historical build, not the changed runtime; live confirmation is still pending.
