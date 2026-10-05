@@ -32,10 +32,10 @@ class FixtureModalTests(unittest.TestCase):
         class Stale(FakeSession):
             def tool(self,name,args):
                 if name=='papyrus' and args.get('function')=='GetString' and args['args'][1].endswith('.Message.text'):
-                    return {'returned':'Speech Broker РЅР° СЃРІСЏР·Рё: old closed box'}
+                    return {'returned':'Speech Broker на связи: old closed box'}
                 return super().tool(name,args)
-        session=Stale('Speech Broker РЅР° СЃРІСЏР·Рё: new native box',['OK'])
-        session.state['lastClosedStartupModal']={'bodyText':'Speech Broker РЅР° СЃРІСЏР·Рё: old closed box','buttons':['OK']}
+        session=Stale('Speech Broker на связи: new native box',['OK'])
+        session.state['lastClosedStartupModal']={'bodyText':'Speech Broker на связи: old closed box','buttons':['OK']}
         before=self.queue(['A'],session.body)
         with patch('skyrim_autotest.vr_probe.ensure_owned_focus'), \
              patch('skyrim_autotest.vr_probe.log_modal_queue',return_value=before), \
@@ -79,7 +79,7 @@ class FixtureModalTests(unittest.TestCase):
                 if name=='menu' and args['action']=='accept':
                     if self.reads<2:raise AssertionError('Premature answer before visible identity')
                 return super().tool(name,args)
-        session=Delayed('Speech Broker РЅР° СЃРІСЏР·Рё',['OK'])
+        session=Delayed('Speech Broker на связи',['OK'])
         with patch('skyrim_autotest.vr_probe.ensure_owned_focus'),patch('skyrim_autotest.vr_probe.time.sleep'):
             self.assertTrue(guard_fixture_modal(session))
         self.assertEqual(session.reads,2)
@@ -98,7 +98,7 @@ class FixtureModalTests(unittest.TestCase):
             self.assertIsNone(classify_startup_modal(session,{**modal,'buttons':['Continue']}))
         with patch.object(session,'tool',return_value={'playerLoaded':True,'cell':{'editorId':'Other'}}):
             self.assertIsNone(classify_startup_modal(session,modal))
-    def queue(self, ids, body='Speech Broker РЅР° СЃРІСЏР·Рё'):
+    def queue(self, ids, body='Speech Broker на связи'):
         return {'available':True,'depth':len(ids),
                 'queued':[{'id':i,'bodyText':body,'buttons':['OK']} for i in ids]}
     def test_two_identical_notifications_each_answered_once_then_menu_closes(self):
@@ -107,7 +107,7 @@ class FixtureModalTests(unittest.TestCase):
                 if name=='menu' and args['action']=='accept':
                     self.accepts.append(args);self.open=len(self.accepts)<2;return {'queued':True}
                 return super().tool(name,args)
-        session=Duplicate('Speech Broker РЅР° СЃРІСЏР·Рё',['OK'])
+        session=Duplicate('Speech Broker на связи',['OK'])
         with patch('skyrim_autotest.vr_probe.ensure_owned_focus'), \
                 patch('skyrim_autotest.vr_probe.log_modal_queue',side_effect=[
                     self.queue(['A','B']),self.queue(['A']),self.queue(['A']),self.queue([])]):
@@ -120,7 +120,7 @@ class FixtureModalTests(unittest.TestCase):
                 if name=='menu' and args['action']=='accept':
                     self.accepts.append(args);self.body='Unknown choice';return {'queued':True}
                 return super().tool(name,args)
-        session=UnknownNext('Speech Broker РЅР° СЃРІСЏР·Рё',['OK'])
+        session=UnknownNext('Speech Broker на связи',['OK'])
         before=self.queue(['A'],'Unknown choice');before['queued']+=self.queue(['B'])['queued'];before['depth']=2
         with patch('skyrim_autotest.vr_probe.ensure_owned_focus'), \
                 patch('skyrim_autotest.vr_probe.log_modal_queue',side_effect=[before,self.queue(['A'],'Unknown choice')]):
@@ -133,7 +133,7 @@ class FixtureModalTests(unittest.TestCase):
                 if name=='menu' and args['action']=='accept':
                     self.accepts.append(args);return {'queued':True}
                 return super().tool(name,args)
-        session=StillOpen('Speech Broker РЅР° СЃРІСЏР·Рё',['OK'])
+        session=StillOpen('Speech Broker на связи',['OK'])
         with patch('skyrim_autotest.vr_probe.ensure_owned_focus'), \
                 patch('skyrim_autotest.vr_probe.log_modal_queue',return_value=self.queue(['A'])), \
                 patch('skyrim_autotest.vr_probe.time.monotonic',side_effect=[0,0,4]), \
@@ -142,13 +142,13 @@ class FixtureModalTests(unittest.TestCase):
                 guard_fixture_modal(session)
         self.assertEqual(len(session.accepts),1)
     def test_late_known_message_is_closed_with_exact_body(self):
-        session=FakeSession('Speech Broker РЅР° СЃРІСЏР·Рё: fixture startup',['OK'])
+        session=FakeSession('Speech Broker на связи: fixture startup',['OK'])
         with patch('skyrim_autotest.vr_probe.time.sleep'), patch('skyrim_autotest.vr_probe.ensure_owned_focus'):
             self.assertTrue(guard_fixture_modal(session))
         self.assertEqual(session.accepts,[{'action':'accept','index':0}])
         self.assertFalse(guard_fixture_modal(session))
     def test_unknown_or_choice_prompt_is_not_accepted(self):
-        for body,buttons in [('Unknown confirmation',['OK']),('Speech Broker РЅР° СЃРІСЏР·Рё',['Yes','No'])]:
+        for body,buttons in [('Unknown confirmation',['OK']),('Speech Broker на связи',['Yes','No'])]:
             with self.subTest(body=body,buttons=buttons):
                 session=FakeSession(body,buttons)
                 with self.assertRaisesRegex(AssertionError,'unclassified modal'):guard_fixture_modal(session)
@@ -159,7 +159,7 @@ class FixtureModalTests(unittest.TestCase):
                 if name=='papyrus' and args.get('function')=='GetString' and args['args'][1].endswith('.Message.text'):
                     return {'returned':'Different dialog'}
                 return super().tool(name,args)
-        session=Changed('Speech Broker РЅР° СЃРІСЏР·Рё',['OK'])
+        session=Changed('Speech Broker на связи',['OK'])
         with self.assertRaisesRegex(AssertionError,'does not match'):
             guard_fixture_modal(session)
         self.assertEqual(session.accepts,[])
@@ -169,7 +169,7 @@ class FixtureModalTests(unittest.TestCase):
                 if name=='menu' and args['action']=='accept':
                     self.accepts.append(args);return {'queued':True}
                 return super().tool(name,args)
-        session=StillOpen('Speech Broker РЅР° СЃРІСЏР·Рё',['OK'])
+        session=StillOpen('Speech Broker на связи',['OK'])
         with patch('skyrim_autotest.vr_probe.ensure_owned_focus'), \
                 patch('skyrim_autotest.vr_probe.time.monotonic',side_effect=[0,0,4]), \
                 patch('skyrim_autotest.vr_probe.time.sleep'):
