@@ -128,6 +128,13 @@ is retained as `--input-backend devbench` for diagnostics; its hand motion is no
 qualified physical HIGGS interaction. Optional `raw_openvr.py` observations are
 application-specific and cannot attest the game's scene input.
 
+The `vr-mobility-probe` diagnostic can run in a minimal Realm world without
+VRIK/HIGGS: it records player movement/jump and game-accessed tracked hands,
+separates physical-controller candidates from keyboard diagnostics, and attempts
+vanilla inventory pickup only with an exact observed activation target. Optional
+physical holding uses the existing HIGGS probe. See the scenario contract for
+bounded inputs and honest unavailable/render domains.
+
 ```powershell
 python -m skyrim_autotest --config C:/TestBench/config/config.json queue add --order C:/TestBench/orders/mod-test.json
 python -m skyrim_autotest --config C:/TestBench/config/config.json queue next --restart-idle-mo2

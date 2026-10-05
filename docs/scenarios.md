@@ -102,6 +102,29 @@ local queue lifecycle; explicit owner acceptance may close a reported order.
 
 ## Explicit background physical VR testing
 
+`kind:"vr-mobility-probe"` is a bounded diagnostic for minimal worlds without
+VRIK/HIGGS. It enters the named cell, samples game-accessed OpenVR left/right
+tracking, tests one left-trackpad forward input and one right-trackpad jump
+candidate, and records actual player displacement/height. Optional
+`keyboardDiagnostics:true` separately tests W/SPACE through DevBench's owned
+bounded BSInputEventQueue leases; these are not physical-controller proof.
+Failed prescribed controls remain failed checks while other bounded diagnostics
+continue, then the run fails with the complete mismatch list. Tool errors are
+terminal. No scripted player movement or jump substitutes for observed input.
+
+Optional `observer:true` records the current player. A single owned firewood
+reference is placed in the neutral hand-ray fixture; one physical trigger press
+is sent only if the actual crosshair selects that exact reference. Inventory
+pickup is distinct from HIGGS holding. If the ray is unavailable/misses, pickup
+is explicitly unavailable, with no activation sent to an unknown object.
+`physicalGrab:true` additionally executes the existing QASmoke hand/grip/hold/
+release probe and therefore requires its VRIK/HIGGS dependencies. With a pinned
+fixture that phase reloads the copied save once; no dynamic reference from the
+mobility world is reused afterward. Minimal mode makes no HIGGS hold claim.
+OpenVR tracking reads do not prove rendered hand animation. World probes use
+engine units; tracking matrices use metres. Boolean scope options and safe cell
+IDs are validated before launch. A fixture remains optional and pinned when used.
+
 The default physical probe requires the owned game to acquire Windows foreground.
 Optional `allowBackgroundVR:true` permits the probe to attempt physical testing
 when Windows denies focus, only with driverBackend=file/inputBackend=driver.

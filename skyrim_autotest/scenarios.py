@@ -10,12 +10,19 @@ def validate(scenario):
     """Reject malformed or observation-only tests before launching or mutating files."""
     if scenario.get('schemaVersion') != 1:
         raise ValueError('Unsupported scenario schema')
-    if 'allowBackgroundVR' in scenario and (type(scenario['allowBackgroundVR']) is not bool or scenario.get('kind') != 'vr-hand-probe'):
-        raise ValueError('allowBackgroundVR is a boolean option for physical vr-hand-probe only')
+    if 'allowBackgroundVR' in scenario and (type(scenario['allowBackgroundVR']) is not bool or scenario.get('kind') not in ('vr-hand-probe', 'vr-mobility-probe')):
+        raise ValueError('allowBackgroundVR is a boolean option for physical VR probes only')
     fixture = scenario.get('fixture')
     if fixture:
         if not isinstance(fixture, dict) or not re.fullmatch(r'[A-Za-z0-9_-]+', fixture.get('saveStem', '')) or any(not re.fullmatch(r'[0-9a-f]{64}', fixture.get(ext + 'Sha256', '')) for ext in ('ess', 'skse')):
             raise ValueError('Fixture needs safe saveStem and pinned ESS/SKSE hashes')
+    if scenario.get('kind') == 'vr-mobility-probe':
+        if not re.fullmatch(r'[A-Za-z0-9_]+', scenario.get('cell', '')):
+            raise ValueError('Mobility probe needs a safe cell editor id')
+        for key in ('physicalGrab', 'observer', 'keyboardDiagnostics'):
+            if key in scenario and type(scenario[key]) is not bool:
+                raise ValueError(key + ' must be boolean')
+        return
     if scenario.get('kind') == 'vr-hand-probe':
         if not re.fullmatch(r'[A-Za-z0-9_]+', scenario.get('cell', '')):
             raise ValueError('Hand probe needs a safe cell editor id')
@@ -97,6 +104,10 @@ def retryable_observer_read(step, error):
 
 
 def execute(session, scenario):
+    if scenario.get('kind') == 'vr-mobility-probe':
+        from .mobility_probe import execute as probe
+        probe(session, scenario)
+        return
     if scenario.get('kind') == 'vr-hand-probe':
         from .vr_probe import execute as probe
         probe(session, scenario)
