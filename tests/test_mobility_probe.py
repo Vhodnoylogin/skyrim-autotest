@@ -34,6 +34,21 @@ class MobilityProbeTests(unittest.TestCase):
         self.assertAlmostEqual(result[1],25,places=4)
         self.assertAlmostEqual(result[2],56.69873,places=4)
 
+    def test_input_hand_target_cannot_be_replaced_with_other_hand_target(self):
+        before,after=self.vr_sample(),self.vr_sample(2)
+        after['vrPicking']['devices']['left']={'targetStatus':'none','target':None}
+        self.assertTrue(mobility_probe.exact_device_pick(before,after,'0xff000801','right'))
+        self.assertFalse(mobility_probe.exact_device_pick(before,after,'0xff000801','left'))
+        after['vrPicking']['devices']['left']=after['vrPicking']['devices']['right']
+        self.assertTrue(mobility_probe.exact_device_pick(before,after,'0xff000801','left'))
+        self.assertFalse(mobility_probe.exact_device_pick(before,after,'0xff000802','left'))
+    def test_secondary_aim_uses_its_actual_transform_and_never_falls_back_to_primary(self):
+        sample=self.vr_sample()
+        with self.assertRaisesRegex(AssertionError,'secondaryAim'):
+            mobility_probe.aim_fixture_position(sample,'secondaryAim')
+        sample['vrPicking']['nodes']['secondaryAim']={'status':'available','world':{
+            'translation':[-14.7,10,84], 'rotationRowMajor':[1,0,0,0,1,0,0,0,1]}}
+        self.assertEqual(mobility_probe.aim_fixture_position(sample,'secondaryAim'),[-14.7,60,84])
     def test_loaded_combined_activate_uses_secondary_trackpad_not_attack_trigger(self):
         sample=self.vr_sample();picking=sample['vrPicking']
         picking['nodes'].update({'rightWand':{'status':'available','world':{'translation':[14.7,10,84]}},

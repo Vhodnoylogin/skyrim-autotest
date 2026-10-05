@@ -55,9 +55,11 @@ class Blocked(RuntimeError):
 
 class HTTPResponseError(RuntimeError):
     """Retain status/route/body without inferring the server's failure cause."""
-    def __init__(self, status, route, body):
+    def __init__(self, status, route, body, diagnostics=None):
         self.status, self.route, self.body = status, route, body
-        super().__init__(f'HTTP {status} {route}: {body}')
+        self.diagnostics = diagnostics or {}
+        detail = ' ' + json.dumps(self.diagnostics) if self.diagnostics else ''
+        super().__init__(f'HTTP {status} {route}: {body}' + detail)
 
 
 class ToolError(RuntimeError):
@@ -108,7 +110,10 @@ def request(port, route, body=None, token=None, timeout=12):
             return json.load(response)
     except urllib.error.HTTPError as e:
         detail = e.read().decode('utf-8', errors='replace')
-        raise HTTPResponseError(e.code, route, detail) from None
+        diagnostics = {key: str(e.headers.get(key))[:2048]
+                       for key in ('EXCEPTION_WHAT', 'Content-Type', 'X-Request-ID')
+                       if e.headers and e.headers.get(key)}
+        raise HTTPResponseError(e.code, route, detail, diagnostics) from None
 
 
 def set_ini(text, section, key, value):

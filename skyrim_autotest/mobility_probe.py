@@ -56,15 +56,15 @@ def vr_pick_envelope(snapshot):
     return picking
 
 
-def primary_aim_fixture_position(snapshot, distance=50):
+def aim_fixture_position(snapshot, node_name, distance=50):
     picking = vr_pick_envelope(snapshot)
-    node = picking.get('nodes', {}).get('primaryAim', {})
+    node = picking.get('nodes', {}).get(node_name, {})
     transform = node.get('world', {})
     origin, rotation = transform.get('translation'), transform.get('rotationRowMajor')
     if (node.get('status') != 'available' or not isinstance(origin, list) or len(origin) != 3
             or not isinstance(rotation, list) or len(rotation) != 9
             or any(type(v) not in (int, float) or not math.isfinite(v) for v in origin + rotation)):
-        raise AssertionError('Actual primary aim world transform unavailable')
+        raise AssertionError('Actual ' + node_name + ' world transform unavailable')
     # Skyrim local +Y forward is a placement candidate, never proof of a target.
     direction = [rotation[1], rotation[4], rotation[7]]
     length = math.sqrt(sum(v*v for v in direction))
@@ -73,11 +73,15 @@ def primary_aim_fixture_position(snapshot, distance=50):
     return [origin[i] + distance * direction[i] / length for i in range(3)]
 
 
-def exact_right_pick(before, after, ref):
+def primary_aim_fixture_position(snapshot, distance=50):
+    return aim_fixture_position(snapshot, 'primaryAim', distance)
+
+
+def exact_device_pick(before, after, ref, role):
     try:
         vr_pick_envelope(before)
         picking = vr_pick_envelope(after)
-        identity = picking.get('devices', {}).get('right', {})
+        identity = picking.get('devices', {}).get(role, {})
         target = identity.get('target') or {}
         return (before['sessionId'] == after['sessionId']
                 and before['loadGeneration'] == after['loadGeneration']
@@ -87,6 +91,10 @@ def exact_right_pick(before, after, ref):
                 and int(target.get('form', '0'), 16) == int(ref, 16))
     except (AssertionError, TypeError, ValueError):
         return False
+
+
+def exact_right_pick(before, after, ref):
+    return exact_device_pick(before, after, ref, 'right')
 
 
 def vive_activation(snapshot):
@@ -116,7 +124,7 @@ def vive_activation(snapshot):
                 if mapping.get('key') in (2,32,33) and type(mapping.get('key')) is int:
                     if mapping.get('modifier') in (0,65535) and mapping.get('linked') is False:
                         candidates.append({'role':role,'key':mapping['key'],'event':event,
-                                           'device':device,'mapping':mapping,'primaryDistances':distances})
+                                           'device':device,'mapping':mapping,'primaryDistances':distances,'primaryRole':primary})
         if len(candidates)==1:
             return candidates[0]
         if candidates:
@@ -298,17 +306,22 @@ def execute(session, scenario):
         papyrus('ObjectReference', 'SetMotionType', [4, True], target=ref)
         time.sleep(.3)
         aim = session.tool('inspect', {'kind': 'world_observer', 'refs': ['0x14']})
-        target = primary_aim_fixture_position(aim)
+        binding = vive_activation(aim)
+        aim_name = 'primaryAim' if binding['role'] == binding['primaryRole'] else 'secondaryAim'
+        target = aim_fixture_position(aim, aim_name)
         place_owned_fixture(papyrus, ref, target)
         time.sleep(.5)
         selected = session.tool('inspect', {'kind': 'world_observer', 'refs': [ref]})
         crosshair = papyrus('Game', 'GetCurrentCrosshairRef')
         session.log('vanilla-pickup-aim', reference=ref, position=target, before=aim,
                     selected=selected, cachedPapyrusCrosshair=crosshair, fixtureMotionType=4,
-                    placementBasis='actual PrimaryMagicAimNode local +Y; exact right target still required')
-        exact = exact_right_pick(aim, selected, ref)
+                    placementBasis='actual ' + aim_name + ' local +Y; exact input-hand target required',
+                    binding=binding)
+        exact = exact_device_pick(aim, selected, ref, binding['role'])
         if exact:
-            binding = vive_activation(selected)
+            fresh_binding = vive_activation(selected)
+            if fresh_binding != binding:
+                raise AssertionError('Loaded activation mapping changed before input; no press sent')
             activate = copy.deepcopy(frame)
             activate[binding['role']]['controller'].update(pressed=1 << binding['key'], touched=1 << binding['key'],
                 axes=[[0, 0], [1 if binding['key']==33 else 0, 0], [0, 0], [0, 0], [0, 0]])
@@ -346,7 +359,7 @@ def execute(session, scenario):
                                             'result': 'unavailable', 'observation': {
                                                 'reference': ref, 'crosshair': crosshair,
                                                 'selected': selected, 'placementSample': aim, 'position': target,
-                                                'reason': 'Exact fixture not selected by the vanilla activation ray; input not sent'}})
+                                                'reason': 'Exact fixture not selected by the mapped input hand activation ray; input not sent'}})
             session.save()
     finally:
         session.tool('driver', {'action': 'release'})

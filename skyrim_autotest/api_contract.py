@@ -82,7 +82,7 @@ def read_description(session, script):
             if error.route != 'api/tool/papyrus' or error.status not in (500, 502, 503, 504):
                 raise
             session.log('papyrus-metadata-read-retry', script=script, attempt=attempt,
-                        status=error.status, body=error.body,
+                        status=error.status, body=error.body, diagnostics=error.diagnostics,
                         remainingSeconds=max(0, end-time.monotonic()),
                         domain='read-only API metadata; server cause unqualified')
             if time.monotonic() >= end:
