@@ -1,8 +1,12 @@
 # Scenario and order contract (schemaVersion 1)
 
 `startMode:"new-game"` selects the identified NEW item in the actual Skyrim VR
-main menu, verifies its confirmation state, and requires a fresh `newGame`
-lifecycle event before world readiness. It is mutually exclusive with `fixture`;
+main menu, verifies its confirmation state, and requires fresh ordered main-menu
+close, loading-start and target-cell-loaded events before world readiness.
+The separate SKSE `newGame` lifecycle is recorded if available; DevBench1.25 did
+not emit it in the observed actual VR new-game flow. A cell event alone is not
+enough, and save-load lifecycle events reject this path.
+It is mutually exclusive with `fixture`;
 the declared `cell` must be reached by the new-game/alternate-start flow itself.
 The executor does not load a save or use `coc` to establish this initial world.
 Known startup notifications are classified and unknown dialogs retain their

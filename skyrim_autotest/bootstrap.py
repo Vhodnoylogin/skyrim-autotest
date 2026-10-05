@@ -54,7 +54,7 @@ def advance_calibration(session):
     raise AssertionError('Startup calibration remained open after one physical button')
 
 
-def start_new_game(session):
+def start_new_game(session, cell):
     """Select the actual NEW item and confirm it through the live stock VR UI."""
     from .api_contract import validate_description
     from .runner import request
@@ -125,24 +125,43 @@ def start_new_game(session):
     session.phase('gameplay-new-game-load', 120)
     ui('InvokeBool', root + '.onAcceptPress', False)
     end = time.monotonic() + 90
+    last_logged_seq = last_seq
     while time.monotonic() < end:
         events = request(session.state['port'], 'api/events')
-        loaded = [event for event in events.get('events', [])
-                  if event.get('topic') == 'lifecycle'
-                  and event.get('data', {}).get('event') == 'newGame'
-                  and event.get('seq', 0) > last_seq
+        fresh = [event for event in events.get('events', [])
+                  if event.get('seq', 0) > last_seq
                   and event.get('frame', 0) >= before['frame']]
-        if loaded:
-            session.state['newGameStarted'] = {'events': loaded, 'selection': matches[0],
+        if fresh and fresh[-1].get('seq', 0) != last_logged_seq:
+            last_logged_seq = fresh[-1]['seq']
+            session.log('new-game-transition-events', events=fresh)
+        if any(event.get('topic') == 'lifecycle' and
+               event.get('data', {}).get('event') in ('preLoadGame', 'postLoadGame')
+               for event in fresh):
+            raise AssertionError('New Game unexpectedly used a save-load transition')
+        closed = [event for event in fresh if event.get('topic') == 'menu'
+                  and event.get('data') == {'name': 'Main Menu', 'opening': False}]
+        loading = [event for event in fresh if event.get('topic') == 'menu'
+                   and event.get('data') == {'name': 'Loading Menu', 'opening': True}]
+        loaded = [event for event in fresh if event.get('topic') == 'scene.cellLoaded'
+                  and event.get('data', {}).get('cell') == cell]
+        if closed and loading and loaded and closed[0]['seq'] <= loading[0]['seq'] < loaded[0]['seq']:
+            session.state['newGameStarted'] = {'events': fresh, 'selection': matches[0],
+                                              'evidenceBasis': 'Identified NEW confirmation and fresh menu/loading/cell transition',
+                                              'lifecycleNewGameObserved': any(
+                                                  e.get('topic') == 'lifecycle' and e.get('data', {}).get('event') == 'newGame'
+                                                  for e in fresh),
                                               'saveLoaded': False, 'consoleBootstrap': False}
             session.state.setdefault('checks', []).append({
-                'name': 'new game lifecycle observed', 'result': 'passed',
+                'name': 'new game world transition observed', 'result': 'passed',
                 'observation': session.state['newGameStarted']})
             session.save()
             session.log('gameplay-new-game-started', events=loaded)
             return
         time.sleep(.5)
-    raise AssertionError('New Game request had no fresh lifecycle confirmation')
+    session.log('new-game-transition-timeout', events=events,
+                menus=session.tool('menu', {'action': 'list'}),
+                scene=session.tool('inspect', {'kind': 'scene'}))
+    raise AssertionError('New Game request had no verified fresh world transition')
 
 
 def prepare_gameplay(session, scenario):
@@ -166,7 +185,7 @@ def prepare_gameplay(session, scenario):
             raise AssertionError('VR playroom did not expose the supported startup screen')
         time.sleep(.25)
     if new_game:
-        start_new_game(session)
+        start_new_game(session, cell)
     if fixture:
         from .runner import request
         session.phase('gameplay-load-pinned-fixture', 120)

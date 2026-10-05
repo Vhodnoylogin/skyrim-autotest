@@ -58,7 +58,7 @@ class NewGameTests(unittest.TestCase):
     def test_wrong_selection_never_confirms_or_starts_new_world(self):
         session = Session(selected=7)
         with self.assertRaisesRegex(AssertionError, 'selection changed'):
-            bootstrap.start_new_game(session)
+            bootstrap.start_new_game(session, 'RealmLorkhan')
         self.assertFalse(session.started)
         self.assertFalse(any(args.get('function', '').startswith('Invoke')
                              for _, args in session.calls))
@@ -70,23 +70,42 @@ class NewGameTests(unittest.TestCase):
         with patch.object(runner, 'request', return_value=old), \
                 patch.object(bootstrap.time, 'monotonic', clock.monotonic), \
                 patch.object(bootstrap.time, 'sleep', clock.sleep):
-            with self.assertRaisesRegex(AssertionError, 'fresh lifecycle'):
-                bootstrap.start_new_game(session)
+            with self.assertRaisesRegex(AssertionError, 'fresh world transition'):
+                bootstrap.start_new_game(session, 'RealmLorkhan')
         self.assertNotIn('newGameStarted', session.state)
         self.assertEqual(sum(args.get('function') == 'InvokeBool'
                              for _, args in session.calls), 1)
 
     def test_verified_new_game_never_loads_a_save_or_uses_console_bootstrap(self):
         session = Session(); clock = Clock()
-        events = {'events': [{'topic': 'lifecycle', 'data': {'event': 'newGame'},
-                              'seq': 2, 'frame': 11}]}
+        events = {'events': [
+            {'topic': 'menu', 'data': {'name': 'Main Menu', 'opening': False}, 'seq': 2, 'frame': 11},
+            {'topic': 'menu', 'data': {'name': 'Loading Menu', 'opening': True}, 'seq': 3, 'frame': 11},
+            {'topic': 'scene.cellLoaded', 'data': {'cell': 'RealmLorkhan'}, 'seq': 4, 'frame': 12}]}
         with patch.object(runner, 'request', side_effect=[{'events': []}, events]), \
                 patch.object(bootstrap.time, 'monotonic', clock.monotonic), \
                 patch.object(bootstrap.time, 'sleep', clock.sleep):
-            bootstrap.start_new_game(session)
+            bootstrap.start_new_game(session, 'RealmLorkhan')
         self.assertTrue(session.state['newGameStarted']['events'])
         self.assertFalse(session.state['newGameStarted']['saveLoaded'])
+        self.assertFalse(session.state['newGameStarted']['lifecycleNewGameObserved'])
         self.assertFalse(any(name in ('game', 'console') for name, _ in session.calls))
+
+    def test_cell_event_alone_or_wrong_world_does_not_establish_new_game(self):
+        for cell, include_menus in [('RealmLorkhan', False), ('Other', True)]:
+            session = Session(); clock = Clock()
+            events = [{'topic': 'scene.cellLoaded', 'data': {'cell': cell}, 'seq': 4, 'frame': 12}]
+            if include_menus:
+                events = [
+                    {'topic': 'menu', 'data': {'name': 'Main Menu', 'opening': False}, 'seq': 2, 'frame': 11},
+                    {'topic': 'menu', 'data': {'name': 'Loading Menu', 'opening': True}, 'seq': 3, 'frame': 11}, *events]
+            with self.subTest(cell=cell), patch.object(runner, 'request', side_effect=lambda *a: {
+                    'events': events if session.started else []}), \
+                    patch.object(bootstrap.time, 'monotonic', clock.monotonic), \
+                    patch.object(bootstrap.time, 'sleep', clock.sleep):
+                with self.assertRaisesRegex(AssertionError, 'fresh world transition'):
+                    bootstrap.start_new_game(session, 'RealmLorkhan')
+            self.assertNotIn('newGameStarted', session.state)
 
     def test_delayed_startup_modal_is_collected_without_a_second_button(self):
         class CalibrationSession:
