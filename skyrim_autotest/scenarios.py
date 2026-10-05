@@ -15,13 +15,17 @@ def validate(scenario):
     if 'allowBackgroundVR' in scenario and (type(scenario['allowBackgroundVR']) is not bool or scenario.get('kind') not in ('vr-hand-probe', 'vr-mobility-probe')):
         raise ValueError('allowBackgroundVR is a boolean option for physical VR probes only')
     fixture = scenario.get('fixture')
+    if 'startMode' in scenario and scenario['startMode'] != 'new-game':
+        raise ValueError('Unsupported initial startMode')
+    if scenario.get('startMode') == 'new-game' and (fixture or not scenario.get('cell')):
+        raise ValueError('New Game requires a declared cell and cannot load a save fixture')
     if fixture:
         if not isinstance(fixture, dict) or not re.fullmatch(r'[A-Za-z0-9_-]+', fixture.get('saveStem', '')) or any(not re.fullmatch(r'[0-9a-f]{64}', fixture.get(ext + 'Sha256', '')) for ext in ('ess', 'skse')):
             raise ValueError('Fixture needs safe saveStem and pinned ESS/SKSE hashes')
     if scenario.get('kind') == 'vr-mobility-probe':
         if not re.fullmatch(r'[A-Za-z0-9_]+', scenario.get('cell', '')):
             raise ValueError('Mobility probe needs a safe cell editor id')
-        for key in ('physicalGrab', 'observer', 'keyboardDiagnostics'):
+        for key in ('physicalGrab', 'observer', 'keyboardDiagnostics', 'controllerJumpRequired'):
             if key in scenario and type(scenario[key]) is not bool:
                 raise ValueError(key + ' must be boolean')
         return

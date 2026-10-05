@@ -50,11 +50,11 @@ def execute(session, scenario):
     qualify(session, mobility=True, hand=scenario.get('physicalGrab', False))
     failed = []
 
-    def record(name, passed, observation):
+    def record(name, passed, observation, required=True):
         session.state['checks'].append({'name': name, 'result': 'passed' if passed else 'failed',
                                          'observation': observation})
         session.save()
-        if not passed:
+        if not passed and required:
             failed.append(name)
 
     def papyrus(script, function, args=None, target=None):
@@ -181,7 +181,9 @@ def execute(session, scenario):
     rise = max([p[2] for p in samples] + [start[2]]) - start[2]
     record('controller jump changes height', rise >= 5,
            {'start': start, 'samples': samples, 'maxRiseEngineUnits': rise,
-            'input': 'one right Vive trackpad north press/release; binding candidate explicitly tested'})
+            'input': 'one right Vive trackpad north press/release; binding candidate explicitly tested',
+            'required': scenario.get('controllerJumpRequired', True)},
+           required=scenario.get('controllerJumpRequired', True))
 
     if scenario.get('observer', True):
         session.phase('mobility-observer', 35)

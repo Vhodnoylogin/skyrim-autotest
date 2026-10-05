@@ -1,5 +1,20 @@
 # Scenario and order contract (schemaVersion 1)
 
+`startMode:"new-game"` selects the identified NEW item in the actual Skyrim VR
+main menu, verifies its confirmation state, and requires a fresh `newGame`
+lifecycle event before world readiness. It is mutually exclusive with `fixture`;
+the declared `cell` must be reached by the new-game/alternate-start flow itself.
+The executor does not load a save or use `coc` to establish this initial world.
+Known startup notifications are classified and unknown dialogs retain their
+exact text/buttons before stopping. Character creation remains a readiness gate.
+The stock VR and inspected Unobtrusive UI start-menu layouts are supported by
+explicit live NEW-token/state checks; unsupported layouts fail before activation.
+
+For a mobility probe, `controllerJumpRequired:false` keeps the physical jump
+candidate's measured failed/passed result but does not terminate the scenario
+for that optional diagnostic. Do not declare it among required order checks in
+that mode; keyboard jump and physical controller jump remain separate evidence.
+
 A generic scenario contains `name` and nonempty `steps`. Each step needs `name`,
 `tool`, `args` (object), a finite `timeout` in (0,180] seconds (default20), and
 `assert` rules. `observe:true` allows an explicit observation-only non-polling
