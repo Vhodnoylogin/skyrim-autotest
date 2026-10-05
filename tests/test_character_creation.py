@@ -8,9 +8,10 @@ class Clock:
     def sleep(self, value): self.now += value
 
 class CharacterSession:
-    def __init__(self, bad=False, stale=False):
+    def __init__(self, bad=False, stale=False, stock_confirmation=False):
         self.state = {}; self.calls = []; self.stage = 'character'; self.name = ''
         self.bad = bad; self.stale = stale
+        self.stock_confirmation = stock_confirmation
     def log(self, *args, **kwargs): pass
     def tool(self, tool, args):
         self.calls.append((tool, args))
@@ -20,14 +21,16 @@ class CharacterSession:
                         'messageBoxOpen': self.stage == 'confirm'}
             if args['action'] == 'describe':
                 return {'bodyText': 'Different choice' if self.bad else 'Finish?',
-                        'buttons': ['Yes', 'No'], 'cancelIndex': 1}
+                        'buttons': ['OK', 'Cancel'] if self.stock_confirmation else ['Yes', 'No'],
+                        'cancelIndex': -1 if self.stock_confirmation else 1}
             if args['action'] == 'accept': self.stage = 'name'; return {}
         if tool == 'papyrus':
             if args['action'] == 'describe': return {}
             function = args['function']; path = args['args'][0 if args['script']=='Game' else 1]
             if args['script'] == 'Game':
                 return {'returned': {'sYes':'Yes', 'sNo':'No', 'sRSMConfirm':'Finish?',
-                                     'sRSMFinishedWarning':'Other known warning'}[path]}
+                                     'sRSMFinishedWarning':'Other known warning',
+                                     'sOK':'OK','sCancel':'Cancel'}[path]}
             if function == 'GetString':
                 value = ('bottomBar' if path.endswith('.bottomBar._name') else
                          self.name if path.endswith('.text') else '')
@@ -57,6 +60,9 @@ class CharacterTests(unittest.TestCase):
         session=CharacterSession(bad=True)
         with self.assertRaisesRegex(AssertionError,'Unclassified'): self.invoke(session)
         self.assertFalse(any(a['action']=='accept' for t,a in session.calls if t=='menu'))
+    def test_actual_ok_cancel_confirmation_uses_exact_live_labels(self):
+        session=CharacterSession(stock_confirmation=True); self.invoke(session)
+        self.assertTrue(session.state['characterCreationCompleted'])
     def test_failed_name_write_is_not_accepted(self):
         session=CharacterSession(stale=True)
         with self.assertRaisesRegex(AssertionError,'write not confirmed'): self.invoke(session)

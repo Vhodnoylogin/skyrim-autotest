@@ -189,7 +189,7 @@ def complete_character_creation(session):
         raise AssertionError('Unidentified or ambiguous character creation UI')
     entry = root + ('.textEntry' if core else '.NameEntryInstance')
     settings = {}
-    for key in ('sRSMConfirm', 'sRSMFinishedWarning', 'sYes', 'sNo'):
+    for key in ('sRSMConfirm', 'sRSMFinishedWarning', 'sYes', 'sNo', 'sOK', 'sCancel'):
         settings[key] = session.tool('papyrus', {'action': 'call', 'script': 'Game',
                                    'function': 'GetGameSettingString', 'args': [key]})['returned']
     session.log('character-creation-settings', values=settings)
@@ -206,8 +206,12 @@ def complete_character_creation(session):
             candidates = [settings[key] for key in ('sRSMConfirm', 'sRSMFinishedWarning')
                           if isinstance(settings[key], str) and settings[key]]
             cancel = modal.get('cancelIndex')
-            if (modal.get('bodyText') not in candidates or
-                    modal.get('buttons') != [settings['sYes'], settings['sNo']] or cancel != 1):
+            known_buttons = ((settings['sYes'], settings['sNo'], 1),
+                             (settings['sOK'], settings['sCancel'], -1))
+            matched_buttons = any(all(isinstance(x, str) and x for x in (yes, no))
+                                  and modal.get('buttons') == [yes, no] and cancel == index
+                                  for yes, no, index in known_buttons)
+            if modal.get('bodyText') not in candidates or not matched_buttons:
                 raise AssertionError('Unclassified character confirmation; no answer sent')
             fresh = session.tool('menu', {'action': 'describe'})
             if fresh != modal:
