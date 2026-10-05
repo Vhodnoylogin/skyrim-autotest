@@ -99,7 +99,7 @@ def execute(session, scenario):
         session.phase('bootstrap-test-cell', 120)
         if guard_fixture_modal(session):
             time.sleep(1)
-    if not already_ready and not scenario.get('fixture'):
+    if not already_ready and not scenario.get('fixture') and not initialized.get('completed'):
         # A fresh game's alternate-start quest can change cells after the first
         # coc. Initialize that world, then deliberately enter the test cell.
         session.tool('console', {'action': 'exec', 'command': 'coc ' + scenario['cell']})
