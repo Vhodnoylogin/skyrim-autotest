@@ -89,6 +89,41 @@ def exact_right_pick(before, after, ref):
         return False
 
 
+def vive_activation(snapshot):
+    """Resolve one supported unmodified input from loaded gameplay bindings."""
+    picking = vr_pick_envelope(snapshot)
+    nodes = picking.get('nodes', {})
+    try:
+        points = {role:nodes[role]['world']['translation'] for role in ('primaryAim','rightWand','leftWand')}
+        if any(nodes[role].get('status') != 'available' or len(point) != 3
+               or any(type(v) not in (int,float) or not math.isfinite(v) for v in point)
+               for role,point in points.items()):
+            raise ValueError('Invalid rig origin')
+        distances = {role:math.dist(points['primaryAim'],points[role+'Wand']) for role in ('right','left')}
+        primary = min(distances, key=distances.get)
+        if distances[primary] > 10 or distances['left' if primary=='right' else 'right'] - distances[primary] < 10:
+            raise ValueError('Ambiguous primary rig')
+    except (KeyError,TypeError,ValueError):
+        raise AssertionError('Primary physical-controller identity unavailable') from None
+    bindings = picking.get('gameplayBindings', {})
+    if bindings.get('status') != 'available' or bindings.get('context') != 'gameplay':
+        raise AssertionError('Loaded Vive gameplay mappings unavailable')
+    roles = {'vivePrimary':primary,'viveSecondary':'left' if primary=='right' else 'right'}
+    for event in ('Activate','Teleport Or Activate'):
+        candidates=[]
+        for device,role in roles.items():
+            for mapping in bindings.get('devices', {}).get(device, {}).get(event, []):
+                if mapping.get('key') in (2,32,33) and type(mapping.get('key')) is int:
+                    if mapping.get('modifier') in (0,65535) and mapping.get('linked') is False:
+                        candidates.append({'role':role,'key':mapping['key'],'event':event,
+                                           'device':device,'mapping':mapping,'primaryDistances':distances})
+        if len(candidates)==1:
+            return candidates[0]
+        if candidates:
+            raise AssertionError('Activation mapping ambiguous; no guessed input')
+    raise AssertionError('No supported physical Vive activation mapping')
+
+
 def execute(session, scenario):
     if session.state.get('inputBackend') != 'driver' or session.state.get('driverBackend') != 'file':
         raise ValueError('Mobility probe requires the physical file adapter')
@@ -272,9 +307,11 @@ def execute(session, scenario):
                     placementBasis='actual PrimaryMagicAimNode local +Y; exact right target still required')
         exact = exact_right_pick(aim, selected, ref)
         if exact:
+            binding = vive_activation(selected)
             activate = copy.deepcopy(frame)
-            activate['right']['controller'].update(pressed=1 << 33, touched=1 << 33,
-                                                  axes=[[0, 0], [1, 0], [0, 0], [0, 0], [0, 0]])
+            activate[binding['role']]['controller'].update(pressed=1 << binding['key'], touched=1 << binding['key'],
+                axes=[[0, 0], [1 if binding['key']==33 else 0, 0], [0, 0], [0, 0], [0, 0]])
+            session.log('vanilla-pickup-binding', binding=binding, exactReference=ref)
             publish(activate, 2)
             time.sleep(.25)
             session.tool('driver', {'action': 'release'})
@@ -282,7 +319,7 @@ def execute(session, scenario):
             current = papyrus('ObjectReference', 'GetItemCount', [base], target='0x14')
             record('vanilla physical inventory pickup', current > item_count,
                    {'reference': ref, 'crosshair': crosshair, 'selected': selected, 'beforeCount': item_count,
-                    'afterCount': current, 'input': 'one right Vive trigger press/release',
+                    'afterCount': current, 'input': 'one mapped physical Vive press/release', 'binding': binding,
                     'domain': 'inventory acquisition, not HIGGS physical hold'})
         else:
             # Never activate another target or turn a scripted Activate into input proof.

@@ -34,6 +34,20 @@ class MobilityProbeTests(unittest.TestCase):
         self.assertAlmostEqual(result[1],25,places=4)
         self.assertAlmostEqual(result[2],56.69873,places=4)
 
+    def test_loaded_combined_activate_uses_secondary_trackpad_not_attack_trigger(self):
+        sample=self.vr_sample();picking=sample['vrPicking']
+        picking['nodes'].update({'rightWand':{'status':'available','world':{'translation':[14.7,10,84]}},
+                                'leftWand':{'status':'available','world':{'translation':[-14.7,10,84]}}})
+        picking['gameplayBindings']={'status':'available','context':'gameplay','devices':{
+            'vivePrimary':{'Activate':[{'key':255,'modifier':0,'linked':False}]},
+            'viveSecondary':{'Teleport Or Activate':[{'key':32,'modifier':0,'linked':False}]}}}
+        binding=mobility_probe.vive_activation(sample)
+        self.assertEqual((binding['role'],binding['key'],binding['event']),('left',32,'Teleport Or Activate'))
+        picking['gameplayBindings']['devices']['viveSecondary']['Teleport Or Activate'][0]['linked']=True
+        with self.assertRaises(AssertionError):mobility_probe.vive_activation(sample)
+        picking['nodes']['leftWand']['world']['translation']=[14.7,10,84]
+        with self.assertRaisesRegex(AssertionError,'identity unavailable'):mobility_probe.vive_activation(sample)
+
     def test_unsafe_pose_or_missing_device_target_cannot_authorize_input(self):
         for field,value in [('units','openvr_metres'),('space','local'),('status','unavailable')]:
             before,after=self.vr_sample(),self.vr_sample(2)
