@@ -66,6 +66,7 @@ def decode_runtime(read, base):
             'targetHandles':list(struct.unpack('<3I',read(picker+4,12))),
             'playerDominantControllerRaw':struct.unpack('<I',read(player+0x6D4,4))[0],
             'playerVRGrabStateRaw':[struct.unpack('<I',read(player+0xED0+i*0x68,4))[0] for i in (0,1)],
+            'activationBothWandsRaw':read(base+0x1EC59C0,1)[0],
             'routingCode':{'rva':hex(route-base),'bytesHex':code.hex(),
                            'sha256':hashlib.sha256(code).hexdigest()},
             'atomicWorldSample':False,'domain':'bounded read-only raw runtime diagnostic, not gameplay proof'}

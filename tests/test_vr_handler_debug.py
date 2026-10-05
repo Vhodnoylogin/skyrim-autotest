@@ -17,6 +17,7 @@ class HandlerDiagnosticTests(unittest.TestCase):
                   base+0x2FEB9F0:player,base+0x2FC60C0:picker,base+0x2FEB9B0:vr,
                   vr:table,table+0x78:route}
         def read(address,size):
+            if address==base+0x1EC59C0 and size==1:return b'\x00'
             if size==8 and address in pointers:return struct.pack('<Q',pointers[address])
             if address==handler and size==0x70:
                 result=bytearray(size);result[8]=1;result[0x60]=1;return bytes(result)

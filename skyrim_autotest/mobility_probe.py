@@ -372,7 +372,9 @@ def execute(session, scenario):
         selection_role = binding['role'] if settings[fixture_name] is True else binding['primaryRole']
         aim_name = 'primaryAim' if selection_role == binding['primaryRole'] else 'secondaryAim'
         session.log('vanilla-pickup-live-settings', settings=settings,
-                    domain='read-only live Utility INI API; no player-setting mutation')
+                    runtimeFixtureApplied=activation_fixture.original is not None,
+                    copiedProfileFixture=session.state.get('activationHandStartupFixture'),
+                    domain='live Utility INI read; declared runtime/copied-profile fixture recorded separately')
         target = aim_fixture_position(aim, aim_name)
         place_owned_fixture(papyrus, ref, target)
         time.sleep(.5)
@@ -383,13 +385,13 @@ def execute(session, scenario):
                     placementBasis='actual '+aim_name+' local +Y; exact active-hand target required',
                     binding=binding, settings=settings)
         exact = exact_device_pick(aim, selected, ref, selection_role)
+        if scenario.get('recordPickupHandlers', False):
+            from . import vr_handler_debug
+            vr_handler_debug.collect(session)
         if exact:
             fresh_binding = vive_activation(selected)
             if fresh_binding != binding:
                 raise AssertionError('Loaded activation mapping changed before input; no press sent')
-            if scenario.get('recordPickupHandlers', False):
-                from . import vr_handler_debug
-                vr_handler_debug.collect(session)
             activate = copy.deepcopy(frame)
             trackpad = activation_trackpad(binding, settings)
             activate[binding['role']]['controller'].update(pressed=1 << binding['key'], touched=1 << binding['key'],
@@ -443,8 +445,9 @@ def execute(session, scenario):
                                                 'reference': ref, 'crosshair': crosshair,
                                                 'selected': selected, 'placementSample': aim, 'position': target,
                                                 'binding': binding, 'settings': settings,
-                                                'reason': 'Exact fixture not selected by the actual dominant-hand activation ray; input not sent'}})
+                                                'reason': 'Exact fixture not selected by actual '+selection_role+' activation ray; input not sent'}})
             session.save()
+            failed.append('vanilla physical inventory pickup unavailable')
     finally:
         try:
             session.tool('driver', {'action': 'release'})

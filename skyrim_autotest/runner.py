@@ -131,6 +131,25 @@ def set_ini(text, section, key, value):
     return text[:match.start(1)] + contents + text[match.end(1):]
 
 
+def prepare_activation_profile(test_profile, scenario, source_profile, run_id):
+    """Explicit self-test fixture in the owned copied profile, before game startup."""
+    if not scenario.get('activationHandStartupFixture', False):
+        return []
+    profile=Path(test_profile).resolve()
+    if (profile.parent != P.profiles.resolve() or profile.name != 'Autotest-'+run_id
+            or profile == Path(source_profile).resolve() or not profile.is_dir()):
+        raise Blocked('Activation fixture may only alter this run\'s copied profile')
+    entries=[]
+    for name in ('Skyrim.ini', 'SkyrimPrefs.ini'):
+        path=profile/name
+        original=path.read_bytes() if path.exists() else b''
+        text=set_ini(original.decode('utf-8-sig'), 'VRInput', 'bActivateWithBothWands', '1')
+        path.write_text(text, encoding='utf-8')
+        entries.append({'path':str(path),'originalSha256':hashlib.sha256(original).hexdigest(),
+                        'sha256':sha(path),'setting':'bActivateWithBothWands:VRInput','value':True})
+    return entries
+
+
 def preflight(profile, restart_idle_mo2=False):
     if Path(profile).name != profile or profile in ('.', '..'):
         raise Blocked('Invalid profile name')
@@ -537,6 +556,14 @@ class Session:
                 text = re.sub(r'(?im)^(\s*' + key + r'\s*=).*$', r'\g<1>0', text)
                 text = set_ini(text, 'Main', key, '0')
             prefs.write_text(text, encoding='utf-8')
+        fixture_files=prepare_activation_profile(test_profile,self.state['scenario'],
+                                                 P.profiles/info['profile'],self.state['id'])
+        if fixture_files:
+            self.state['activationHandStartupFixture']={'files':fixture_files,
+                'scope':'explicit owned copied-profile self-test fixture; source profile unchanged'}
+            self.save()
+            self.log('activation-hand-copied-profile-fixture', files=fixture_files,
+                     sourceProfileUnchanged=True, cleanup='ordinary restore/archive/removal')
         # MO2 stores its selected profile in memory, so only write while it is closed.
         text = P.mo2_ini.read_bytes().decode('utf-8-sig')
         text = re.sub(r'(?m)^selected_profile=.*$', lambda _: 'selected_profile=@ByteArray(' + profile_name + ')', text)

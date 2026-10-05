@@ -34,6 +34,12 @@ secondary aim, and restore/verify its original value even after a partial apply
 error. It defaults off, does not save INI files and is not a mod-order startup
 transition. Record this fixture scope in the order and verdict; it does not prove
 the unchanged original mapping/configuration supports secondary activation.
+`activationHandStartupFixture:true` additionally sets this value in the run's
+owned copied-profile Skyrim.ini and SkyrimPrefs.ini before launching, with
+before/after hashes. It requires `activationHandFixture:true`; original profiles
+are never targets. Ordinary restoration/archive/removal ends that fixture. Use
+this explicit self-test scope when the native picking pipeline needs the setting
+at startup, and verify loaded state instead of assuming hot INI changes rebuild it.
 Live settings and native grabbed references never substitute for the required
 increase in inventory. `recordPickupInput:true`
 adds an owned raw DevBench event recording with transfer and ownership checks.
