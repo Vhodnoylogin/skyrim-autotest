@@ -37,12 +37,45 @@ class ApiContractTests(unittest.TestCase):
             with self.subTest(value=value),self.assertRaises(AssertionError):
                 api_contract.validate_description('ObjectReference',value,'memberFunctions',{'SetPosition':['float']*3})
 
+    def test_only_server_failure_of_metadata_read_can_be_repeated(self):
+        from unittest.mock import patch
+        from skyrim_autotest.runner import HTTPResponseError
+        class Session:
+            def __init__(self, status):self.calls=[];self.status=status
+            def log(self,*args,**kwargs):pass
+            def tool(self,name,args,**kwargs):
+                self.calls.append((name,args))
+                if len(self.calls)==1:raise HTTPResponseError(self.status,'api/tool/papyrus','')
+                return {'name':'ObjectReference'}
+        session=Session(500)
+        with patch('time.sleep'):
+            self.assertEqual(api_contract.read_description(session,'ObjectReference'),
+                             {'name':'ObjectReference'})
+        self.assertEqual(len(session.calls),2)
+        self.assertTrue(all(args['action']=='describe' for _,args in session.calls))
+        for status in (400,401,403,404):
+            session=Session(status)
+            with self.assertRaises(HTTPResponseError):
+                api_contract.read_description(session,'ObjectReference')
+            self.assertEqual(len(session.calls),1)
+    def test_repeated_server_failure_expires_without_marking_api_ready(self):
+        from unittest.mock import patch
+        from skyrim_autotest.runner import HTTPResponseError
+        class Session:
+            state={}
+            def phase(self,*args):pass
+            def log(self,*args,**kwargs):pass
+            def tool(self,name,args,**kwargs):raise HTTPResponseError(500,'api/tool/papyrus','')
+        session=Session()
+        with patch('time.monotonic',side_effect=[0,0,16]), self.assertRaises(HTTPResponseError):
+            api_contract.qualify(session,mobility=True)
+        self.assertNotIn('livePapyrusApi',session.state)
     def test_qualification_failure_is_read_only_and_never_marks_api_ready(self):
         class Session:
             state={}
             def __init__(self):self.calls=[]
             def phase(self,*a):pass
-            def tool(self,name,args):
+            def tool(self,name,args,**kwargs):
                 self.calls.append((name,args));return {'name':args['script'],'memberFunctions':[]}
         session=Session()
         with self.assertRaises(AssertionError):api_contract.qualify(session,mobility=True)

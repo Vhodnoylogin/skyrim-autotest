@@ -67,6 +67,29 @@ def validate_description(script, description, scope, methods):
     return checked
 
 
+def read_description(session, script):
+    """Bounded metadata reads only; failures are retained, mutations never retried."""
+    import time
+    from .runner import HTTPResponseError
+    end = time.monotonic() + 15
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return session.tool('papyrus', {'action': 'describe', 'script': script},
+                                timeout=5, deadline=end)
+        except HTTPResponseError as error:
+            if error.route != 'api/tool/papyrus' or error.status not in (500, 502, 503, 504):
+                raise
+            session.log('papyrus-metadata-read-retry', script=script, attempt=attempt,
+                        status=error.status, body=error.body,
+                        remainingSeconds=max(0, end-time.monotonic()),
+                        domain='read-only API metadata; server cause unqualified')
+            if time.monotonic() >= end:
+                raise
+            time.sleep(min(.5, max(0, end-time.monotonic())))
+
+
 def qualify(session, mobility=False, hand=False):
     required = {}
     for table, enabled in ((MOBILITY, mobility), (HAND, hand)):
@@ -78,7 +101,7 @@ def qualify(session, mobility=False, hand=False):
     session.phase('qualify-live-papyrus-api', 90)
     checked = []
     for script, (scope, methods) in required.items():
-        value = session.tool('papyrus', {'action': 'describe', 'script': script})
+        value = read_description(session, script)
         checked.extend(validate_description(script, value, scope, methods))
     session.log('live-papyrus-api-qualified', methods=checked)
     session.state['livePapyrusApi'] = checked
