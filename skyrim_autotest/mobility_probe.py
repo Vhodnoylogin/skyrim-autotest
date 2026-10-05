@@ -46,6 +46,8 @@ def place_owned_fixture(papyrus, ref, xyz):
 def execute(session, scenario):
     if session.state.get('inputBackend') != 'driver' or session.state.get('driverBackend') != 'file':
         raise ValueError('Mobility probe requires the physical file adapter')
+    from .api_contract import qualify
+    qualify(session, mobility=True, hand=scenario.get('physicalGrab', False))
     failed = []
 
     def record(name, passed, observation):

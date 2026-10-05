@@ -135,6 +135,11 @@ input. Readiness failures never replay load/input/coc mutations. The platform
 logs `gameplay-ready` separately from subject assertions. A scenario with neither
 cell nor pinned save cannot dispatch mod-test actions. This common path still
 needs live qualification; API responsiveness alone cannot establish readiness.
+Before mobility mutations the executor reads live `papyrus describe` metadata
+and verifies required member/global signatures, including atomic
+`ObjectReference.SetPosition(float,float,float)`. Missing/wrong class, scope or
+parameter types fail before fixture/control actions. The metadata and result
+remain in raw evidence; installed PSC source alone does not qualify the loaded VM.
 
 The default physical probe requires the owned game to acquire Windows foreground.
 Optional `allowBackgroundVR:true` permits the probe to attempt physical testing
