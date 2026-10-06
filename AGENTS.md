@@ -43,7 +43,13 @@ installation must remain within the owner's requested scope.
    deadline and log. Started reads, unknown failures and mutations remain terminal.
    The built-in cell-readiness wait separately permits scene-only HTTP
    500/502/503/504 or structured abandoned_before_start reads within its original
-   90 seconds. Preserve every error; require stable matching scene data afterward.
+   90 seconds. Known UTF-8 serialization failures stop immediately; three
+   consecutive HTTP500 scene errors stop rather than consume the whole budget.
+   Check late blocking dialogs during save/cell transitions through the common
+   executor. Require playerLoaded and exact cell editorId/formId, never matching
+   text anywhere in a response. Text encoding diagnostics preserve unavailable
+   display fields; they do not waive subject text assertions or cell identity.
+   Preserve every error; require stable matching scene data afterward.
    Never repeat coc/load or treat a retried error as readiness. Identity/health
    errors and arbitrary scenario HTTP failures still stop the run.
    For explicit unattended physical VR scenarios, allowBackgroundVR:true may

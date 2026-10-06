@@ -233,3 +233,21 @@ Body tests that require HIGGS/structured state can proceed with pinned repaired
 DevBench instrumentation; broad control-chain acceptance remains incomplete.
 No further diagnostic launches were made after the owner stopped them for
 usage-budget reasons. Retained fixtures, reports and raw game code stay external.
+
+## 2026-10-06 Body Pouches readiness blockers
+
+The subsequent real Body attempt ended before subject testing: QASmoke loaded,
+but87 scene requests failed with json.type_error.316 (final byte0xC7), and an
+unresolved MessageBoxMenu opened during the transition. Zero of122 requested
+checks ran. The copied profile was successfully archived and removed; a
+separate diagnostic source-profile removal was blocked by command review.
+This overrides the earlier provisional ability-to-dispatch assessment above.
+
+The common cell wait now handles late startup modals, checks loaded player3D
+and exact editorId/formId, stops immediately on identified UTF-8 serialization
+errors, and limits consecutive unclassified HTTP500 errors to three. One
+deadline and no repeat of load/coc/input mutations are retained. Unknown dialogs
+remain terminal with collected text/buttons. Five added offline regressions
+cover the actual UTF-8 failure, modal arrival, unknown choices, unrelated cell
+text/no loaded player, and safe display-text degradation versus unavailable
+identity. All150 executor tests pass. This is not a live Body acceptance result.

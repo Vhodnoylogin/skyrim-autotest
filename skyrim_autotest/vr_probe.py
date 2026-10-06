@@ -6,17 +6,31 @@ import time
 
 
 def wait_test_cell(session, cell):
-    """Bounded scene-only readiness reads; never repeat the preceding coc."""
+    """Observe exact cell identity and late startup dialogs; never repeat coc."""
     from .runner import HTTPResponseError, ToolError
     end = time.monotonic() + 90
     stable_since = None
     attempts, retries = 0, 0
     last_error = None
+    consecutive_server_errors = 0
     while time.monotonic() < end:
+        # Notifications can open during save/coc transitions, before scene data
+        # becomes readable. Classify them in the common executor, not in orders.
+        menus = session.tool('menu', {'action': 'list'}, deadline=end)
+        if menus.get('messageBoxOpen'):
+            guard_fixture_modal(session)
+            stable_since = None
+            continue
         attempts += 1
         try:
             scene = session.tool('inspect', {'kind': 'scene'}, timeout=12, deadline=end)
         except Exception as error:
+            diagnostic = (error.body if isinstance(error, HTTPResponseError) else str(error))
+            if ('json.exception.type_error.316' in diagnostic or
+                    'invalid UTF-8 in tool output' in diagnostic):
+                session.log('bootstrap-scene-terminal', attempt=attempts,
+                            reason='provider-text-serialization', error=str(error))
+                raise
             # These are candidate readiness failures, not proof of a transient
             # server condition. They cannot pass unless stable scene data follows.
             retryable = (
@@ -29,6 +43,12 @@ def wait_test_cell(session, cell):
                 error.result.get('outcome') == 'abandoned_before_start')
             if not retryable:
                 raise
+            consecutive_server_errors = (consecutive_server_errors + 1
+                                         if isinstance(error, HTTPResponseError) and error.status == 500 else 0)
+            if consecutive_server_errors >= 3:
+                session.log('bootstrap-scene-terminal', attempt=attempts,
+                            reason='persistent-server-error', error=str(error), body=error.body)
+                raise
             stable_since = None
             retries += 1
             last_error = str(error)
@@ -37,13 +57,18 @@ def wait_test_cell(session, cell):
             session.log('bootstrap-scene-retry', attempt=attempts, error=last_error,
                         remainingSeconds=max(0, end - time.monotonic()), **details)
         else:
+            consecutive_server_errors = 0
             now = time.monotonic()
             session.log('bootstrap-scene', result=scene, attempt=attempts)
             if now > end:
                 session.log('bootstrap-scene-timeout', attempts=attempts, retries=retries,
                             reason='response-after-deadline', lastError=last_error)
                 raise TimeoutError('Test cell response arrived after readiness deadline')
-            if cell.casefold() in json.dumps(scene).casefold():
+            identity = scene.get('cell')
+            matches = (isinstance(identity, dict) and scene.get('playerLoaded') is True and
+                       any(isinstance(identity.get(key), str) and
+                           identity[key].casefold() == cell.casefold() for key in ('editorId', 'formId')))
+            if matches:
                 if stable_since is None:
                     stable_since = now
                 if now - stable_since > 4:
@@ -53,7 +78,7 @@ def wait_test_cell(session, cell):
                 stable_since = None
         time.sleep(min(1, max(0, end - time.monotonic())))
     session.log('bootstrap-scene-timeout', attempts=attempts, retries=retries, lastError=last_error)
-    raise AssertionError('Test cell did not load within 90 seconds' +
+    raise AssertionError('Test cell readiness could not be verified within 90 seconds' +
                          ('; last readiness error: ' + last_error if last_error else ''))
 
 
@@ -159,7 +184,7 @@ def classify_startup_modal(session, modal):
     """Recognize notices, never choices about the subject mod."""
     if len(modal.get('buttons', [])) != 1:
         return None
-    if modal.get('bodyText', '').startswith('Speech Broker на связи'):
+    if isinstance(modal.get('bodyText'), str) and modal['bodyText'].startswith('Speech Broker на связи'):
         return 'speech-broker-notice'
     # Realm overrides Skyrim.esm MQ101TempChooseSidesMessage (000947D2).
     # Verified MESG/DSD pairs, restricted to its fresh character-completed world.

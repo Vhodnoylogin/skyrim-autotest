@@ -51,3 +51,31 @@ commit 9106d402cfc7dcbc5bf7458be6748af19d7fc914.
 DevBench retains its upstream license/credits; the fork is not an upstream
 release. The source correction and native regression are published there;
 generated host dependency locks and test binaries remain external.
+
+## Current Body readiness candidate: 1.26.0
+
+Upstream1.26 keeps the same unfixed CommonLib pin and strict engine-string JSON
+serialization. Our branch [fix/vr-readiness-v126](https://github.com/Vhodnoylogin/devbench/tree/fix/vr-readiness-v126),
+commit b43bbae6841a6ec725d94af44478a1b17c9c7cd5, merges1.26 while retaining
+the pointer fix. It also normalizes malformed tool-result text without guessing
+its encoding: unreadable strings become null, and textEncodingDiagnostics
+preserves paths/raw hex/byte lengths with explicit bounds. Valid identities,
+numeric data and UTF-8 are retained. Text-dependent assertions cannot pass on
+null data. REST and MCP use the same registry normalization. Invalid keys,
+non-object roots and reserved-field conflicts fail explicitly. Event payloads
+are outside this correction's scope.
+
+Rebuild the exact published source with deployment disabled:
+
+```powershell
+python tools/build_devbench_fork.py --build-dir C:/TestBuilds/devbench-v126-readiness
+```
+
+The recipe reacquires digest-pinned Xmake, checks out the exact DevBench fork
+and corrected CommonLib, runs the compiled eight-case decoder regression and
+native tests, and builds a DLL/PDB pair outside Git. It does not deploy or start
+the game. The original1.25 builder remains a historical reproduction recipe.
+The candidate passed215 native cases and the eight actual decoder cases locally.
+Our executor passed150 offline tests. Combined Body Pouches qualification is
+pending; preserve the pre-subject failure and prepare a new pinned technical
+successor, never rewrite the old order or label its zero checks as tested.
