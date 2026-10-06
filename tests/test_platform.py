@@ -190,22 +190,26 @@ class PlatformTests(unittest.TestCase):
         reference = [-411.90506,2026.27026,6981.82471]
         origin = [.3,1.2,-.35]
         class Fake(Session):
-            def log(self, *args, **kwargs): pass
+            def log(self, kind, **kwargs):
+                if kind == 'platform-reach-position': self.increments.append(kwargs['trackingIncrementMetres'])
             def tool(self, tool, args, **kwargs):
                 self.calls.append((tool, copy.deepcopy(args)))
                 if tool == 'driver': self.state['hardwareFrame'] = copy.deepcopy(args['frame'])
-                if tool == 'menu': return {'messageBoxOpen': False, 'openMenus': [], 'menuStates': []}
+                if tool == 'menu':
+                    self.menu_observed = True
+                    return {'messageBoxOpen': False, 'openMenus': [], 'menuStates': []}
                 return {'published': True, 'acknowledgedByDriver': False}
-        for prepared in (False, True):
-            with self.subTest(prepared=prepared):
+        for prepared, escaped in ((False, False), (True, False), (True, True)):
+            with self.subTest(prepared=prepared, escaped=escaped):
                 session = Fake()
+                session.increments, session.menu_observed = [], False
                 frame = neutral()
                 if prepared:
                     for i,v in zip((3,7,11), [0,.3,-.55]): frame['right']['matrix'][i] = v
                 session.state['hardwareFrame'] = frame
                 backend = self.backend(session)
                 backend.pause = lambda seconds: None
-                backend.xyz = lambda ref: reference[:]
+                backend.xyz = lambda ref: [v+(350 if escaped and session.menu_observed else 0) for v in reference]
                 def pap(script, function, *a, **k):
                     if function == 'CanGrabObject': return True
                     if function == 'GetGrabbedObject': return {'formId': '0xFF001234'}
@@ -217,7 +221,11 @@ class PlatformTests(unittest.TestCase):
                 backend.hand_xyz = hand_xyz
                 req = {'action': 'reach_and_grip_reference', 'hand': 'right', 'grip': 'closed',
                        'holdSeconds': 2, 'maximumReachMetres': .5, 'referenceTag': 'seed-potion'}
-                if prepared:
+                if escaped:
+                    with self.assertRaisesRegex(AssertionError, 'moved away'): backend.controller(req)
+                    self.assertTrue(all(args['frame']['right']['controller']['pressed'] == 0
+                                        for tool,args in session.calls if tool == 'driver'))
+                elif prepared:
                     result = backend.controller(req)
                     self.assertIsNone(result['observedGameplaySuccess'])
                     self.assertEqual(session.calls[-1][1]['frame']['right']['controller']['pressed'], 4)
@@ -229,6 +237,8 @@ class PlatformTests(unittest.TestCase):
                     # This checks approach distance, not collision/selection.
                     reached = hand_xyz('right')
                     self.assertLess(sum((a-b)**2 for a,b in zip(reached,reference))**.5, 12)
+                    self.assertGreater(len(session.increments), 1)
+                    self.assertTrue(all(sum(v*v for v in delta)**.5 <= .01000001 for delta in session.increments))
                 else:
                     with self.assertRaisesRegex(ValueError, 'declared maximum'): backend.controller(req)
                     self.assertTrue(all(call[1]['frame']['right']['controller']['pressed'] == 0 for call in session.calls))

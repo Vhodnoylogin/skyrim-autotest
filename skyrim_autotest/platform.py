@@ -322,19 +322,29 @@ class Backend:
                        targetPalmGameUnits=target, trackingStartMetres=start_tracking,
                        measuredGameUnitsPerMetre=columns, maximumReachMetres=req['maximumReachMetres'],
                        approachBasis='close hand landmark candidate; palm/selection unobserved')
-            for _ in range(3):
+            for _ in range(80):
+                # Track the actual dynamic target, rather than pressing at a
+                # stale point after a teleported hand has displaced it.
+                target = self.xyz(ref)
+                target[0] -= math.sin(heading)*7
+                target[1] -= math.cos(heading)*7
+                target[2] += 7
                 current = self.hand_xyz(hand)
+                if math.dist(current, target) < 2: break
                 delta = solve3(columns, [target[i]-current[i] for i in range(3)])
                 total = [frame[hand]['matrix'][index] + change - origin
                          for index, change, origin in zip((3,7,11), delta, start_tracking)]
                 if math.sqrt(sum(v*v for v in total)) > req['maximumReachMetres']:
                     raise ValueError('Physical reach exceeds declared maximum')
+                distance = math.sqrt(sum(v*v for v in delta))
+                fraction = min(1., .01/distance)
+                delta = [v*fraction for v in delta]
                 self.s.log('platform-reach-position', handPositionGameUnits=current,
-                           totalTrackingDisplacementMetres=total)
+                           targetHandGameUnits=target, totalTrackingDisplacementMetres=total,
+                           trackingIncrementMetres=delta)
                 for index, change in zip((3,7,11), delta): frame[hand]['matrix'][index] += change
                 self.publish(frame, 10)
-                self.pause(.3)
-                if math.dist(self.hand_xyz(hand), target) < 3: break
+                self.pause(.1)
             else: raise AssertionError('Controller could not reach exact fixture reference')
         if action == 'release_reference': self.tagged(req)
         grip = req.get('grip', 'open') if action != 'release_reference' else 'open'
@@ -346,13 +356,20 @@ class Backend:
             self.pause(.5)
             menus = self.call('menu', {'action': 'list', 'includeFlags': True})
             can_grab = self.pap('HiggsVR', 'CanGrabObject', [hand == 'left'])
+            hand_position, reference_position = self.hand_xyz(hand), self.xyz(ref)
+            current_target = [reference_position[0]-math.sin(heading)*7,
+                              reference_position[1]-math.cos(heading)*7,
+                              reference_position[2]+7]
             self.s.log('platform-grip-readiness', menus=menus, canGrab=can_grab,
-                       handPositionGameUnits=self.hand_xyz(hand),
-                       referencePositionGameUnits=self.xyz(ref))
+                       handPositionGameUnits=hand_position,
+                       referencePositionGameUnits=reference_position,
+                       currentTargetHandGameUnits=current_target)
             if menus_block_gameplay(menus):
                 raise AssertionError('Gameplay input blocked by an open menu')
             if can_grab is not True:
                 raise AssertionError('HIGGS hand is not ready for physical acquisition')
+            if math.dist(hand_position, current_target) >= 3:
+                raise AssertionError('Fixture reference moved away before physical grip')
         frame[hand]['controller'].update(pressed=4 if grip == 'closed' else 0,
                                          touched=4 if grip == 'closed' else 0,
                                          axes=[[0,0] for _ in range(5)])
