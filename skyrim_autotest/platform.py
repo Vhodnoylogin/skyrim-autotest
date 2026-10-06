@@ -254,6 +254,9 @@ class Backend:
             observed = self.call('driver', {'action': 'release'})
             self.pause(req.get('settleSeconds', 0))
             return observed
+        from .vr_probe import ensure_owned_focus
+        self.remaining()
+        ensure_owned_focus(self.s, {}, 'platform-controller-owned-focus')
         frame = self.frame()
         hand = req['hand']
         other = 'right' if hand == 'left' else 'left'
@@ -311,12 +314,37 @@ class Backend:
             else: raise AssertionError('Controller could not reach exact fixture reference')
         if action == 'release_reference': self.tagged(req)
         grip = req.get('grip', 'open') if action != 'release_reference' else 'open'
+        if action == 'reach_and_grip_reference':
+            # Pose delivery can work while game input is suspended. Recheck the
+            # owned foreground and neutral interval before the single rising edge.
+            ensure_owned_focus(self.s, {}, 'platform-grip-owned-focus')
+            self.publish(frame, .5)
+            self.pause(.5)
+            menus = self.call('menu', {'action': 'list'})
+            can_grab = self.pap('HiggsVR', 'CanGrabObject', [hand == 'left'])
+            self.s.log('platform-grip-readiness', menus=menus, canGrab=can_grab,
+                       handPositionGameUnits=self.hand_xyz(hand),
+                       referencePositionGameUnits=self.xyz(ref))
+            if menus.get('messageBoxOpen') or set(menus.get('openMenus', [])).difference({'HUD Menu'}):
+                raise AssertionError('Gameplay input blocked by an open menu')
+            if can_grab is not True:
+                raise AssertionError('HIGGS hand is not ready for physical acquisition')
         frame[hand]['controller'].update(pressed=4 if grip == 'closed' else 0,
                                          touched=4 if grip == 'closed' else 0,
                                          axes=[[0,0] for _ in range(5)])
         duration = req.get('durationSeconds', req.get('holdSeconds', req.get('settleSeconds', 1)))
         response = self.publish(frame, duration)
         self.pause(duration)
+        if action == 'reach_and_grip_reference':
+            held = self.pap('HiggsVR', 'GetGrabbedObject', [hand == 'left'])
+            self.s.log('platform-physical-grip-observation', requestedReference=ref, held=held,
+                       acceptedAsSubjectResult=False)
+            if not isinstance(held, dict) or held.get('formId') != ref:
+                # ReadController may dispatch callbacks: diagnose only after the
+                # requested grip interval, never before its tested rising edge.
+                self.s.log('platform-failed-grip-input',
+                           observation=self.call('input', {'device': 'vrTrackedSet', 'action': 'observe'}),
+                           acceptedAsAcquisitionProof=False)
         return {'inputIssued': True, 'observedGameplaySuccess': None, 'publication': response}
 
     def mutate(self, req):
@@ -385,6 +413,18 @@ def initialize_controllers(session, configuration):
         for index, value in zip((3,7,11), positions[hand]): frame[hand]['matrix'][index] = value
         frame[hand]['controller'].update(pressed=0, touched=0, axes=[[0,0] for _ in range(5)])
     session.phase('platform-controller-initialization', 15)
+    from .vr_probe import ensure_owned_focus
+    ensure_owned_focus(session, {}, 'platform-initialization-owned-focus')
+    backend = Backend(session, time.monotonic()+15)
+    # Common executor setup, before any subject operation. Loading a save can
+    # leave controls disabled even with a loaded player and HUD-only menus.
+    backend.pap('Game', 'EnablePlayerControls', [True]*8+[0])
+    controls = {name: backend.pap('Game', name) for name in (
+        'IsMovementControlsEnabled', 'IsFightingControlsEnabled',
+        'IsLookingControlsEnabled', 'IsActivateControlsEnabled')}
+    session.log('platform-gameplay-controls', observed=controls, subjectAction=False)
+    if any(value is not True for value in controls.values()):
+        raise AssertionError('Gameplay controls remain disabled after common platform initialization')
     publication = session.tool('driver', {'action': 'publish', 'frame': frame, 'holdSeconds': 30})
     session.log('platform-controller-start-pose', positionsMetres=positions,
                 publication=publication, subjectAction=False, consumedByGameNotProven=True)

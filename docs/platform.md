@@ -43,6 +43,17 @@ subsequent movement remains measured and bounded by the unchanged subject
 maximum. The initial pose and configuration are separately pinned/qualified;
 there is no hidden pre-positioning inside a bounded reach or assertion waiver.
 
+For explicitly configured automatic controller initialization, the common stage
+focuses the owned game, enables normal player controls and verifies movement,
+fighting, looking and activation before publishing the initial pose. Every
+physical controller action rechecks owned foreground. A measured reach adds a
+neutral interval and actual menu/HIGGS CanGrabObject observations before its one
+grip transition. After the requested hold it logs the actual held reference;
+failed acquisition records tracked input only after that interval, since reading
+controller state may dispatch callbacks. Focus/readiness/publication do not
+replace the subject's subsequent exact-reference assertions. This repair is a
+candidate until live qualification proves its behavior with the pinned platform.
+
 `hand.continuousHold.seconds` represents the elapsed interval of bounded samples
 with the same exact HIGGS reference. Each sample rechecks lifecycle continuity;
 more than0.5seconds between samples fails. The response retains every sample,

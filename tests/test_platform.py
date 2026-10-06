@@ -132,20 +132,28 @@ class PlatformTests(unittest.TestCase):
         self.assertEqual(session.state['checks'][0]['name'], 'check')
         self.assertEqual(operations()['world.read']['fields']['hand.reference.id'], 'hand.reference.id')
 
-    def test_explicit_initial_pose_before_subject_is_open_and_keeps_head(self):
+    @patch('skyrim_autotest.vr_probe.ensure_owned_focus')
+    def test_explicit_initial_pose_before_subject_is_open_and_keeps_head(self, focus):
         class Fake(Session):
             def phase(self, *args): self.phase_name = args[0]
             def log(self, *args, **kwargs): self.logged = kwargs
+            def tool(self, tool, args, **kwargs):
+                result = super().tool(tool, args, **kwargs)
+                return {'returned': True} if tool == 'papyrus' else result
         session = Fake()
         session.state.update(inputBackend='driver', driverBackend='file')
         platform.initialize_controllers(session, {'controller_start_positions_metres': {'left': [-.3,.3,-.55], 'right': [0,.3,-.55]}})
-        frame = session.calls[0][1]['frame']
+        frame = session.calls[-1][1]['frame']
         self.assertEqual([frame['right']['matrix'][i] for i in (3,7,11)], [0,.3,-.55])
         self.assertEqual(frame['hmd']['matrix'][7], 1.65)
         self.assertEqual(frame['right']['controller']['pressed'], 0)
         self.assertEqual(frame['left']['controller']['pressed'], 0)
         self.assertFalse(session.logged['subjectAction'])
         self.assertTrue(session.logged['consumedByGameNotProven'])
+        self.assertEqual([a['function'] for t,a in session.calls if t == 'papyrus'],
+                         ['EnablePlayerControls', 'IsMovementControlsEnabled', 'IsFightingControlsEnabled',
+                          'IsLookingControlsEnabled', 'IsActivateControlsEnabled'])
+        focus.assert_called_once()
         session.state['gameplayBootstrap']['completed'] = False
         session.calls.clear()
         with self.assertRaises(ValueError): platform.initialize_controllers(session, {'controller_start_positions_metres': {'left': [0,0,0], 'right': [0,0,0]}})
@@ -173,7 +181,8 @@ class PlatformTests(unittest.TestCase):
         new_delta = solve3(columns, [t-b for t,b in zip(target,prepared)])
         self.assertLess(sum(v*v for v in new_delta)**.5, .5)
 
-    def test_measured_physical_reach_uses_open_calibration_and_bounded_motion(self):
+    @patch('skyrim_autotest.vr_probe.ensure_owned_focus')
+    def test_measured_physical_reach_uses_open_calibration_and_bounded_motion(self, focus):
         import copy
         from skyrim_autotest.hardware import neutral
         columns = [[-11.8976,68.9795,0], [0,0,70], [68.9813,11.8994,0]]
@@ -196,7 +205,11 @@ class PlatformTests(unittest.TestCase):
                 backend = self.backend(session)
                 backend.pause = lambda seconds: None
                 backend.xyz = lambda ref: reference[:]
-                backend.pap = lambda *a, **k: 260.2147521972656
+                def pap(script, function, *a, **k):
+                    if function == 'CanGrabObject': return True
+                    if function == 'GetGrabbedObject': return {'formId': '0xFF001234'}
+                    return 260.2147521972656
+                backend.pap = pap
                 def hand_xyz(hand):
                     point = [session.state['hardwareFrame'][hand]['matrix'][i] for i in (3,7,11)]
                     return [baseline[r]+sum(columns[c][r]*(point[c]-origin[c]) for c in range(3)) for r in range(3)]
@@ -213,6 +226,27 @@ class PlatformTests(unittest.TestCase):
                 else:
                     with self.assertRaisesRegex(ValueError, 'declared maximum'): backend.controller(req)
                     self.assertTrue(all(call[1]['frame']['right']['controller']['pressed'] == 0 for call in session.calls))
+
+    @patch('skyrim_autotest.vr_probe.ensure_owned_focus', side_effect=AssertionError('foreground denied'))
+    def test_focus_denial_prevents_controller_publication(self, focus):
+        session = Session()
+        with self.assertRaisesRegex(AssertionError, 'foreground denied'):
+            self.backend(session).controller({'action': 'release_reference', 'hand': 'right',
+                                             'referenceTag': 'seed-potion', 'settleSeconds': 0})
+        self.assertEqual(session.calls, [])
+
+    @patch('skyrim_autotest.vr_probe.ensure_owned_focus')
+    def test_disabled_controls_stop_common_stage_before_pose_publication(self, focus):
+        class Fake(Session):
+            def phase(self, *args): pass
+            def log(self, *args, **kwargs): pass
+        session = Fake()
+        session.state.update(inputBackend='driver', driverBackend='file')
+        session.responses['papyrus'] = {'returned': False}
+        with self.assertRaisesRegex(AssertionError, 'remain disabled'):
+            platform.initialize_controllers(session, {'controller_start_positions_metres':
+                                                     {'left': [0,0,0], 'right': [0,0,0]}})
+        self.assertFalse(any(t == 'driver' for t,a in session.calls))
 
 
 if __name__ == '__main__': unittest.main()
