@@ -775,6 +775,21 @@ class Session:
         self.collect()
         # New unrelated sessions block restore: never change settings under another game.
         busy = [p for p in native.processes() if p['name'].lower() in VR_NAMES | GAME_NAMES | {'modorganizer.exe'}]
+        # A refused graceful restart precedes every live setup mutation. Recovery
+        # must preserve that exact preflight MO2 rather than treating it as an
+        # unknown new session, but only when there is literally nothing to undo.
+        idle = self.state.get('preflight', {}).get('idleMO2')
+        pristine = (self.state.get('snapshots') == [] and self.state.get('owned') == [] and
+                    self.state.get('launchIntents') == {} and not self.state.get('game') and
+                    not self.state.get('testProfile') and not self.state.get('hardwareFrame') and
+                    not self.state.get('reopenMO2'))
+        if pristine and idle and native.alive(idle):
+            preserved = [p for p in busy if p['name'].lower() == 'modorganizer.exe' and
+                         p['pid'] == idle['pid'] and native.identity(p['pid']) == idle]
+            busy = [p for p in busy if p not in preserved]
+            if preserved:
+                self.log('unchanged-preflight-mo2-preserved', identity=idle,
+                         noLiveSetupMutations=True, forcedStop=False)
         if busy:
             raise RuntimeError(f'Unexpected session after owned process shutdown: {busy}')
         with self.lock:

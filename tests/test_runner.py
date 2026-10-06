@@ -42,6 +42,35 @@ class RecoveryTests(unittest.TestCase):
                 self.session.cleanup()
         self.assertEqual(self.file.read_bytes(), b'test state')
 
+    def test_pristine_restart_refusal_preserves_exact_preflight_mo2(self):
+        idle = {'pid': 999, 'birth': 123, 'path': 'original/ModOrganizer.exe'}
+        self.session.state['preflight']['idleMO2'] = idle
+        processes = [{'pid': 999, 'parent': 1, 'name': 'ModOrganizer.exe'}]
+        with patch.object(native, 'processes', return_value=processes), \
+             patch.object(native, 'alive', return_value=True), \
+             patch.object(native, 'identity', return_value=idle), \
+             patch.object(native, 'close') as close, patch.object(native, 'terminate') as terminate, \
+             patch.object(self.session, 'collect'):
+            self.session.cleanup()
+        close.assert_not_called()
+        terminate.assert_not_called()
+        self.assertTrue(self.session.state['restored'])
+
+    def test_preserved_mo2_exception_rejects_pid_reuse_or_any_live_mutation(self):
+        idle = {'pid': 999, 'birth': 123, 'path': 'original/ModOrganizer.exe'}
+        self.session.state['preflight']['idleMO2'] = idle
+        processes = [{'pid': 999, 'parent': 1, 'name': 'ModOrganizer.exe'}]
+        for changed in (True, False):
+            with self.subTest(changed=changed):
+                if changed: self.session.write(self.file, b'mutated')
+                else: self.session.state['snapshots'] = []
+                with patch.object(native, 'processes', return_value=processes), \
+                     patch.object(native, 'alive', return_value=True), \
+                     patch.object(native, 'identity', return_value=idle if changed else {**idle, 'birth': 124}), \
+                     patch.object(self.session, 'collect'):
+                    with self.assertRaisesRegex(RuntimeError, 'Unexpected session'):
+                        self.session.cleanup()
+
     def test_corrupt_backup_is_not_restored(self):
         self.session.write(self.file, b'test state')
         Path(self.session.state['snapshots'][0]['backup']).write_bytes(b'corrupt')
