@@ -74,14 +74,24 @@ class PlatformTests(unittest.TestCase):
         backend.resolve = lambda *a: '0x0003EADD'
         counts = iter([7, 2])
         mutations = []
-        def pap(script, function, values, target):
+        def pap(script, function, values, target, **kwargs):
             if function == 'GetItemCount': return next(counts)
-            mutations.append((function, values))
+            mutations.append((function, values, kwargs))
         backend.pap = pap
         req = {'action': 'set_fixture_inventory_quantity', 'owner': 'player',
                'item': {'plugin': 'Skyrim.esm', 'localId': '03EADD'}, 'quantityItems': 2}
         self.assertEqual(backend.mutate(req)['inventory']['quantity']['items'], 2)
-        self.assertEqual(mutations, [('RemoveItem', [{'form': '0x0003EADD'}, 5, True, None])])
+        self.assertEqual(mutations, [('RemoveItem', [{'form': '0x0003EADD'}, 5, True], {'fill_neutral': True})])
+
+    def test_remove_destination_neutral_is_explicit_and_other_calls_stay_strict(self):
+        session = Session()
+        session.responses['papyrus'] = {'returned': None}
+        backend = self.backend(session)
+        backend.pap('ObjectReference', 'RemoveItem', [{'form': '0x0003EADD'}, 2, True], '0x14', fill_neutral=True)
+        self.assertTrue(session.calls[-1][1]['fillNeutral'])
+        self.assertNotIn(None, session.calls[-1][1]['args'])
+        backend.pap('ObjectReference', 'GetItemCount', [{'form': '0x0003EADD'}], '0x14')
+        self.assertNotIn('fillNeutral', session.calls[-1][1])
 
     def test_bootstrap_and_deadline_are_required_before_mutation(self):
         session = Session()

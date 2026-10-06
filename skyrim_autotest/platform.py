@@ -140,10 +140,11 @@ class Backend:
     def call(self, tool, args):
         return self.s.tool(tool, args, timeout=min(12, self.remaining()), deadline=self.end)
 
-    def pap(self, script, function, values=None, target=None):
+    def pap(self, script, function, values=None, target=None, *, fill_neutral=False):
         args = {'action': 'call', 'script': script, 'function': function, 'args': values or [],
                 'timeoutMs': max(1, min(6000, int(self.remaining()*1000)))}
         if target: args['self'] = {'form': target}
+        if fill_neutral: args['fillNeutral'] = True
         response = self.call('papyrus', args)
         if 'returned' not in response: raise ValueError('Papyrus return value unavailable')
         return response['returned']
@@ -396,7 +397,10 @@ class Backend:
             if type(before) is not int or before < 0: raise ValueError('Fixture inventory unavailable')
             delta = req['quantityItems'] - before
             if delta > 0: self.pap('ObjectReference', 'AddItem', [{'form': base}, delta, True], '0x14')
-            if delta < 0: self.pap('ObjectReference', 'RemoveItem', [{'form': base}, -delta, True, None], '0x14')
+            # DevBench accepts no JSON-null argument. Omit only the trailing
+            # akOtherContainer, whose reviewed ObjectReference.psc default is
+            # None, and explicitly permit its neutral VM default.
+            if delta < 0: self.pap('ObjectReference', 'RemoveItem', [{'form': base}, -delta, True], '0x14', fill_neutral=True)
             after = self.pap('ObjectReference', 'GetItemCount', [{'form': base}], '0x14')
             if after != req['quantityItems']: raise AssertionError('Fixture inventory quantity did not settle')
             return {'inventory': {'quantity': {'items': after}}, 'beforeItems': before}
