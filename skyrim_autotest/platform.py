@@ -405,9 +405,9 @@ class Backend:
             if after != req['quantityItems']: raise AssertionError('Fixture inventory quantity did not settle')
             return {'inventory': {'quantity': {'items': after}}, 'beforeItems': before}
         if action == 'set_fixture_health':
-            self.pap('Actor', 'SetActorValue', ['Health', req['baseHealthPoints']], '0x14')
+            self.pap('Actor', 'SetActorValue', ['Health', float(req['baseHealthPoints'])], '0x14')
             self.pap('Actor', 'RestoreActorValue', ['Health', 10000.], '0x14')
-            self.pap('Actor', 'DamageActorValue', ['Health', req['damageHealthPoints']], '0x14')
+            self.pap('Actor', 'DamageActorValue', ['Health', float(req['damageHealthPoints'])], '0x14')
             return {'player': {'health': {'points': self.pap('Actor', 'GetActorValue', ['Health'], '0x14')}}}
         if action == 'place_fixture_reference_in_hand':
             ref = self.tagged(req)

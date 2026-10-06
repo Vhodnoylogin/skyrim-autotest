@@ -127,6 +127,11 @@ class RecoveryTests(unittest.TestCase):
 
 
 class ScenarioTests(unittest.TestCase):
+    def test_ini_spaced_key_replaced_without_duplicate_or_other_changes(self):
+        original = '[Debug]\r\nAuto Open Crash Log = true\r\nMax Crash Logs = 20\r\n[Other]\r\nKeep = true\r\n'
+        result = runner.set_ini(original, 'Debug', 'Auto Open Crash Log', 'false')
+        self.assertEqual(result, original.replace('Auto Open Crash Log = true', 'Auto Open Crash Log = false'))
+        self.assertEqual(result.count('Auto Open Crash Log'), 1)
     def test_observation_only_and_invalid_timeout_are_rejected(self):
         base = {'schemaVersion': 1, 'steps': [{'name': 'Observe', 'tool': 'inspect', 'observe': True}]}
         with self.assertRaisesRegex(ValueError, 'Observation-only'):

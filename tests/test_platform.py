@@ -93,6 +93,20 @@ class PlatformTests(unittest.TestCase):
         backend.pap('ObjectReference', 'GetItemCount', [{'form': '0x0003EADD'}], '0x14')
         self.assertNotIn('fillNeutral', session.calls[-1][1])
 
+    def test_integer_health_spec_uses_native_float_vm_arguments_and_observed_result(self):
+        backend = self.backend(Session())
+        calls = []
+        def pap(script, function, values, target):
+            calls.append((function, values))
+            if function == 'GetActorValue': return 299.5
+        backend.pap = pap
+        result = backend.mutate({'action': 'set_fixture_health', 'baseHealthPoints': 500,
+                                 'damageHealthPoints': 200})
+        self.assertEqual(result['player']['health']['points'], 299.5)
+        for function, values in calls[:-1]: self.assertIs(type(values[1]), float)
+        self.assertEqual(calls[0], ('SetActorValue', ['Health', 500.0]))
+        self.assertEqual(calls[2], ('DamageActorValue', ['Health', 200.0]))
+
     def test_bootstrap_and_deadline_are_required_before_mutation(self):
         session = Session()
         session.state['gameplayBootstrap']['completed'] = False

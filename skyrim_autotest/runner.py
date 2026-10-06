@@ -123,9 +123,9 @@ def set_ini(text, section, key, value):
     if not match:
         return text.rstrip() + newline + f'[{section}]' + newline + f'{key}={value}' + newline
     contents = match[1]
-    keypattern = re.compile(r'(?m)^' + re.escape(key) + r'=.*$')
+    keypattern = re.compile(r'(?m)^([ \t]*' + re.escape(key) + r'[ \t]*=[ \t]*)[^\r\n]*')
     if keypattern.search(contents):
-        contents = keypattern.sub(lambda _: f'{key}={value}', contents)
+        contents = keypattern.sub(lambda match: match[1] + value, contents)
     else:
         contents += f'{key}={value}{newline}'
     return text[:match.start(1)] + contents + text[match.end(1):]
