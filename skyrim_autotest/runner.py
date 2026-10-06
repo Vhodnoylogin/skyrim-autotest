@@ -463,7 +463,8 @@ class Session:
         if info.get('idleMO2'):
             self.state['reopenMO2'] = True
             self.save()
-            native.close(info['idleMO2'])
+            self.log('idle-mo2-graceful-close', identity=info['idleMO2'],
+                     request=native.close(info['idleMO2'], system_command=True))
             end = time.monotonic() + 30
             while native.alive(info['idleMO2']) and time.monotonic() < end:
                 time.sleep(.5)

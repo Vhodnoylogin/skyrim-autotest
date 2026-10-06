@@ -183,19 +183,33 @@ def processes():
     return out
 
 
-def close(ident):
+def close(ident, *, system_command=False):
     if not alive(ident):
-        return
+        return {'requested': False, 'windows': [], 'reason': 'identity-not-live'}
+    if type(system_command) is not bool: raise ValueError('Close route must be boolean')
+    requests = []
+    U.PostMessageW.argtypes = [W.HWND, W.UINT, W.WPARAM, W.LPARAM]
+    U.PostMessageW.restype = W.BOOL
+    U.IsWindowVisible.argtypes = [W.HWND]
+    U.IsWindowVisible.restype = W.BOOL
     callback_type = C.WINFUNCTYPE(W.BOOL, W.HWND, W.LPARAM)
     def callback(hwnd, _):
         pid = W.DWORD()
         U.GetWindowThreadProcessId(hwnd, C.byref(pid))
-        if pid.value == ident['pid']:
-            U.PostMessageW(hwnd, 0x10, 0, 0)
+        if pid.value == ident['pid'] and alive(ident) and (not system_command or U.IsWindowVisible(hwnd)):
+            # SC_CLOSE takes the application's ordinary system-menu close path.
+            # It is a graceful request, never a process termination/dismissal.
+            message, wparam = (0x112, 0xF060) if system_command else (0x10, 0)
+            C.set_last_error(0)
+            accepted = bool(U.PostMessageW(hwnd, message, wparam, 0))
+            requests.append({'hwnd': int(hwnd), 'message': message, 'accepted': accepted,
+                             'error': 0 if accepted else C.get_last_error()})
         return True
     U.EnumWindows.argtypes = [callback_type, W.LPARAM]
     U.GetWindowThreadProcessId.argtypes = [W.HWND, C.POINTER(W.DWORD)]
     U.EnumWindows(callback_type(callback), 0)
+    return {'requested': bool(requests), 'windows': requests, 'systemCommand': system_command,
+            'shutdownObserved': False}
 
 
 def terminate(ident):
