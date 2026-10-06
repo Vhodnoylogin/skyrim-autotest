@@ -64,11 +64,12 @@ def alive(ident):
     return bool(ident and identity(ident['pid']) == {k: ident[k] for k in ('pid', 'birth', 'path')})
 
 
-def focus_owned(ident, timeout=3):
+def focus_owned(ident, timeout=3, *, activate=True):
     """Bounded foreground requests; observe success and never touch foreign queues."""
     import math
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 5:
         raise ValueError('Owned focus timeout must be finite within (0, 5]')
+    if type(activate) is not bool: raise ValueError('Owned activation choice must be boolean')
     if not alive(ident):
         raise RuntimeError('Cannot focus a process whose identity changed')
     U.GetForegroundWindow.restype = W.HWND
@@ -120,6 +121,9 @@ def focus_owned(ident, timeout=3):
         pid = W.DWORD()
         U.GetWindowThreadProcessId(U.GetForegroundWindow(), C.byref(pid))
         return pid.value == ident['pid'] and alive(ident)
+    if not activate:
+        if not target_thread(): raise RuntimeError('Owned window identity changed during focus observation')
+        return result(requested=False, focused=focused(), reason='observe-only', attempts=0)
     while time.monotonic() < deadline:
         thread = target_thread()
         if not thread:

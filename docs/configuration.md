@@ -22,6 +22,14 @@ file whose content is read immediately before an authenticated request.
 | staged_plugins | External source files staged into MO2 overwrite before launch, with source/destination/sha256 |
 | devbench_runtime_files | Optional discovery file override list; default LOCALAPPDATA/devbench/vr/runtime.json and overwrite/SKSE/Plugins/devbench/runtime.json |
 | controller_start_positions_metres | Optional platform-owned left/right tracking translations, three finite metre values each within [-2,2]; open-hand pose applied once after common gameplay readiness and before subject actions |
+| allow_background_physical_vr | Optional boolean, default false; semantic platform physical actions observe owned focus without requesting it and may proceed in background only with the owned file driver; native gameplay assertions remain mandatory |
+
+Background permission applies only to semantic platform physical checkpoints.
+Common startup UI still requires its normal owned foreground checks. This allows
+an operator to read another app after world loading without repeated activation
+requests. It does not prove the game consumes background input; qualify exact
+hand acquisition, hold and release in the actual session. No background keyboard
+or UI automation is authorized by this option.
 
 The optional controller start pose is explicit fixture preparation in the frozen
 platform configuration, not a subject-order action or a larger reach allowance.

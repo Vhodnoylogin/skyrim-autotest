@@ -20,6 +20,15 @@ class BackgroundTests(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError,'did not grant foreground'):
                 ensure_owned_focus(session,{},'before-grip')
         self.assertFalse(any(kind=='background-vr-attempt' for kind,values in session.logs))
+    def test_platform_optin_observes_focus_but_startup_remains_strict(self):
+        session=self.Session()
+        session.state['configuration']={'allow_background_physical_vr':True}
+        with patch.object(native,'focus_owned',return_value={'requested':False,'focused':False}) as focus:
+            ensure_owned_focus(session,{},'platform-controller-owned-focus')
+            focus.assert_called_with(session.state['game'],activate=False)
+            with self.assertRaisesRegex(AssertionError,'did not grant foreground'):
+                ensure_owned_focus(session,{},'startup-confirmation')
+            focus.assert_called_with(session.state['game'])
     def test_optin_logs_attempt_without_treating_foreground_as_input_proof(self):
         session=self.Session()
         focus={'requested':False,'focused':False,'foreground':{'pid':999}}

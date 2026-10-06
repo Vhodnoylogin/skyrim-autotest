@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 from skyrim_autotest import native
 
 class FocusTests(unittest.TestCase):
-    def run_focus(self, focus_after=None, lose_after=None, exception_on_attached=False):
+    def run_focus(self, focus_after=None, lose_after=None, exception_on_attached=False, activate=True):
         clock = [0.]
         ident = {'pid':42,'birth':123,'path':'owned.exe'}
         ui = MagicMock()
@@ -32,7 +32,7 @@ class FocusTests(unittest.TestCase):
                     native.focus_owned(ident,timeout=1)
                 result=None
             else:
-                result=native.focus_owned(ident,timeout=1)
+                result=native.focus_owned(ident,timeout=1,activate=activate)
         return result, ui, clock[0]
     def test_asynchronous_focus_settles_before_deadline(self):
         result,ui,elapsed=self.run_focus(focus_after=.2)
@@ -48,6 +48,15 @@ class FocusTests(unittest.TestCase):
         self.assertEqual([c.args for c in ui.AttachThreadInput.call_args_list],[(10,20,True),(10,20,False)])
         # Never joined the unrelated foreground window's thread900.
         self.assertTrue(all(c.args[1] == 20 for c in ui.AttachThreadInput.call_args_list))
+    def test_observe_only_retains_foreign_focus_without_activation_or_attachment(self):
+        result,ui,elapsed=self.run_focus(activate=False)
+        self.assertFalse(result['focused'])
+        self.assertFalse(result['requested'])
+        self.assertEqual(result['foreground']['pid'],99)
+        self.assertEqual(elapsed,0)
+        ui.ShowWindowAsync.assert_not_called()
+        ui.SetForegroundWindow.assert_not_called()
+        ui.AttachThreadInput.assert_not_called()
     def test_identity_loss_stops_without_touching_reused_window(self):
         result,ui,elapsed=self.run_focus(lose_after=.2)
         self.assertFalse(result['focused'])

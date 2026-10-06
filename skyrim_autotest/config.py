@@ -37,11 +37,13 @@ def configure(value, base=None):
     missing = sorted(k for k in REQUIRED if not value.get(k))
     if missing:
         raise ConfigurationError("Missing configuration fields: " + ", ".join(missing))
-    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres"}
+    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr"}
     if unknown:
         raise ConfigurationError("Unknown configuration fields: " + ", ".join(sorted(unknown)))
     base = Path(base or Path.cwd()).resolve()
     result = dict(value)
+    if 'allow_background_physical_vr' in result and type(result['allow_background_physical_vr']) is not bool:
+        raise ConfigurationError('allow_background_physical_vr must be boolean')
     if 'controller_start_positions_metres' in result:
         positions = result['controller_start_positions_metres']
         if not isinstance(positions, dict) or set(positions) != {'left', 'right'}:

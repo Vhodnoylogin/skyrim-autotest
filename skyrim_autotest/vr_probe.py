@@ -589,10 +589,13 @@ def execute(session, scenario):
 def ensure_owned_focus(session, scenario, checkpoint):
     """Background VR is explicit and still requires unchanged physical assertions."""
     from . import native
-    background = scenario.get('allowBackgroundVR', False)
+    platform_background = (checkpoint.startswith('platform-') and
+                           session.state.get('configuration', {}).get('allow_background_physical_vr') is True)
+    background = scenario.get('allowBackgroundVR', False) or platform_background
     if background and (session.state.get('inputBackend') != 'driver' or session.state.get('driverBackend') != 'file'):
         raise ValueError('Background VR requires the physical file-adapter backend')
-    result = native.focus_owned(session.state['game'])
+    result = (native.focus_owned(session.state['game'], activate=False) if platform_background
+              else native.focus_owned(session.state['game']))
     session.log(checkpoint, result=result)
     if not result['focused']:
         if not background:
