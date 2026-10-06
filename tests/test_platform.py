@@ -173,5 +173,46 @@ class PlatformTests(unittest.TestCase):
         new_delta = solve3(columns, [t-b for t,b in zip(target,prepared)])
         self.assertLess(sum(v*v for v in new_delta)**.5, .5)
 
+    def test_measured_physical_reach_uses_open_calibration_and_bounded_motion(self):
+        import copy
+        from skyrim_autotest.hardware import neutral
+        columns = [[-11.8976,68.9795,0], [0,0,70], [68.9813,11.8994,0]]
+        baseline = [-381.05688,2056.01636,7067.85010]
+        reference = [-411.90506,2026.27026,6981.82471]
+        origin = [.3,1.2,-.35]
+        class Fake(Session):
+            def log(self, *args, **kwargs): pass
+            def tool(self, tool, args, **kwargs):
+                self.calls.append((tool, copy.deepcopy(args)))
+                if tool == 'driver': self.state['hardwareFrame'] = copy.deepcopy(args['frame'])
+                return {'published': True, 'acknowledgedByDriver': False}
+        for prepared in (False, True):
+            with self.subTest(prepared=prepared):
+                session = Fake()
+                frame = neutral()
+                if prepared:
+                    for i,v in zip((3,7,11), [0,.3,-.55]): frame['right']['matrix'][i] = v
+                session.state['hardwareFrame'] = frame
+                backend = self.backend(session)
+                backend.pause = lambda seconds: None
+                backend.xyz = lambda ref: reference[:]
+                backend.pap = lambda *a, **k: 260.2147521972656
+                def hand_xyz(hand):
+                    point = [session.state['hardwareFrame'][hand]['matrix'][i] for i in (3,7,11)]
+                    return [baseline[r]+sum(columns[c][r]*(point[c]-origin[c]) for c in range(3)) for r in range(3)]
+                backend.hand_xyz = hand_xyz
+                req = {'action': 'reach_and_grip_reference', 'hand': 'right', 'grip': 'closed',
+                       'holdSeconds': 2, 'maximumReachMetres': .5, 'referenceTag': 'seed-potion'}
+                if prepared:
+                    result = backend.controller(req)
+                    self.assertIsNone(result['observedGameplaySuccess'])
+                    self.assertEqual(session.calls[-1][1]['frame']['right']['controller']['pressed'], 4)
+                    start = [0,.3,-.55]
+                    end = [session.calls[-1][1]['frame']['right']['matrix'][i] for i in (3,7,11)]
+                    self.assertLess(sum((a-b)**2 for a,b in zip(end,start))**.5, .5)
+                else:
+                    with self.assertRaisesRegex(ValueError, 'declared maximum'): backend.controller(req)
+                    self.assertTrue(all(call[1]['frame']['right']['controller']['pressed'] == 0 for call in session.calls))
+
 
 if __name__ == '__main__': unittest.main()
