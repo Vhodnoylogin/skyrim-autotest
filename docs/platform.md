@@ -54,6 +54,13 @@ controller state may dispatch callbacks. Focus/readiness/publication do not
 replace the subject's subsequent exact-reference assertions. This repair is a
 candidate until live qualification proves its behavior with the pinned platform.
 
+Gameplay checks request native menu flags through menu list includeFlags=true.
+An open custom rollover name alone is not a blocking dialog. Actual pause/modal/
+freeze flags block; cursor/menu-context ownership blocks a non-always-open menu.
+Missing/unavailable/inconsistent flag records block conservatively. No unknown
+menu is dismissed or permitted by a name whitelist. The new menu provider and
+this classification still require a live pinned qualification before dispatch.
+
 `hand.continuousHold.seconds` represents the elapsed interval of bounded samples
 with the same exact HIGGS reference. Each sample rechecks lifecycle continuity;
 more than0.5seconds between samples fails. The response retains every sample,

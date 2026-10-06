@@ -194,6 +194,7 @@ class PlatformTests(unittest.TestCase):
             def tool(self, tool, args, **kwargs):
                 self.calls.append((tool, copy.deepcopy(args)))
                 if tool == 'driver': self.state['hardwareFrame'] = copy.deepcopy(args['frame'])
+                if tool == 'menu': return {'messageBoxOpen': False, 'openMenus': [], 'menuStates': []}
                 return {'published': True, 'acknowledgedByDriver': False}
         for prepared in (False, True):
             with self.subTest(prepared=prepared):
@@ -247,6 +248,26 @@ class PlatformTests(unittest.TestCase):
             platform.initialize_controllers(session, {'controller_start_positions_metres':
                                                      {'left': [0,0,0], 'right': [0,0,0]}})
         self.assertFalse(any(t == 'driver' for t,a in session.calls))
+
+    def test_native_menu_flags_allow_benign_rollover_without_name_whitelist(self):
+        row = dict(name='AnyCustomRollover', available=True, alwaysOpen=False,
+                   pausesGame=False, modal=False, usesCursor=False,
+                   usesMenuContext=False, freezeFramePause=False)
+        state = dict(messageBoxOpen=False, openMenus=[row['name']], menuStates=[row])
+        self.assertFalse(platform.menus_block_gameplay(state))
+        for flag in ('pausesGame', 'modal', 'usesCursor', 'usesMenuContext', 'freezeFramePause'):
+            with self.subTest(flag=flag):
+                row[flag] = True
+                self.assertTrue(platform.menus_block_gameplay(state))
+                row[flag] = False
+        row['available'] = False
+        self.assertTrue(platform.menus_block_gameplay(state))
+
+    def test_missing_or_inconsistent_menu_flags_never_claim_gameplay_ready(self):
+        for state in ({'messageBoxOpen': False, 'openMenus': ['WSActivateRollover']},
+                      {'messageBoxOpen': False, 'openMenus': ['MessageBoxMenu'], 'menuStates': []},
+                      {'messageBoxOpen': True, 'openMenus': [], 'menuStates': []}):
+            self.assertTrue(platform.menus_block_gameplay(state))
 
 
 if __name__ == '__main__': unittest.main()

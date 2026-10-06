@@ -19,6 +19,25 @@ OBSERVATIONS = {'form.identity', 'body_slot.settings', 'body_slot.display',
                 'reference.state', 'reference.physics'}
 
 
+def menus_block_gameplay(observation):
+    """Require actual native flags; never infer blocking from a mod menu name."""
+    if observation.get('messageBoxOpen') is not False:
+        return True
+    names, states = observation.get('openMenus'), observation.get('menuStates')
+    if not isinstance(names, list) or not isinstance(states, list):
+        return True
+    if len(states) != len(names) or {row.get('name') for row in states} != set(names):
+        return True
+    for row in states:
+        fields = ('alwaysOpen', 'pausesGame', 'modal', 'usesCursor', 'usesMenuContext', 'freezeFramePause')
+        if row.get('available') is not True or any(type(row.get(key)) is not bool for key in fields):
+            return True
+        if (row.get('name') == 'Console' or row['pausesGame'] or row['modal'] or row['freezeFramePause']
+                or (not row['alwaysOpen'] and (row['usesCursor'] or row['usesMenuContext']))):
+            return True
+    return False
+
+
 def number(value, low, high):
     if type(value) not in (int, float) or not math.isfinite(value) or not low <= value <= high:
         raise ValueError('Semantic numeric value outside bounded domain')
@@ -320,12 +339,12 @@ class Backend:
             ensure_owned_focus(self.s, {}, 'platform-grip-owned-focus')
             self.publish(frame, .5)
             self.pause(.5)
-            menus = self.call('menu', {'action': 'list'})
+            menus = self.call('menu', {'action': 'list', 'includeFlags': True})
             can_grab = self.pap('HiggsVR', 'CanGrabObject', [hand == 'left'])
             self.s.log('platform-grip-readiness', menus=menus, canGrab=can_grab,
                        handPositionGameUnits=self.hand_xyz(hand),
                        referencePositionGameUnits=self.xyz(ref))
-            if menus.get('messageBoxOpen') or set(menus.get('openMenus', [])).difference({'HUD Menu'}):
+            if menus_block_gameplay(menus):
                 raise AssertionError('Gameplay input blocked by an open menu')
             if can_grab is not True:
                 raise AssertionError('HIGGS hand is not ready for physical acquisition')
@@ -438,9 +457,9 @@ def execute(session, args, deadline):
     op, req = args['operation'], args.get('request', {})
     if op == 'state.read':
         scene = backend.call('inspect', {'kind': 'scene'})
-        menus = backend.call('menu', {'action': 'list'})
+        menus = backend.call('menu', {'action': 'list', 'includeFlags': True})
         ready = (scene.get('playerLoaded') is True and scene.get('cell', {}).get('editorId') not in (None, 'VRPlayroom01')
-                 and not menus.get('messageBoxOpen') and not set(menus.get('openMenus', [])).difference({'HUD Menu'}))
+                 and not menus_block_gameplay(menus))
         return {'world': {'ready': ready}, 'scene': scene, 'menus': menus}
     if op == 'player.read':
         raw = backend.call('inspect', {'kind': 'player'})
