@@ -10,7 +10,7 @@ import zipfile
 from build_devbench_compat import sha, XMAKE_URL, XMAKE_SHA
 
 SOURCE = 'https://github.com/Vhodnoylogin/devbench.git'
-COMMIT = 'b43bbae6841a6ec725d94af44478a1b17c9c7cd5'
+COMMIT = 'c3b3f9af172f4ee88d51ebd863229d242722c908'
 COMMONLIB = '9106d402cfc7dcbc5bf7458be6748af19d7fc914'
 ROOT = Path(__file__).resolve().parents[1]
 

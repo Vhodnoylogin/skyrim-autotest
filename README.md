@@ -103,6 +103,10 @@ may overwrite before testing it. Do not install/edit mods concurrently with a ru
 
 ## Scenarios and orders
 
+Polygon's semantic subject interface can use the executor-local
+[platform backend](docs/platform.md). Its mapping is a candidate, requiring
+operator-reviewed live qualification; no mod order selects provider versions.
+
 Generic scenarios use DevBench tools with explicit returned-state assertions.
 `tool: "driver"` is routed to our owned physical adapter, not to DevBench input
 injection. Full HMD/left/right frames have bounded leases, then buttons/axes are

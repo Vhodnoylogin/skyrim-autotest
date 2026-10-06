@@ -75,6 +75,11 @@ Commands are init, config-check, build-driver, preflight, run, status, recover a
 queue. `guide` prints these instructions. Fault injection requires a deliberate
 recovery-test task; its expected failed result is not a mod regression.
 
+For Polygon semantic requests read docs/platform.md. Candidate mappings alone
+do not qualify a platform. Preserve common bootstrap and absolute step deadlines;
+never treat requested fixture values as measurements or sampled held-reference
+continuity as proof of unobserved events. Keep subject orders unchanged on tool updates.
+
 Code contributors: use Python standard library only for runtime; preserve
 process creation-time/path/ancestry ownership, shared mutex and durable snapshots.
 Before committing/pushing verify and name this repository and remote. Third-party

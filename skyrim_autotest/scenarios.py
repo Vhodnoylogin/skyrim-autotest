@@ -68,9 +68,15 @@ def validate(scenario):
             assertion_count += len(rules)
         if step['tool'] == 'driver':
             validate_driver(step.get('args', {}))
+        if step['tool'] == 'platform':
+            from .platform import validate as validate_platform
+            validate_platform(step.get('args', {}))
         if step.get('poll'):
             args = step.get('args', {})
             readonly = (step['tool'] == 'driver' and args.get('action') == 'status') or step['tool'] == 'inspect' or (step['tool'] == 'menu' and args.get('action') in ('list', 'describe')) or (step['tool'] == 'input' and args.get('action') in ('status', 'capabilities'))
+            if step['tool'] == 'platform':
+                from .platform import READS
+                readonly = step.get('args', {}).get('operation') in READS
             if not readonly:
                 raise ValueError('Polling is limited to known read-only inspection/status tools')
     if not assertion_count:
@@ -148,7 +154,11 @@ def execute(session, scenario):
                     remaining = end - time.monotonic()
                     if remaining <= 0:
                         raise TimeoutError('Step deadline exceeded during reference validation')
-                result = session.tool(step['tool'], resolve_args(step.get('args', {}), session.state), timeout=min(remaining, 12))
+                if step['tool'] == 'platform':
+                    result = session.tool(step['tool'], resolve_args(step.get('args', {}), session.state),
+                                          timeout=min(remaining, 12), deadline=end)
+                else:
+                    result = session.tool(step['tool'], resolve_args(step.get('args', {}), session.state), timeout=min(remaining, 12))
             except Exception as error:
                 from .runner import ToolError
                 if isinstance(error, ToolError):

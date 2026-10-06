@@ -425,6 +425,17 @@ class Session:
             self.invalidate_probe_reference('potential world-changing request: ' + name)
         if name == 'driver':
             return self.driver_tool(args)
+        if name == 'platform':
+            from .platform import execute
+            started = time.monotonic()
+            try:
+                result = execute(self, args, deadline or (started + timeout))
+            except Exception as error:
+                self.log('tool-error', tool=name, args=args, error=str(error),
+                         elapsedMs=int((time.monotonic() - started) * 1000))
+                raise
+            self.log('tool', tool=name, args=args, result=result)
+            return result
         def bounded_timeout(limit):
             if deadline is None:
                 return limit

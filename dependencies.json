@@ -59,11 +59,11 @@
   "devbenchCompatibilityCandidate": {
     "upstreamVersion": "1.26.0",
     "source": "https://github.com/Vhodnoylogin/devbench/tree/fix/vr-readiness-v126",
-    "commit": "b43bbae6841a6ec725d94af44478a1b17c9c7cd5",
+    "commit": "c3b3f9af172f4ee88d51ebd863229d242722c908",
     "commonlibCommit": "9106d402cfc7dcbc5bf7458be6748af19d7fc914",
     "rebuild": "python tools/build_devbench_fork.py --build-dir <new external directory>",
-    "testedCandidateDllSha256": "be2d95032090f3299bfe1a75463e7675ca93801aaa5c46af21d18087c090ff34",
-    "testedCandidatePdbSha256": "e3db984fc65733eed6f2af482547ad2738b8972c4ee22d60c8c84477125adbf2",
+    "testedCandidateDllSha256": "581c3ed27efab01d61a2d4b5a16e4a88ab475da9adbf988f317bff5271b8a22d",
+    "testedCandidatePdbSha256": "8cf44531bdc1ed5823352867b7fe902bba214c49a52338ef848cd955f70fa95a",
     "status": "Native215 tests and eight decoder cases passed; Body live qualification pending. Not an upstream release or an installed-version claim.",
     "note": "Generated binary hashes may differ on another build; pin the resulting matching DLL/PDB. No foreign binaries/source bundled."
   },
