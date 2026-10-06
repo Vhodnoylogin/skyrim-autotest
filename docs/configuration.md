@@ -45,6 +45,17 @@ backed up/restored, new files removed. Source hashes are verified before setup
 and again at staging. Include the mod's configuration/output files in extra_files
 when they are not already captured under enabled mod directories.
 
+For unattended crash collection, stage a pinned copy of the actual winning
+`SKSE/Plugins/CrashLogger.ini` with `[Debug] Auto Open Crash Log = false`.
+Crash Logger otherwise opens its default viewer after a crash; that child can
+keep MO2's virtualized launch chain alive. Preserve every other setting and keep
+the generated copy outside Git. The ordinary `staged_plugins` mechanism also
+accepts this INI destination: it backs up the existing overwrite file, stages the
+verified copy before launch, and restores its original content afterward. Logs
+remain enabled and collected; do not solve this by terminating an unrelated
+editor or disabling the logger. Record crash-spawned viewer identity/ancestry
+when reviewing a blocked historical session.
+
 `config-check` validates schema and path policy without launching programs. It
 is not live dependency readiness. `preflight` checks actual configured binaries,
 profile, busy processes, SteamVR input profile, Root Builder stock DLL and
