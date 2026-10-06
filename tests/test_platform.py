@@ -224,6 +224,11 @@ class PlatformTests(unittest.TestCase):
                     start = [0,.3,-.55]
                     end = [session.calls[-1][1]['frame']['right']['matrix'][i] for i in (3,7,11)]
                     self.assertLess(sum((a-b)**2 for a,b in zip(end,start))**.5, .5)
+                    # Small-bottle regression: the old long-clutter landmark
+                    # left the hand over 23 game units from the reference.
+                    # This checks approach distance, not collision/selection.
+                    reached = hand_xyz('right')
+                    self.assertLess(sum((a-b)**2 for a,b in zip(reached,reference))**.5, 12)
                 else:
                     with self.assertRaisesRegex(ValueError, 'declared maximum'): backend.controller(req)
                     self.assertTrue(all(call[1]['frame']['right']['controller']['pressed'] == 0 for call in session.calls))

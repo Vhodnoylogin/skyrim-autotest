@@ -308,15 +308,20 @@ class Backend:
             target = self.xyz(ref)
             reference_position = list(target)
             heading = math.radians(self.pap('ObjectReference', 'GetAngleZ', target='0x14'))
-            # HIGGS near-cast landmark used by the previously observed physical fixture.
-            target[0] -= math.sin(heading)*21
-            target[1] -= math.cos(heading)*21
-            target[2] += 10
+            # The old 21-unit landmark was observed with long firewood. It can
+            # leave a small bottle outside the near cast (0.15m plus 0.08m
+            # radius in the reviewed HIGGS configuration). Use a close approach
+            # candidate, retaining the exact-reference physical-grip assertion.
+            # This is not a measured palm/collision transform or selection ACK.
+            target[0] -= math.sin(heading)*7
+            target[1] -= math.cos(heading)*7
+            target[2] += 7
             from .platform_math import solve3
             start_tracking = [frame[hand]['matrix'][index] for index in (3,7,11)]
             self.s.log('platform-reach-geometry', reference=ref, referencePositionGameUnits=reference_position,
                        targetPalmGameUnits=target, trackingStartMetres=start_tracking,
-                       measuredGameUnitsPerMetre=columns, maximumReachMetres=req['maximumReachMetres'])
+                       measuredGameUnitsPerMetre=columns, maximumReachMetres=req['maximumReachMetres'],
+                       approachBasis='close hand landmark candidate; palm/selection unobserved')
             for _ in range(3):
                 current = self.hand_xyz(hand)
                 delta = solve3(columns, [target[i]-current[i] for i in range(3)])
