@@ -365,11 +365,21 @@ def prepare_gameplay(session, scenario):
             time.sleep(1)
         else:
             raise AssertionError('Common gameplay fixture did not finish loading')
+        # postLoadGame is a lifecycle signal, not settled render/gameplay state.
+        # Never overlap a second world transition with save initialization.
+        session.phase('gameplay-loaded-fixture-stabilization', 120)
+        loaded_scene, _ = wait_gameplay_ready(session, None, False)
+        session.log('gameplay-fixture-stable', scene=loaded_scene)
     session.phase('gameplay-world-ready', 120)
     vr_probe.guard_fixture_modal(session)
     if cell:
-        if not new_game:
+        already_in_cell = (fixture and loaded_scene.get('playerLoaded') is True and
+                           loaded_scene.get('cell', {}).get('editorId') == cell)
+        if not new_game and not already_in_cell:
             session.tool('console', {'action': 'exec', 'command': 'coc ' + cell})
+        elif already_in_cell:
+            session.log('gameplay-cell-transition-skipped', cell=cell,
+                        reason='pinned fixture already loaded in declared cell')
         scene = vr_probe.wait_test_cell(session, cell)
     else:
         scene = session.tool('inspect', {'kind': 'scene'})

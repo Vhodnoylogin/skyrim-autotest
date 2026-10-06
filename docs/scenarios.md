@@ -178,6 +178,9 @@ engine units; tracking matrices use metres. Boolean scope options and safe cell
 IDs are validated before launch. A fixture remains optional and pinned when used.
 Common executor bootstrap runs before scenario dispatch. A scenario declares
 its initial `cell` and/or pinned `fixture`; it does not implement startup UI.
+After postLoadGame, a pinned fixture must reach stable gameplay before any
+additional cell transition. If its observed loaded cell already matches the
+declared target, skip `coc` and retain the normal target-cell/readiness checks.
 The platform waits for the identified calibration menu in `VRPlayroom01`, sends
 one bounded physical right-trigger press and observes the menu closing. It then
 loads the pinned save once when provided, observes postLoadGame, selects the
