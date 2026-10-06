@@ -21,6 +21,14 @@ file whose content is read immediately before an authenticated request.
 | extra_files | Explicit paths to regular files that may change; existence/content snapshotted before launch |
 | staged_plugins | External source files staged into MO2 overwrite before launch, with source/destination/sha256 |
 | devbench_runtime_files | Optional discovery file override list; default LOCALAPPDATA/devbench/vr/runtime.json and overwrite/SKSE/Plugins/devbench/runtime.json |
+| controller_start_positions_metres | Optional platform-owned left/right tracking translations, three finite metre values each within [-2,2]; open-hand pose applied once after common gameplay readiness and before subject actions |
+
+The optional controller start pose is explicit fixture preparation in the frozen
+platform configuration, not a subject-order action or a larger reach allowance.
+It requires the owned file driver; defaults remain unchanged. The executor logs
+its publication without claiming consumed/gameplay state. A later bounded reach
+starts at this recorded initial pose and keeps its original maximum displacement.
+Qualify the configuration and actual measured hand behavior; never change it mid-run.
 
 A staged plugin is `{ "source": "C:/Build/WorldObserver.dll", "destination":
 "SKSE/Plugins/WorldObserver.dll", "sha256": "<64 lower-case hex digits>" }`.

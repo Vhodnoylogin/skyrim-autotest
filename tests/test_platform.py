@@ -132,5 +132,46 @@ class PlatformTests(unittest.TestCase):
         self.assertEqual(session.state['checks'][0]['name'], 'check')
         self.assertEqual(operations()['world.read']['fields']['hand.reference.id'], 'hand.reference.id')
 
+    def test_explicit_initial_pose_before_subject_is_open_and_keeps_head(self):
+        class Fake(Session):
+            def phase(self, *args): self.phase_name = args[0]
+            def log(self, *args, **kwargs): self.logged = kwargs
+        session = Fake()
+        session.state.update(inputBackend='driver', driverBackend='file')
+        platform.initialize_controllers(session, {'controller_start_positions_metres': {'left': [-.3,.3,-.55], 'right': [0,.3,-.55]}})
+        frame = session.calls[0][1]['frame']
+        self.assertEqual([frame['right']['matrix'][i] for i in (3,7,11)], [0,.3,-.55])
+        self.assertEqual(frame['hmd']['matrix'][7], 1.65)
+        self.assertEqual(frame['right']['controller']['pressed'], 0)
+        self.assertEqual(frame['left']['controller']['pressed'], 0)
+        self.assertFalse(session.logged['subjectAction'])
+        self.assertTrue(session.logged['consumedByGameNotProven'])
+        session.state['gameplayBootstrap']['completed'] = False
+        session.calls.clear()
+        with self.assertRaises(ValueError): platform.initialize_controllers(session, {'controller_start_positions_metres': {'left': [0,0,0], 'right': [0,0,0]}})
+        self.assertEqual(session.calls, [])
+
+    def test_start_pose_configuration_fails_bad_dimensions_or_units(self):
+        from skyrim_autotest.config import configure, template, ConfigurationError
+        config = template()
+        config['controller_start_positions_metres'] = {'right': [0,.3,-.55], 'left': [-.3,.3,-.55]}
+        configure(config)
+        for bad in ({'right': [0,0,0]}, {'right': [0,3,0], 'left': [0,0,0]},
+                    {'right': [0,True,0], 'left': [0,0,0]}, {'right': [0,float('nan'),0], 'left': [0,0,0]}):
+            with self.subTest(bad=bad):
+                config['controller_start_positions_metres'] = bad
+                with self.assertRaises(ConfigurationError): configure(config)
+
+    def test_recorded_geometry_keeps_original_half_metre_bound(self):
+        columns = [[-11.8976,68.9795,0], [0,0,70], [68.9813,11.8994,0]]
+        baseline = [-381.05688,2056.01636,7067.85010]
+        target = [-411.90506,2026.27026,6991.82471]
+        old_delta = solve3(columns, [t-b for t,b in zip(target,baseline)])
+        self.assertGreater(sum(v*v for v in old_delta)**.5, .5)
+        shift = [-.3,-.9,-.2]  # Initial platform pose difference, before bounded reach.
+        prepared = [baseline[r]+sum(columns[c][r]*shift[c] for c in range(3)) for r in range(3)]
+        new_delta = solve3(columns, [t-b for t,b in zip(target,prepared)])
+        self.assertLess(sum(v*v for v in new_delta)**.5, .5)
+
 
 if __name__ == '__main__': unittest.main()

@@ -284,10 +284,17 @@ class Backend:
                 self.publish(frame, 10)
                 self.pause(.15)
             target = self.xyz(ref)
-            # Near-cast palm offset, observed in the original physical fixture.
+            reference_position = list(target)
+            heading = math.radians(self.pap('ObjectReference', 'GetAngleZ', target='0x14'))
+            # HIGGS near-cast landmark used by the previously observed physical fixture.
+            target[0] -= math.sin(heading)*21
+            target[1] -= math.cos(heading)*21
             target[2] += 10
             from .platform_math import solve3
             start_tracking = [frame[hand]['matrix'][index] for index in (3,7,11)]
+            self.s.log('platform-reach-geometry', reference=ref, referencePositionGameUnits=reference_position,
+                       targetPalmGameUnits=target, trackingStartMetres=start_tracking,
+                       measuredGameUnitsPerMetre=columns, maximumReachMetres=req['maximumReachMetres'])
             for _ in range(3):
                 current = self.hand_xyz(hand)
                 delta = solve3(columns, [target[i]-current[i] for i in range(3)])
@@ -295,6 +302,8 @@ class Backend:
                          for index, change, origin in zip((3,7,11), delta, start_tracking)]
                 if math.sqrt(sum(v*v for v in total)) > req['maximumReachMetres']:
                     raise ValueError('Physical reach exceeds declared maximum')
+                self.s.log('platform-reach-position', handPositionGameUnits=current,
+                           totalTrackingDisplacementMetres=total)
                 for index, change in zip((3,7,11), delta): frame[hand]['matrix'][index] += change
                 self.publish(frame, 10)
                 self.pause(.3)
@@ -360,6 +369,25 @@ class Backend:
                 last = point
             self.pause(.1)
         return {'reference': {'id': ref, 'settledPositionGameUnits': last}}
+
+
+def initialize_controllers(session, configuration):
+    """Explicit platform initial pose, before subject steps and bounded reaches."""
+    positions = configuration.get('controller_start_positions_metres')
+    if positions is None: return
+    if not session.state.get('gameplayBootstrap', {}).get('completed'):
+        raise ValueError('Controller platform fixture must follow common gameplay readiness')
+    if session.state.get('inputBackend') != 'driver' or session.state.get('driverBackend') != 'file':
+        raise ValueError('Initial controller pose requires the owned file-driver backend')
+    from .hardware import neutral
+    frame = copy.deepcopy(session.state.get('hardwareFrame') or neutral())
+    for hand in ('left', 'right'):
+        for index, value in zip((3,7,11), positions[hand]): frame[hand]['matrix'][index] = value
+        frame[hand]['controller'].update(pressed=0, touched=0, axes=[[0,0] for _ in range(5)])
+    session.phase('platform-controller-initialization', 15)
+    publication = session.tool('driver', {'action': 'publish', 'frame': frame, 'holdSeconds': 30})
+    session.log('platform-controller-start-pose', positionsMetres=positions,
+                publication=publication, subjectAction=False, consumedByGameNotProven=True)
 
 
 def execute(session, args, deadline):

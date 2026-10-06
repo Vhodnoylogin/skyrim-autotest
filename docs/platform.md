@@ -35,6 +35,14 @@ poses are issued input, not proof of reaching a pouch/mouth. Publication retains
 the existing30second bounded lease across intervening reads, with explicit
 release/next action and guardian ownership checks. It is not a driver ACK.
 
+A platform can explicitly prepare open hands at configured
+controller_start_positions_metres after common gameplay readiness and before
+subject steps. This lets a floor fixture begin with hands near the floor rather
+than spend its bounded reach lowering from a chest-height default. The actual
+subsequent movement remains measured and bounded by the unchanged subject
+maximum. The initial pose and configuration are separately pinned/qualified;
+there is no hidden pre-positioning inside a bounded reach or assertion waiver.
+
 `hand.continuousHold.seconds` represents the elapsed interval of bounded samples
 with the same exact HIGGS reference. Each sample rechecks lifecycle continuity;
 more than0.5seconds between samples fails. The response retains every sample,

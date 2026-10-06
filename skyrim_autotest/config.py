@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path, PureWindowsPath
 import re
+import math
 
 SCHEMA = 1
 
@@ -36,11 +37,18 @@ def configure(value, base=None):
     missing = sorted(k for k in REQUIRED if not value.get(k))
     if missing:
         raise ConfigurationError("Missing configuration fields: " + ", ".join(missing))
-    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "staged_plugins", "devbench_runtime_files"}
+    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres"}
     if unknown:
         raise ConfigurationError("Unknown configuration fields: " + ", ".join(sorted(unknown)))
     base = Path(base or Path.cwd()).resolve()
     result = dict(value)
+    if 'controller_start_positions_metres' in result:
+        positions = result['controller_start_positions_metres']
+        if not isinstance(positions, dict) or set(positions) != {'left', 'right'}:
+            raise ConfigurationError('Controller start positions require both explicit hands')
+        for xyz in positions.values():
+            if not isinstance(xyz, list) or len(xyz) != 3 or any(type(v) not in (int, float) or not math.isfinite(v) or abs(v) > 2 for v in xyz):
+                raise ConfigurationError('Controller start positions require three finite metre values within [-2,2]')
     for key in PATH_KEYS:
         if result.get(key):
             path = Path(result[key]).expanduser()
