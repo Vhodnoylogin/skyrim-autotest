@@ -97,7 +97,7 @@ class FocusInputPauseTests(unittest.TestCase):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as directory:
             frame=hardware.neutral();frame['right']['controller']['pressed']=4
-            session=runner.Session(directory,{'inputBackend':'driver','driverBackend':'file','hardwareFrame':frame})
+            session=runner.Session(directory,{'id':'focus-input-test','owned':[], 'inputBackend':'driver','driverBackend':'file','hardwareFrame':frame})
             with patch.object(hardware,'publish') as publish:
                 self.assertTrue(session.pause_focus_input())
                 self.assertEqual(frame['right']['controller']['pressed'],0)

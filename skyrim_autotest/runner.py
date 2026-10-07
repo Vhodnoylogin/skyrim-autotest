@@ -245,9 +245,20 @@ class Session:
             configure(self.state['configuration'])
         self.lock = threading.RLock()
         self.finished = threading.Event()
+        self.heartbeat_failed = threading.Event()
+        self.heartbeat_error = None
+        self.heartbeat_thread_id = None
+        if not native.alive(self.state.get('runner')):
+            from . import runner_monitor
+            runner_monitor.restore(self.dir, self.state)
 
     def save(self):
         with self.lock:
+            if threading.get_ident() == self.heartbeat_thread_id:
+                from . import runner_monitor
+                atomic_json(self.dir/'heartbeat.json',runner_monitor.snapshot(self.state))
+                return
+            self.state['stateSavedAt'] = time.time()
             atomic_json(self.dir / 'state.json', self.state)
 
     def log(self, kind, **details):
@@ -356,16 +367,49 @@ class Session:
         return process
 
     def heartbeat(self):
-        while not self.finished.wait(1):
-            with self.lock:
-                self.state['heartbeat'] = time.time()
-                if self.state.get('hardwareFrame') and not self.state.get('restoringFiles') and not self.state.get('focusInputPaused'):
-                    from . import hardware
-                    if hardware.tick_ms() >= self.state.get('hardwareHoldUntilTickMs', 0):
-                        hardware.release(self.state['hardwareFrame'])
-                    self.publish_hardware(self.state['hardwareFrame'])
-                self.discover()
-                self.save()
+        self.heartbeat_thread_id = threading.get_ident()
+        try:
+            while not self.finished.wait(1):
+                with self.lock:
+                    self.state['heartbeat'] = time.time()
+                    if self.state.get('hardwareFrame') and not self.state.get('restoringFiles') and not self.state.get('focusInputPaused'):
+                        from . import hardware
+                        if hardware.tick_ms() >= self.state.get('hardwareHoldUntilTickMs', 0):
+                            hardware.release(self.state['hardwareFrame'])
+                        self.publish_hardware(self.state['hardwareFrame'])
+                    self.discover()
+                    self.save()
+        except Exception as error:
+            self.heartbeat_error = {'type':type(error).__name__,'message':str(error),'trace':traceback.format_exc()}
+            self.heartbeat_failed.set()
+            from . import runner_monitor
+            try:
+                with self.lock:
+                    atomic_json(self.dir/'heartbeat.json',runner_monitor.snapshot(self.state,self.heartbeat_error))
+                    atomic_json(self.dir/'heartbeat-error.json',self.heartbeat_error)
+                    self.log('heartbeat-failed',**self.heartbeat_error)
+            except Exception:
+                # In-memory failure still reaches the main thread/final result;
+                # the independent guardian also detects a missing/stale pulse.
+                pass
+        finally:
+            self.heartbeat_thread_id = None
+
+    def finish_heartbeat(self, thread):
+        self.finished.set()
+        thread.join(timeout=3)
+        if thread.is_alive() and not self.heartbeat_error:
+            self.heartbeat_error={'type':'HeartbeatStopTimeout','message':'Heartbeat did not stop within three seconds'}
+            self.heartbeat_failed.set()
+        with self.lock:
+            pulse=self.dir/'heartbeat.json'
+            health={'healthy':not self.heartbeat_failed.is_set(),'stopped':not thread.is_alive(),
+                    'error':self.heartbeat_error,'pulse':{'path':str(pulse),'sha256':sha(pulse)} if pulse.is_file() else None}
+            self.state['heartbeatHealth']=health
+            if not health['healthy']:
+                self.state['result']='failed'
+                self.state['reason']=(self.state.get('reason','')+'; executor heartbeat failed').lstrip('; ')
+            return health
 
     def pause_focus_input(self):
         from . import hardware
@@ -494,6 +538,8 @@ class Session:
             raise
 
     def tool(self, name, args, timeout=12, deadline=None):
+        if self.heartbeat_failed.is_set() and not self.state.get('phase','').startswith('stop-and-restore'):
+            raise Blocked('Executor heartbeat failed; refusing further test actions')
         if self.state.get('postStepsActive') and changes_reference_world(name, args):
             self.invalidate_probe_reference('potential world-changing request: ' + name)
         if name == 'driver':
@@ -1032,7 +1078,7 @@ class Session:
         for item in self.state.get('checks', []):
             lines.append(f'- {item["name"]}: {item["result"]}')
         (self.dir / 'report.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
-        atomic_json(self.dir / 'result.json', {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors')})
+        atomic_json(self.dir / 'result.json', {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors','heartbeatHealth')})
 
     def reopen_mo2(self):
         if self.state.get('reopenMO2') and self.state.get('restored'):
@@ -1058,7 +1104,11 @@ def guardian(directory):
             return
         owner = state.get('runner')
         reason = 'Runner died or exceeded its deadline; independent guardian recovered the session'
-        expired = time.time() > state.get('deadline', time.time() + 1) + 15 or time.time() - state.get('heartbeat', time.time()) > 35
+        from . import runner_monitor
+        pulse_at,pulse=runner_monitor.observed_at(directory,state)
+        expired = time.time() > state.get('deadline', time.time() + 1) + 15 or time.time() - pulse_at > 35
+        if pulse and not pulse['healthy'] and not state.get('phase','').startswith('stop-and-restore'):
+            reason,expired='Executor heartbeat reported failure',True
         from .game_restart import expected_restart
         restarting=expected_restart(state,time.time())
         if restarting:
@@ -1240,11 +1290,10 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
             except Exception as e:
                 session.state.update(result='failed', reason=session.state.get('reason', '') + '; cleanup: ' + str(e))
                 session.log('cleanup-error', trace=traceback.format_exc())
+            session.finish_heartbeat(heartbeat)
             session.state['done'] = session.state.get('restored', False)
             session.save()
             session.report()
-            session.finished.set()
-            heartbeat.join(timeout=3)
             session.reopen_mo2()
         print(json.dumps({'run': str(directory), 'result': session.state['result'], 'restored': session.state['restored'], 'reason': session.state.get('reason', '')}), flush=True)
         return 0 if session.state['result'] == 'passed' and session.state['restored'] else 1

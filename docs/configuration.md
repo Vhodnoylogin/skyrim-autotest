@@ -1,5 +1,14 @@
 # Configuration contract (schemaVersion 1)
 
+The executor records an identity-bound `heartbeat.json` separately from the
+main run state, including only health and locked process/input recovery data.
+The guardian validates that pulse against the exact run and runner identity;
+stale, mismatched or malformed pulses cannot extend its deadline. Recovery
+preserves late owned-process discoveries and newer input state without replacing
+newer durable main-thread data. `result.json` includes `heartbeatHealth`; a
+failed or non-stopping monitor makes the technical result fail even when game
+checks and file restoration succeeded. Heartbeat health is not gameplay readiness.
+
 Optional `allow_steam_client_restart: true` requires an explicit `steam_exe` path.
 It authorizes one graceful `steam.exe -shutdown` only if the exact preflight
 client is still alive, holds our staged null-driver module, its executable and
