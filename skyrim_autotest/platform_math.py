@@ -47,3 +47,53 @@ def pose_frames(start, target):
                                      2*(x*y+z*w),1-2*(x*x+z*z),2*(y*z-x*w),xyz[1],
                                      2*(x*z-y*w),2*(y*z+x*w),1-2*(x*x+y*y),xyz[2]]
         yield frame
+
+
+def world_bounds_center(bounds, transform):
+    """Observed scene-root transform of native local model bounds, not collision COM."""
+    def finite(values, count):
+        if not isinstance(values,list) or len(values)!=count or any(type(v) not in (int,float) or not math.isfinite(v) for v in values):
+            raise ValueError('Bounds/scene transform numeric data unavailable')
+        return values
+    lower,upper=finite(bounds.get('min'),3),finite(bounds.get('max'),3)
+    if any(a>b or b-a>512 for a,b in zip(lower,upper)):
+        raise ValueError('Model bounds invalid or outside bounded grip domain')
+    local=[(a+b)/2 for a,b in zip(lower,upper)]
+    rotation=finite(transform.get('rotationRowMajor'),9)
+    translation=finite(transform.get('translation'),3)
+    scale=transform.get('scale')
+    if type(scale) not in (int,float) or not math.isfinite(scale) or not 0<scale<=100:
+        raise ValueError('Scene transform scale unavailable')
+    rows=[rotation[i:i+3] for i in (0,3,6)]
+    if any(abs(sum(a*b for a,b in zip(rows[i],rows[j]))-(1 if i==j else 0))>.001 for i in range(3) for j in range(3)):
+        raise ValueError('Scene rotation is not orthonormal')
+    determinant=sum(rows[0][i]*(rows[1][(i+1)%3]*rows[2][(i+2)%3]-rows[1][(i+2)%3]*rows[2][(i+1)%3]) for i in range(3))
+    if abs(determinant-1)>.001:raise ValueError('Scene rotation handedness unavailable')
+    return [translation[i]+scale*sum(rows[i][j]*local[j] for j in range(3)) for i in range(3)]
+
+
+def body_reach_envelope(columns, shoulder, elbow, hand, target):
+    """Generous observed-body workspace, not anatomical IK or a travel budget."""
+    def metres(a, b):
+        return math.sqrt(sum(v*v for v in solve3(columns, [x-y for x,y in zip(a,b)])))
+    upper, lower = metres(shoulder, elbow), metres(elbow, hand)
+    if not .05 <= upper <= 1.2 or not .05 <= lower <= 1.2 or not .2 <= upper+lower <= 1.4:
+        raise ValueError('Observed arm geometry unavailable or extreme')
+    # Permit bending/repositioning and scaled VR avatars. This deliberately
+    # rejects only extremes, not normal reach from a previously distant pose.
+    radius = min(2., 2*(upper+lower)+.2)
+    distance = metres(shoulder, target)
+    if distance > radius:
+        raise ValueError('Target outside observed body reach envelope')
+    return {'shoulderToTargetMetres': distance, 'armChainMetres': upper+lower,
+            'bodyEnvelopeRadiusMetres': radius, 'basis': 'observed arm chain with generous bending margin; not anatomical IK'}
+
+
+def fixture_offset(index, heading):
+    """Distinct initial slots for up to16 small disposable fixture references."""
+    if type(index) is not int or not 0 <= index < 16:
+        raise ValueError('Fixture placement slot unavailable')
+    lateral = (-30., -10., 10., 30.)[index % 4]
+    forward = 42. + 20.*(index // 4)
+    return [math.sin(heading)*forward + math.cos(heading)*lateral,
+            math.cos(heading)*forward - math.sin(heading)*lateral, 20.]

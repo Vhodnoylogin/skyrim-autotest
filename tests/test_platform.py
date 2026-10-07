@@ -18,6 +18,7 @@ class Session:
     def validate_probe_reference(self, timeout=3):
         self.validations += 1
         if not self.state['probeObjectLive']: raise ValueError('generation changed')
+    def log(self, *args, **kwargs): pass
     def tool(self, tool, args, timeout=12, deadline=None):
         self.calls.append((tool, args))
         self.deadlines.append(deadline)
@@ -251,19 +252,27 @@ class PlatformTests(unittest.TestCase):
                             moving[1] -= 1
                         return list(moving)
                     backend.xyz = dynamic_xyz
+                def center(ref, hand=None):
+                    position=hand_xyz('right')
+                    shoulder=[reference[0],reference[1],reference[2]+70]
+                    backend._reach_body={'hand':position,'shoulder':shoulder,
+                                         'elbow':[(a+b)/2 for a,b in zip(shoulder,position)]}
+                    return backend.xyz(ref)
+                backend.reference_center = center
                 req = {'action': 'reach_and_grip_reference', 'hand': 'right', 'grip': 'closed',
                        'holdSeconds': 2, 'maximumReachMetres': .5, 'referenceTag': 'seed-potion'}
                 if escaped:
-                    with self.assertRaisesRegex(AssertionError, 'moved away'): backend.controller(req)
+                    with self.assertRaisesRegex(ValueError, 'body reach envelope'): backend.controller(req)
                     self.assertTrue(all(args['frame']['right']['controller']['pressed'] == 0
                                         for tool,args in session.calls if tool == 'driver'))
-                elif prepared:
+                else:
                     result = backend.controller(req)
                     self.assertIsNone(result['observedGameplaySuccess'])
                     self.assertEqual(session.calls[-1][1]['frame']['right']['controller']['pressed'], 4)
-                    start = [0,.3,-.55]
+                    start = [0,.3,-.55] if prepared else origin
                     end = [session.calls[-1][1]['frame']['right']['matrix'][i] for i in (3,7,11)]
-                    self.assertLess(sum((a-b)**2 for a,b in zip(end,start))**.5, .5)
+                    if prepared:self.assertLess(sum((a-b)**2 for a,b in zip(end,start))**.5, .5)
+                    else:self.assertGreater(sum((a-b)**2 for a,b in zip(end,start))**.5, .5)
                     # Small-bottle regression: the old long-clutter landmark
                     # left the hand over 23 game units from the reference.
                     # This checks approach distance, not collision/selection.
@@ -272,9 +281,6 @@ class PlatformTests(unittest.TestCase):
                     self.assertGreater(sum((a-b)**2 for a,b in zip(reached,reference))**.5, 15)
                     self.assertGreater(len(session.increments), 1)
                     self.assertTrue(all(sum(v*v for v in delta)**.5 <= .01000001 for delta in session.increments))
-                else:
-                    with self.assertRaisesRegex(ValueError, 'declared maximum'): backend.controller(req)
-                    self.assertTrue(all(call[1]['frame']['right']['controller']['pressed'] == 0 for call in session.calls))
 
     @patch('skyrim_autotest.vr_probe.ensure_owned_focus', side_effect=AssertionError('foreground denied'))
     def test_focus_denial_prevents_controller_publication(self, focus):

@@ -202,6 +202,70 @@ class Backend:
     def xyz(self, target):
         return [self.pap('ObjectReference', 'GetPosition' + a, target=target) for a in 'XYZ']
 
+    def reference_center(self, ref, hand=None):
+        """Native bounds plus observed row-major scene transform; no guessed Euler order."""
+        from .platform_math import world_bounds_center
+        self.s.validate_probe_reference(timeout=min(3,self.remaining()))
+        if not hasattr(self, '_grip_bounds'): self._grip_bounds = {}
+        if ref not in self._grip_bounds:
+            rows=self.call('inspect',{'kind':'refs','formId':ref}).get('refs',[])
+            exact=[row for row in rows if int(row.get('formId','0'),16)==int(ref,16)]
+            if len(exact)!=1 or not isinstance(exact[0].get('bounds'),dict):
+                raise ValueError('Exact native model bounds unavailable')
+            self._grip_bounds[ref]=exact[0]['bounds']
+        query={'kind':'world_observer','refs':[ref]}
+        names = None
+        if hand:
+            names = (['NPC L UpperArm [LUar]', 'NPC L Forearm [LLar]', 'NPC L Hand [LHnd]']
+                     if hand == 'left' else ['NPC R UpperArm [RUar]', 'NPC R Forearm [RLar]', 'NPC R Hand [RHnd]'])
+            query['nodes']=[{'ref':'0x14','name':name,'firstPerson':True} for name in names]
+        snapshot=self.call('inspect',query)
+        if snapshot.get('ok') is not True or snapshot.get('units')!='skyrim_engine_units' or snapshot.get('space')!='world':
+            raise ValueError('Observer grip target units/space unavailable')
+        rows=snapshot.get('refs',[])
+        if len(rows)!=1:raise ValueError('Exact observed reference transform unavailable')
+        row=rows[0];identity=row.get('identity',{})
+        if (row.get('status')!='available' or row.get('loaded3D') is not True or
+                row.get('deleted') is not False or row.get('disabled') is not False or
+                int(identity.get('form','0'),16)!=int(ref,16) or
+                type(identity.get('runtimeHandle')) is not int or identity['runtimeHandle']<=0 or
+                type(snapshot.get('loadGeneration')) is not int or identity.get('loadGeneration')!=snapshot['loadGeneration'] or
+                not isinstance(snapshot.get('sessionId'),str) or not snapshot['sessionId']):
+            raise ValueError('Observed grip reference identity/generation unavailable')
+        key=(snapshot['sessionId'],snapshot['loadGeneration'],identity['runtimeHandle'])
+        if not hasattr(self,'_grip_identity'):self._grip_identity={}
+        if ref in self._grip_identity and self._grip_identity[ref]!=key:
+            raise ValueError('Grip target incarnation/session/generation changed')
+        self._grip_identity[ref]=key
+        center=world_bounds_center(self._grip_bounds[ref],row.get('sceneTransform') or {})
+        self.s.log('platform-reference-bounds-center',reference=ref,identity=identity,
+                   observerSession=snapshot['sessionId'],sampleId=snapshot.get('sampleId'),
+                   bounds=self._grip_bounds[ref],sceneTransform=row['sceneTransform'],centerGameUnits=center,
+                   basis='native local model bounds transformed by observed scene root; not physical collision COM')
+        if names:
+            nodes=snapshot.get('nodes',[])
+            points=[]
+            player_identity=None
+            for name in names:
+                exact=[node for node in nodes if node.get('name')==name and node.get('firstPerson') is True and int(node.get('form','0'),16)==0x14]
+                if len(exact)!=1 or exact[0].get('status')!='available':
+                    raise ValueError('Observed body reach node unavailable: '+name)
+                node=exact[0];ident=node.get('identity',{})
+                point=node.get('world',{}).get('translation')
+                if (int(ident.get('form','0'),16)!=0x14 or ident.get('loadGeneration')!=snapshot['loadGeneration'] or
+                        type(ident.get('runtimeHandle')) is not int or ident['runtimeHandle']<=0 or
+                        not isinstance(point,list) or len(point)!=3 or
+                        any(type(v) not in (int,float) or not math.isfinite(v) for v in point)):
+                    raise ValueError('Observed body node identity/coordinates unavailable')
+                if player_identity is not None and player_identity!=ident:raise ValueError('Observed body node identities differ')
+                player_identity=ident;points.append(point)
+            self._reach_body={'shoulder':points[0],'elbow':points[1],'hand':points[2]}
+            player_key=(snapshot['sessionId'],snapshot['loadGeneration'],player_identity['runtimeHandle'])
+            if hasattr(self,'_reach_player_identity') and self._reach_player_identity!=player_key:
+                raise ValueError('Body reach player identity changed')
+            self._reach_player_identity=player_key
+        return center
+
     def hand_xyz(self, hand):
         node = 'NPC L Hand [LHnd]' if hand == 'left' else 'NPC R Hand [RHnd]'
         return [self.pap('NetImmerse', 'GetNodeWorldPosition' + a, [{'form': '0x14'}, node, True]) for a in 'XYZ']
@@ -369,7 +433,7 @@ class Backend:
                 columns.append([(measured[i]-baseline[i])/.05 for i in range(3)])
                 self.publish(frame, 10)
                 self.pause(.15)
-            target = self.xyz(ref)
+            target = self.reference_center(ref, hand)
             reference_position = list(target)
             heading = math.radians(self.pap('ObjectReference', 'GetAngleZ', target='0x14'))
             # The old 21-unit landmark was observed with long firewood. It can
@@ -382,32 +446,38 @@ class Backend:
             target[0] -= math.sin(heading)*12
             target[1] -= math.cos(heading)*12
             target[2] += 10
-            from .platform_math import solve3
+            from .platform_math import solve3, body_reach_envelope
             start_tracking = [frame[hand]['matrix'][index] for index in (3,7,11)]
-            self.s.log('platform-reach-geometry', reference=ref, referencePositionGameUnits=reference_position,
+            self.s.log('platform-reach-geometry', reference=ref, referenceBoundsCenterGameUnits=reference_position,
                        targetPalmGameUnits=target, trackingStartMetres=start_tracking,
-                       measuredGameUnitsPerMetre=columns, maximumReachMetres=req['maximumReachMetres'],
-                       approachBasis='close hand landmark candidate; palm/selection unobserved')
-            for _ in range(80):
+                       measuredGameUnitsPerMetre=columns, legacyMaximumReachMetres=req['maximumReachMetres'],
+                       reachPolicy='incremental-observed-body-envelope; legacy travel budget superseded by owner direction',
+                       approachBasis='observed transformed model-bounds center plus stand-off; palm/selection unobserved')
+            progress_at=time.monotonic()
+            previous_hand=None
+            for _ in range(256):
                 # Track the actual dynamic target, rather than pressing at a
                 # stale point after a teleported hand has displaced it.
-                target = self.xyz(ref)
+                target = self.reference_center(ref, hand)
                 target[0] -= math.sin(heading)*12
                 target[1] -= math.cos(heading)*12
                 target[2] += 10
-                current = self.hand_xyz(hand)
+                current = self._reach_body['hand']
+                envelope=body_reach_envelope(columns,self._reach_body['shoulder'],self._reach_body['elbow'],current,target)
                 if math.dist(current, target) < 2: break
+                if previous_hand is None or math.dist(previous_hand,current)>=.25:
+                    previous_hand=list(current);progress_at=time.monotonic()
+                elif time.monotonic()-progress_at>5:
+                    raise AssertionError('Physical hand made no observed progress for five seconds')
                 delta = solve3(columns, [target[i]-current[i] for i in range(3)])
                 total = [frame[hand]['matrix'][index] + change - origin
                          for index, change, origin in zip((3,7,11), delta, start_tracking)]
-                if math.sqrt(sum(v*v for v in total)) > req['maximumReachMetres']:
-                    raise ValueError('Physical reach exceeds declared maximum')
                 distance = math.sqrt(sum(v*v for v in delta))
                 fraction = min(1., .01/distance)
                 delta = [v*fraction for v in delta]
                 self.s.log('platform-reach-position', handPositionGameUnits=current,
                            targetHandGameUnits=target, totalTrackingDisplacementMetres=total,
-                           trackingIncrementMetres=delta)
+                           trackingIncrementMetres=delta,bodyEnvelope=envelope)
                 for index, change in zip((3,7,11), delta): frame[hand]['matrix'][index] += change
                 self.publish(frame, 10)
                 self.pause(.1)
@@ -422,7 +492,8 @@ class Backend:
             self.pause(.5)
             menus = self.call('menu', {'action': 'list', 'includeFlags': True})
             can_grab = self.pap('HiggsVR', 'CanGrabObject', [hand == 'left'])
-            hand_position, reference_position = self.hand_xyz(hand), self.xyz(ref)
+            reference_position = self.reference_center(ref, hand)
+            hand_position = self._reach_body['hand']
             current_target = [reference_position[0]-math.sin(heading)*12,
                               reference_position[1]-math.cos(heading)*12,
                               reference_position[2]+10]
@@ -430,6 +501,7 @@ class Backend:
                        handPositionGameUnits=hand_position,
                        referencePositionGameUnits=reference_position,
                        currentTargetHandGameUnits=current_target)
+            body_reach_envelope(columns,self._reach_body['shoulder'],self._reach_body['elbow'],hand_position,current_target)
             if menus_block_gameplay(menus):
                 raise AssertionError('Gameplay input blocked by an open menu')
             if can_grab is not True:
@@ -500,6 +572,7 @@ class Backend:
             raise ValueError('Fixture reference tag already exists; mutation refused')
         if len(references) >= 16:
             raise ValueError('Fixture reference limit16 reached')
+        placement_slot=len(references)
         if references:
             self.s.validate_probe_reference(timeout=min(3, self.remaining()))
         if req['quantityItems'] not in (1, 5): raise ValueError('Only fixture reference quantities1or5 are supported')
@@ -540,7 +613,11 @@ class Backend:
             if len(rows) != 1 or type(rows[0].get('quantityItems')) is not int or rows[0]['quantityItems'] != 5:
                 raise ValueError('Actual single-reference stack quantity is not5')
         heading = math.radians(self.pap('ObjectReference', 'GetAngleZ', target='0x14'))
-        self.pap('ObjectReference', 'MoveTo', [{'form': '0x14'}, math.sin(heading)*42, math.cos(heading)*42, 20., False], ref)
+        from .platform_math import fixture_offset
+        offset=fixture_offset(placement_slot,heading)
+        self.s.log('platform-fixture-placement',reference=ref,slot=placement_slot,offsetGameUnits=offset,
+                   basis='separate initial slots; settling/reach remain observed, not promised by requested offset')
+        self.pap('ObjectReference', 'MoveTo', [{'form': '0x14'}, *offset, False], ref)
         self.pap('ObjectReference', 'Enable', [False], ref)
         last, stable = None, None
         while True:

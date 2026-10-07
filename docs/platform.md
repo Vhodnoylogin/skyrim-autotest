@@ -43,8 +43,8 @@ A platform can explicitly prepare open hands at configured
 controller_start_positions_metres after common gameplay readiness and before
 subject steps. This lets a floor fixture begin with hands near the floor rather
 than spend its bounded reach lowering from a chest-height default. The actual
-subsequent movement remains measured and bounded by the unchanged subject
-maximum. The initial pose and configuration are separately pinned/qualified;
+subsequent movement remains measured and bounded by the observed body workspace
+and the original operation deadline. The initial pose and configuration are separately pinned/qualified;
 there is no hidden pre-positioning inside a bounded reach or assertion waiver.
 
 For explicitly configured automatic controller initialization, the common stage
@@ -84,8 +84,8 @@ Physical small-bottle approach keeps a candidate hand-node stand-off of12 game
 units behind and10 above the observed reference. The earlier7/7 candidate pushed
 the dynamic bottle before its grip edge in run20261007-105504-b826e7. This is
 platform geometry, not a measured palm transform or selection acknowledgement.
-Keep the original request reach bound, dynamic reobservation, small increments
-and exact HIGGS held-reference assertions. Live qualification is required.
+Keep dynamic reobservation, small increments and exact HIGGS held-reference
+assertions. Live qualification is required.
 
 Pose-and-grip motion interpolates rigid device poses in increments at most.01m,
 with a50ms minimum settling interval. Previous controller buttons stay held during
@@ -162,3 +162,32 @@ This candidate supports same-process load only: restart_game remains unsupported
 No save/load capability is live-qualified by these non-game tests. Operator must
 qualify actual saved/restored inventory, generated hashes, ordered lifecycle,
 common readiness, tag invalidation and full environment restoration separately.
+
+
+Observed-body incremental reach candidate (owner-directed policy revision):
+maximumReachMetres is retained as a legacy request field and logged, but no longer
+acts as a cumulative travel cap from the hand's previous pose. A0.7m move can be
+normal if both endpoints are in the avatar's workspace. This change requires a
+new qualified platform; do not rewrite retained orders/packets. The new source
+uses one Observer task per sample for exact target scene transform and the
+first-person upper-arm, forearm and hand nodes. Native local model bounds are
+transformed by observed row-major rotation/scale/translation, consistently for
+approach and final pregrip validation. Missing nodes, units, handles, generations
+or transforms stop before Grip; no fallback to guessed Euler angles or origin.
+
+The generous shoulder-relative workspace radius is twice the observed arm-chain
+length plus0.2m, capped at2m; invalid/extreme segment lengths stop. It allows
+bending and VR-avatar variation and is not anatomical inverse kinematics. Each
+motion increment is at most0.01m; unchanged absolute deadline,256increment hard
+limit,5seconds without actual hand movement, native menus and exact HIGGS held
+reference checks remain. Body workspace and incremental motion are candidate
+observations until actual game qualification; input publication is never Grip
+consumption proof. Initial calibration still uses three0.05m tracking probes.
+
+Disposable fixture references receive separate20-game-unit-spaced initial slots
+in a heading-rotated4x4 layout. One native spawn/drop and one initial MoveTo per
+reference are retained. No item teleport or directGrabObject is used during
+physical reach. Physics can move these objects after placement; stability is
+not reachability. The next actual body/target sample is authoritative and rejects
+an extreme target. Separate slots reduce initial overlap; they cannot guarantee
+no contact or prevent inherited DropObject velocity.
