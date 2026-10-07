@@ -10,7 +10,7 @@ import time
 
 READS = {'state.read', 'player.read', 'world.read', 'menu.read'}
 ACTIONS = {
-    'input.perform': {'save_game', 'load_game'},
+    'input.perform': {'save_game', 'load_game', 'restart_game'},
     'controller.perform': {'pose_and_grip', 'reach_and_grip_reference', 'release_reference', 'release_all'},
     'object.perform': {'create_fixture_reference', 'place_fixture_reference_in_hand', 'tag_held_reference',
                        'set_fixture_inventory_quantity', 'set_fixture_health'},
@@ -71,6 +71,7 @@ def validate(args):
         'lifecycle.state': ({'observation', 'afterSaveTag'}, set()),
         'save_game': ({'action', 'saveTag', 'scope'}, set()),
         'load_game': ({'action', 'saveTag', 'scope'}, set()),
+        'restart_game': ({'action', 'saveTag', 'scope'}, set()),
         'form.identity': ({'observation', 'form'}, set()),
         'form.alchemy': ({'observation', 'form'}, set()),
         'body_slot.settings': ({'observation', 'slot'}, set()),

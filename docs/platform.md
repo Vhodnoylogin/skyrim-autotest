@@ -158,8 +158,8 @@ pidChanged, generationChanged, oldReferenceTagsInvalidated. Generation denotes
 observed native load transition plus executor epoch, never an atomic producer
 generation. All nested common-readiness calls retain the action deadline.
 
-This candidate supports same-process load only: restart_game remains unsupported.
-No save/load capability is live-qualified by these non-game tests. Operator must
+Same-process save/load and the later restart_game extension each need separate
+live qualification. No save/load capability is qualified by non-game tests. Operator must
 qualify actual saved/restored inventory, generated hashes, ordered lifecycle,
 common readiness, tag invalidation and full environment restoration separately.
 
@@ -217,15 +217,16 @@ without another controller read. This prevents diagnostics from erasing a
 wrong-reference acquisition before the test observes it.
 
 MO2 virtual-save successor: MO2 can override the prepared absolute setting with
-`__MO_Saves\\`. This exact alias is accepted only after a live challenge: with
-owned LocalSaves/LocalSettings enabled, a fresh nonce copy of the pinned valid
-fixture ESS appears in the game's default save enumeration and disappears after
-its exact owned file is removed. The expected logical directory comes from the
-configured game log directory. Generic relative directories still fail. The
-challenge never requests a game save/load and cannot weaken the original/global
-save baseline checks. It attests observed USVFS mapping, not atomic filesystem
-ownership; actual save pairs must still appear only in the owned profile and
-pass event/hash/completion checks. This successor requires game qualification.
+`__MO_Saves\\`. A post-launch external nonce file was not visible during actual
+qualification03, before any game save mutation. The successor stages a fresh
+nonce copy of the pinned valid fixture ESS before launch. With owned local
+saves/settings enabled, the game's default directory must enumerate that exact
+nonce and successfully read its header. The owned copy/hash/path and expected
+logical directory are rechecked before saves/loads. The probe is retained in the
+archived attempt profile as evidence; it is never loaded. Generic relative paths
+still fail. This attests observed USVFS mapping, not atomic filesystem ownership.
+Original/global saves must remain unchanged and actual generated pairs must
+still pass event/hash/completion checks. This successor needs game qualification.
 
 `object.perform` tag_held_reference captures an already held actual reference,
 bracketing an Observer runtime handle/session/load-generation read with native
@@ -234,3 +235,17 @@ the old seed. New tags cannot reuse existing/invalidated names. Later use checks
 the captured incarnation, rejecting the same recycled formID with another handle
 or changed session/generation. These sequential samples cannot prove continuity
 between reads. Actual drawn-item qualification is required before deployment.
+
+Owned game-only restart candidate uses the same input.perform scope/saveTag and
+requires an already completed owned save pair. It releases controls, invalidates
+old tags, preserves a separate before-restart log segment, requests one owned
+game exit and one SKSE launch through the unchanged MO2 instance/profile. Only
+the exact owned game may be forcibly stopped after its graceful deadline; foreign
+processes block the transition. SteamVR/MO2/profile are not restarted. Fresh
+matching process identity, DevBench frames/task queue, the common startup screen,
+native save mapping, ordered load events and common quiet gameplay readiness
+must all complete before another subject action. The original action deadline
+is retained; the guardian's durable expected-exit window is <=180seconds and
+never disables runner/deadline recovery. Incomplete transitions cannot replay;
+limit2 explicit restarts per attempt. Restart, saved inventory recovery, process
+identity change, log segmentation and final restoration require live qualification.

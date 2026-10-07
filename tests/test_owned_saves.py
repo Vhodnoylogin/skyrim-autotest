@@ -19,6 +19,7 @@ class Backend:
                       'gameplayBootstrap':{'completed':True},'scenario':{},
                       'platformReferences':{'old-tag':{'id':'0xFF001234'}},'probeObjectLive':True}
         self.s.save=lambda:None;self.s.capture_probe_cursor=lambda:0
+        self.s.phase=lambda *a:None
         self.s.invalidate_probe_reference=lambda reason:self.s.state.update(probeObjectLive=False)
         self.s.log=lambda *a,**k:None
         self.calls=[];self.end=100
@@ -95,6 +96,22 @@ class OwnedSaveTests(unittest.TestCase):
         with patch('skyrim_autotest.runner.request',return_value={'headSeq':1,'events':[event(1,'postLoadGame')]}):
             with self.assertRaisesRegex(ValueError,'unique ordered'):owned_saves.perform(self.b,self.request('load_game'))
         self.assertFalse(self.b.s.state['gameplayBootstrap']['completed'])
+
+    def test_restart_load_requires_new_process_common_startup_then_ordered_native_load(self):
+        self.complete()
+        def restart(b):
+            b.s.state['game']={'pid':18,'birth':456}
+            b.s.state['gameRestartTransition']={'completed':False,'stage':'loading'}
+        native=[event(1,'preLoadGame'),event(2,'postLoadGame')]
+        with patch('skyrim_autotest.game_restart.start',side_effect=restart), \
+             patch('skyrim_autotest.bootstrap.prepare_startup_screen') as startup, \
+             patch('skyrim_autotest.runner.request',side_effect=[{'headSeq':2,'events':native},{'headSeq':2,'events':[]}]), \
+             patch('skyrim_autotest.bootstrap.wait_gameplay_ready',return_value=({'playerLoaded':True,'cell':{'editorId':'QASmoke'}},{})) as ready, \
+             patch('skyrim_autotest.platform.initialize_controllers'):
+            value=owned_saves.perform(self.b,self.request('restart_game'))['lifecycle']
+        self.assertTrue(value['pidChanged']);self.assertTrue(value['worldReady'])
+        self.assertTrue(self.b.s.state['gameRestartTransition']['completed'])
+        startup.assert_called_once();ready.assert_called_once()
     def test_lifecycle_gap_and_leading_head_are_not_skipped(self):
         with patch('skyrim_autotest.runner.request',return_value={'headSeq':2,'events':[event(2,'saveGame')]}):
             with self.assertRaisesRegex(ValueError,'gap'):owned_saves.Events(self.b,0).read()
@@ -113,27 +130,31 @@ class OwnedSaveTests(unittest.TestCase):
         self.b.s.state['fixture']={'saveStem':'fixture','essSha256':hashlib.sha256(contents).hexdigest()}
         self.b.s.state['configuration']['skse_logs']=str(Path(self.tmp.name)/'MyGames/SKSE')
         (target.parent/'settings.ini').write_text('[General]\nLocalSaves=true\nLocalSettings=true\n')
+        game=self.b.s.state.pop('game')
+        owned_saves.prepare_mapping_probe(self.b.s,target)
+        self.b.s.state['game']=game
         self.b.pap=lambda *a,**k:'__MO_Saves\\'
         def listing(tool,args):
             self.assertEqual(tool,'game');self.assertEqual(args['action'],'list')
             self.b.calls.append((tool,args))
-            saves=[{'name':p.stem} for p in target.glob(args['filter']+'*.ess')] if exposed else []
-            return {'dir':str(Path(self.tmp.name)/'MyGames/__MO_Saves'),'truncated':False,'count':len(saves),'saves':saves}
+            saves=[{'name':p.stem,'meta':{}} for p in target.glob(args['filter']+'*.ess')] if exposed else []
+            return {'dir':str(Path(self.tmp.name)/'MyGames/__MO_Saves'),'truncated':False,
+                    'count':len(saves),'returned':len(saves),'metaAvailable':bool(saves),'saves':saves}
         self.b.call=listing
         return target
 
-    def test_mo2_alias_requires_live_unique_challenge_appearance_and_removal(self):
+    def test_mo2_alias_requires_live_read_of_unique_prelaunch_pinned_probe(self):
         target=self.virtual_mapping()
         self.assertEqual(owned_saves.directory(self.b),target)
-        self.assertEqual(len(self.b.calls),3)
-        self.assertEqual([p.name for p in target.iterdir()],['fixture.ess'])
+        self.assertEqual(len(self.b.calls),1)
+        self.assertEqual(len(list(target.glob('Autotest_Map_*'))),1)
         # No save/load request was used to establish the directory mapping.
         self.assertTrue(all(args['action']=='list' for tool,args in self.b.calls))
 
     def test_mo2_alias_without_actual_mapping_or_local_flags_stops_before_save(self):
         target=self.virtual_mapping(exposed=False)
-        with self.assertRaisesRegex(ValueError,'does not expose'):owned_saves.directory(self.b)
-        self.assertFalse(list(target.glob('Autotest_Map_*')))
+        with self.assertRaisesRegex(ValueError,'cannot read exact'):owned_saves.directory(self.b)
+        self.assertEqual(len(list(target.glob('Autotest_Map_*'))),1)
         (target.parent/'settings.ini').write_text('[General]\nLocalSaves=false\nLocalSettings=true\n')
         self.b.calls=[]
         with self.assertRaisesRegex(ValueError,'local saves/settings'):owned_saves.directory(self.b)
@@ -142,6 +163,13 @@ class OwnedSaveTests(unittest.TestCase):
     def test_mo2_mapping_never_accepts_generic_relative_save_directory(self):
         self.virtual_mapping();self.b.pap=lambda *a,**k:'Saves\\'
         with self.assertRaisesRegex(ValueError,'Native save path'):owned_saves.directory(self.b)
+        self.assertEqual(self.b.calls,[])
+
+    def test_mapping_probe_cannot_be_created_after_launch_or_changed_before_guard(self):
+        target=self.virtual_mapping()
+        with self.assertRaisesRegex(ValueError,'precede game launch'):owned_saves.prepare_mapping_probe(self.b.s,target)
+        Path(self.b.s.state['ownedSaveMappingProbe']['path']).write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError,'probe changed'):owned_saves.directory(self.b)
         self.assertEqual(self.b.calls,[])
     def test_schema_maps_exact_save_and_lifecycle_requests(self):
         platform.validate({'operation':'input.perform','request':self.request()})

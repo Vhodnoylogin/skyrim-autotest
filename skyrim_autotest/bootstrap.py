@@ -326,15 +326,8 @@ def wait_gameplay_ready(session, cell, new_game, deadline=None):
     raise AssertionError('Initialized gameplay is not ready after stable startup/menu checks')
 
 
-def prepare_gameplay(session, scenario):
-    """Resolve the declared initial state once, without knowing a subject mod."""
-    cell = scenario.get('cell')
-    fixture = scenario.get('fixture')
-    new_game = scenario.get('startMode') == 'new-game'
-    if new_game and fixture:
-        raise AssertionError('New Game cannot load a save fixture')
-    if not cell and not fixture:
-        raise AssertionError('Gameplay scenario requires an initial cell or pinned save')
+def prepare_startup_screen(session):
+    """Common application-start transition, also used by an owned game restart."""
     session.phase('gameplay-startup-screen', 35)
     end = time.monotonic() + 15
     while True:
@@ -346,6 +339,18 @@ def prepare_gameplay(session, scenario):
         if time.monotonic() >= end:
             raise AssertionError('VR playroom did not expose the supported startup screen')
         time.sleep(.25)
+
+
+def prepare_gameplay(session, scenario):
+    """Resolve the declared initial state once, without knowing a subject mod."""
+    cell = scenario.get('cell')
+    fixture = scenario.get('fixture')
+    new_game = scenario.get('startMode') == 'new-game'
+    if new_game and fixture:
+        raise AssertionError('New Game cannot load a save fixture')
+    if not cell and not fixture:
+        raise AssertionError('Gameplay scenario requires an initial cell or pinned save')
+    prepare_startup_screen(session)
     if new_game:
         start_new_game(session, cell)
     if fixture:

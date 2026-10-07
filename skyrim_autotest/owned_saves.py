@@ -6,29 +6,14 @@ from pathlib import Path
 import time
 
 
-def verify_mo2_save_mapping(backend, target, observed):
-    """Challenge the live game's virtual directory before any game save request."""
-    import configparser
+def prepare_mapping_probe(session, target):
+    """Stage a unique valid ESS before MO2 constructs the process's USVFS map."""
     import uuid
-    state=backend.s.state
-    settings=configparser.ConfigParser(interpolation=None)
-    settings.read(target.parent/'settings.ini',encoding='utf-8-sig')
-    if not all(settings.getboolean('General',key,fallback=False) for key in ('LocalSaves','LocalSettings')):
-        raise ValueError('MO2 save mapping requires owned local saves/settings')
-    # MO2 substitutes this exact alias at launch; an arbitrary relative path is
-    # never accepted. Check in-process visibility, not a guessed external resolve.
-    expected=Path(state['configuration']['skse_logs']).parent / observed
-    marker='Autotest_Map_'+uuid.uuid4().hex
-    query={'action':'list','filter':marker,'limit':2}
-    def listed():
-        value=backend.call('game',query)
-        if (Path(value.get('dir','')).resolve()!=expected.resolve() or value.get('truncated') is not False or
-                type(value.get('count')) is not int or not isinstance(value.get('saves'),list)):
-            raise ValueError('Native MO2 save directory enumeration unavailable')
-        return value
-    before=listed()
-    if before['count']!=0 or before['saves']:
-        raise ValueError('Fresh save mapping challenge unexpectedly exists')
+    state=session.state
+    if state.get('game') or state.get('launchIntents',{}).get('game'):
+        raise ValueError('Save mapping probe must precede game launch')
+    if target.resolve()!=Path(state['ownedSaveDirectory']).resolve():
+        raise ValueError('Mapping probe outside owned save directory')
     fixture=state.get('fixture',{})
     stem=fixture.get('saveStem','')
     if not stem or Path(stem).name!=stem or '/' in stem or '\\' in stem:
@@ -41,26 +26,42 @@ def verify_mo2_save_mapping(backend, target, observed):
     digest=hashlib.sha256(contents).hexdigest()
     if digest!=fixture.get('essSha256') or not contents.startswith(b'TESV_SAVEGAME'):
         raise ValueError('Owned mapping fixture hash/header mismatch')
+    marker='Autotest_Map_'+uuid.uuid4().hex
     challenge=target/(marker+'.ess')
-    created=False
-    try:
-        with challenge.open('xb') as stream:
-            created=True;stream.write(contents)
-        during=listed()
-        if during['count']!=1 or [p.get('name') for p in during['saves']]!=[marker]:
-            raise ValueError('Native MO2 save alias does not expose exact owned challenge')
-    finally:
-        if created:
-            if challenge.is_symlink() or hashlib.sha256(challenge.read_bytes()).hexdigest()!=digest:
-                raise ValueError('Owned save challenge changed; refusing deletion')
-            challenge.unlink()
-    after=listed()
-    if after['count']!=0 or after['saves']:
-        raise ValueError('Native MO2 save alias retained stale challenge')
+    with challenge.open('xb') as stream:stream.write(contents)
+    state['ownedSaveMappingProbe']={'stem':marker,'path':str(challenge.resolve()),'sha256':digest,
+                                   'preparedAt':time.time(),'preparedBeforeLaunch':True}
+    session.save()
+    session.log('owned-save-mapping-probe-prepared',probe=state['ownedSaveMappingProbe'])
+
+
+def verify_mo2_save_mapping(backend, target, observed):
+    """Read the prelaunch nonce through the game's default virtual directory."""
+    import configparser
+    import re
+    state=backend.s.state
+    settings=configparser.ConfigParser(interpolation=None)
+    settings.read(target.parent/'settings.ini',encoding='utf-8-sig')
+    if not all(settings.getboolean('General',key,fallback=False) for key in ('LocalSaves','LocalSettings')):
+        raise ValueError('MO2 save mapping requires owned local saves/settings')
+    probe=state.get('ownedSaveMappingProbe',{})
+    marker=probe.get('stem','')
+    if (not re.fullmatch(r'Autotest_Map_[0-9a-f]{32}',marker) or probe.get('preparedBeforeLaunch') is not True or
+            Path(probe.get('path','')).resolve()!=(target/(marker+'.ess')).resolve()):
+        raise ValueError('Owned prelaunch save mapping probe unavailable')
+    challenge=target/(marker+'.ess')
+    if challenge.is_symlink() or hashlib.sha256(challenge.read_bytes()).hexdigest()!=probe['sha256']:
+        raise ValueError('Owned mapping probe changed')
+    expected=Path(state['configuration']['skse_logs']).parent / observed
+    during=backend.call('game',{'action':'list','filter':marker,'limit':2,'detail':True})
+    if (Path(during.get('dir','')).resolve()!=expected.resolve() or during.get('truncated') is not False or
+            during.get('count')!=1 or during.get('returned')!=1 or during.get('metaAvailable') is not True or
+            not isinstance(during.get('saves'),list) or [p.get('name') for p in during['saves']]!=[marker] or
+            not isinstance(during['saves'][0].get('meta'),dict)):
+        raise ValueError('Native MO2 save alias cannot read exact prelaunch owned probe')
     backend.s.log('owned-save-virtual-mapping-verified',ownedDirectory=str(target),nativeSetting=observed,
-                  logicalDirectory=str(expected),challengeStem=marker,fixtureSha256=digest,
-                  before=before,during=during,after=after,
-                  basis='fresh nonce appears/disappears in game-process default save enumeration; observed USVFS mapping, not atomic filesystem contract')
+                  logicalDirectory=str(expected),probe=probe,nativeEnumeration=during,
+                  basis='prelaunch unique owned pinned ESS enumerated/header-read through default game directory; observed USVFS mapping, not atomic filesystem contract')
 
 
 def directory(backend):
@@ -168,6 +169,8 @@ class BoundSession:
     def __getattr__(self, name): return getattr(self.backend.s, name)
     def tool(self, name, args, timeout=12, deadline=None):
         return self.backend.s.tool(name, args, timeout=min(timeout, self.backend.remaining()), deadline=self.backend.end)
+    def phase(self, name, seconds=120):
+        return self.backend.s.phase(name,min(seconds,self.backend.remaining()))
 
 
 def saved(backend, tag):
@@ -230,6 +233,18 @@ def perform(backend, req):
     state['ownedLoadTransition'] = transition
     b.s.save()
     if state.get('hardwareFrame'): b.call('driver', {'action':'release'})
+    restarting=req['action']=='restart_game'
+    if restarting:
+        from .game_restart import start
+        from .bootstrap import prepare_startup_screen
+        start(b)
+        prepare_startup_screen(BoundSession(b))
+        saved(b,tag) # Reverify the exact owned pair and native mapping in the new process.
+        cursor=b.s.capture_probe_cursor()
+        transition['cursorBefore']=cursor
+        transition['restartRequested']=True
+        b.s.save()
+        BoundSession(b).phase('gameplay-owned-restart-load',b.remaining())
     b.call('game', {'action':'load', 'name':record['stem'], 'dir':str(target)})
     events = Events(b, cursor)
     saw_pre, completed_events = False, []
@@ -250,8 +265,8 @@ def perform(backend, req):
     proxy = BoundSession(b)
     cell = state.get('scenario', {}).get('cell')
     scene, menus = wait_gameplay_ready(proxy, cell, False, deadline=b.end)
-    if state['game'] != previous_game:
-        raise ValueError('Game process identity changed during same-process load')
+    if (state['game'] != previous_game)!=restarting:
+        raise ValueError('Owned load/restart process identity does not match requested transition')
     state['gameplayBootstrap'].update(completed=True, scene=scene, menus=menus, loadedOwnedSave=tag)
     from .platform import initialize_controllers
     initialize_controllers(proxy, state.get('configuration', {}))
@@ -259,6 +274,8 @@ def perform(backend, req):
     state['ownedWorldGeneration'] = state.get('ownedWorldGeneration', 0)+1
     transition.update(completed=True, afterGame=copy.deepcopy(state['game']), cursor=events.cursor,
                       events=completed_events, worldGeneration=state['ownedWorldGeneration'], scene=scene)
+    if restarting:
+        state['gameRestartTransition'].update(completed=True,stage='completed',afterGame=copy.deepcopy(state['game']))
     b.s.save()
     return observe(b, {'observation':'lifecycle.state','afterSaveTag':tag})
 

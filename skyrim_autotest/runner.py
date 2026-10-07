@@ -679,6 +679,9 @@ class Session:
                 shutil.copy2(source, test_profile / 'saves' / source.name)
             self.state['fixture'] = fixture
             self.save()
+        if P.value.get('allow_owned_save_load') is True:
+            from .owned_saves import prepare_mapping_probe
+            prepare_mapping_probe(self,test_profile/'saves')
         modlist = test_profile / 'modlist.txt'
         text = modlist.read_text(encoding='utf-8-sig')
         text = '\n'.join('-' + line[1:] if line.startswith('+') and line[1:] in OCU else line for line in text.splitlines()) + '\n'
@@ -835,9 +838,13 @@ class Session:
             time.sleep(1)
         raise Blocked('Fresh matching DevBench with advancing game frames not found')
 
-    def collect(self):
+    def collect(self, segment=None):
         dest = self.dir / 'evidence'
-        dest.mkdir(exist_ok=True)
+        if segment is not None:
+            if not re.fullmatch(r'before-restart-[12]',segment):
+                raise ValueError('Invalid restart evidence segment')
+            dest = dest / segment
+        dest.mkdir(parents=True,exist_ok=True)
         log_dir = P.skse_logs
         manifest = []
         launched_at = self.state.get('launchIntents', {}).get('game', {}).get('at')
@@ -1012,7 +1019,11 @@ def guardian(directory):
         owner = state.get('runner')
         reason = 'Runner died or exceeded its deadline; independent guardian recovered the session'
         expired = time.time() > state.get('deadline', time.time() + 1) + 15 or time.time() - state.get('heartbeat', time.time()) > 35
-        if state.get('game') and not state.get('phase', '').startswith('stop-and-restore'):
+        from .game_restart import expected_restart
+        restarting=expected_restart(state,time.time())
+        if restarting:
+            last_health=None;health_changed=time.monotonic();connection_failed=None;since=0
+        if state.get('game') and not state.get('phase', '').startswith('stop-and-restore') and not restarting:
             if not native.alive(state['game']):
                 reason, expired = 'Owned SkyrimVR process exited unexpectedly (CTD or external termination)', True
             else:
