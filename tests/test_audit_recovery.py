@@ -123,6 +123,49 @@ class CollectionRecoveryTests(unittest.TestCase):
         self.assertEqual(projected['sourceSnapshot']['mode'],'two-pass-verified-prefix')
         self.assertEqual(projected['sourceSnapshot']['prefixSha256'],projected['sha256'])
 
+    def test_recollect_before_restore_does_not_mistake_flat_artifacts_for_directories(self):
+        (self.steam/'vrserver.txt').write_bytes(b'log')
+        self.assertTrue(self.session.collect('before-restart-1'))
+        self.assertTrue(self.session.collect())
+        self.assertTrue(self.session.collect())
+        self.assertEqual(self.session.state['collectionErrors'],[])
+
+    def partial_restore(self):
+        output=self.root/'generated.ini';self.session.write(output,b'generated output')
+        self.config.value['collected_files']=[str(output)]
+        original=runner.shutil.copy2
+        def locked_copy(source,target,*args,**kwargs):
+            if Path(target)==self.file:raise PermissionError('mapped file remains locked')
+            return original(source,target,*args,**kwargs)
+        with patch.object(runner.shutil,'copy2',side_effect=locked_copy):
+            with self.assertRaisesRegex(RuntimeError,'Restoration incomplete'):self.session.cleanup()
+        self.assertFalse(output.exists())
+        self.assertTrue(self.session.state['restoringFiles'])
+        return self.directory/'evidence/manifest.json'
+
+    def test_recovery_after_partial_restore_preserves_pre_restore_evidence(self):
+        manifest=self.partial_restore();digest=runner.sha(manifest)
+        self.assertEqual(digest,self.session.state['finalCollectionCheckpoint']['manifestSha256'])
+        with patch.object(self.session,'collect',side_effect=AssertionError('recollection forbidden')):
+            self.session.cleanup()
+        self.assertTrue(self.session.state['restored']);self.assertTrue(self.session.state['collectionComplete'])
+        self.assertEqual(self.session.state['collectionErrors'],[])
+        self.assertEqual(runner.sha(manifest),digest)
+        self.assertEqual(self.file.read_bytes(),b'original')
+
+    def test_changed_frozen_manifest_stops_recovery_before_further_file_restore(self):
+        manifest=self.partial_restore();manifest.write_text('[]')
+        with self.assertRaisesRegex(RuntimeError,'collection manifest changed'):self.session.cleanup()
+        self.assertEqual(self.file.read_bytes(),b'modified')
+
+    def test_legacy_partial_restore_does_not_invent_complete_collection(self):
+        self.session.state.update(restoringFiles=True,collectionComplete=False,
+            collectionErrors=[{'path':'old-log','error':'original error'}])
+        with patch.object(self.session,'collect',side_effect=AssertionError('recollection forbidden')):
+            self.session.cleanup()
+        self.assertTrue(self.session.state['restored']);self.assertFalse(self.session.state['collectionComplete'])
+        self.assertEqual(self.session.state['collectionErrors'],[{'path':'old-log','error':'original error'}])
+
     def test_foreign_game_still_blocks_restore_after_collection_error(self):
         with patch.object(native,'processes',return_value=[{'pid':5,'name':'SkyrimVR.exe','parent':1}]), \
                 patch.object(self.session,'collect',side_effect=RuntimeError('collection failed')):

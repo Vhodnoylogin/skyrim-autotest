@@ -11,7 +11,7 @@ import time
 READS = {'state.read', 'player.read', 'world.read', 'menu.read'}
 ACTIONS = {
     'input.perform': {'save_game', 'load_game', 'restart_game'},
-    'controller.perform': {'pose_and_grip', 'reach_and_grip_reference', 'release_reference', 'release_all','pose_hand_at_body_slot','grip_and_withdraw_from_body_slot'},
+    'controller.perform': {'pose_and_grip', 'reach_and_grip_reference', 'release_reference', 'release_all','release_hand','pose_hand_at_body_slot','grip_and_withdraw_from_body_slot'},
     'object.perform': {'create_fixture_reference', 'place_fixture_reference_in_hand', 'tag_held_reference',
                        'set_fixture_inventory_quantity', 'set_fixture_health', 'save_game'},
 }
@@ -80,6 +80,7 @@ def validate(args):
         'reach_and_grip_reference': ({'action', 'hand', 'grip', 'holdSeconds', 'maximumReachMetres', 'referenceTag'}, set()),
         'release_reference': ({'action', 'hand', 'referenceTag', 'settleSeconds', 'zone'}, set()),
         'release_all': ({'action'}, {'settleSeconds'}),
+        'release_hand': ({'action','hand','settleSeconds'}, set()),
         'create_fixture_reference': ({'action', 'item', 'quantityItems', 'referenceTag', 'placement'}, set()),
         'place_fixture_reference_in_hand': ({'action', 'hand', 'referenceTag', 'keepGripClosed', 'settleSeconds'}, set()),
         'tag_held_reference': ({'action', 'hand', 'referenceTag'}, set()),
@@ -649,6 +650,10 @@ class Backend:
         duration = req.get('durationSeconds', req.get('holdSeconds', req.get('settleSeconds', 1)))
         response = self.publish(frame, duration)
         self.pause(duration)
+        if action=='release_hand':
+            self.s.log('platform-hand-release-issued',hand=hand,posePreserved=True,
+                       otherHandInputPreserved=True,reapproachPerformed=False,
+                       publication=response,observedGameplaySuccess=None)
         if action == 'reach_and_grip_reference':
             held = self.pap('HiggsVR', 'GetGrabbedObject', [hand == 'left'])
             self.s.log('platform-physical-grip-observation', requestedReference=ref, held=held,

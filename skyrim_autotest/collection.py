@@ -143,10 +143,10 @@ def collect(session, segment=None):
             if type(used) is not int or not 0 <= used <= maximum:
                 raise ValueError('Invalid reserved restart count during collection')
             folders = [dest/f'before-restart-{i}' for i in range(1, used+1)]
-            unexpected = set(dest.glob('before-restart-*')) - set(folders)
+            unexpected = {p for p in dest.glob('before-restart-*') if p.is_dir() or p.is_symlink()} - set(folders)
             for folder in unexpected: error(folder, 'Unreserved restart evidence segment')
         else:
-            folders = sorted(dest.glob('before-restart-*'))
+            folders = sorted(p for p in dest.glob('before-restart-*') if p.is_dir() or p.is_symlink())
         for folder in folders:
             try:
                 segment_number(session.state, folder.name)

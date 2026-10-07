@@ -1,5 +1,17 @@
 # Semantic platform backend
 
+`controller.perform/release_hand` takes `hand` and `settleSeconds`: it opens only
+that hand at the current controller pose, preserving HMD and the other hand.
+It runs the common input gate but never recalibrates or approaches a target.
+Use it after separately observed placement/held checks when the intended action
+is release in place. Native empty-hand/storage assertions must follow; input
+publication is not proof of release. Existing pose actions still mean approach.
+
+Cleanup freezes final collection before file restoration. Recovery after a partial
+restore preserves that manifest and its errors rather than recollecting removed
+outputs. A changed frozen manifest remains a blocker; legacy missing checkpoint
+is explicitly reported and never invents complete collection.
+
 Live SKSE/SteamVR/bridge log collection pins the initial byte range from one open
 file and verifies the same prefix twice. Appended tail bytes are recorded as outside
 that snapshot; this is not an atomic or complete-history claim. Prefix rewrite,

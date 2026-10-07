@@ -901,14 +901,32 @@ class Session:
                 time.sleep(.2)
             if any(native.alive(i) for i in owned):
                 raise RuntimeError(f'Owned {role} process did not exit; refusing file restoration')
-        try:
-            self.collect()
-        except Exception as error:
-            # Even an unexpected collector failure cannot prevent safe restoration.
-            self.state.setdefault('collectionErrors', []).append(
-                {'path': 'collector', 'error': str(error), 'segment': None})
-            self.state['collectionComplete'] = False
-            self.log('collect-error', error=str(error), restorationStillRequired=True)
+        if self.state.get('restoringFiles'):
+            # A partial restore may already have removed generated outputs.
+            # Preserve collected evidence/errors; do not overwrite its manifest
+            # or manufacture new missing-output errors from restored files.
+            checkpoint=self.state.get('finalCollectionCheckpoint',{})
+            manifest=self.dir/'evidence/manifest.json'
+            if checkpoint.get('manifestSha256') and (not manifest.is_file() or sha(manifest)!=checkpoint['manifestSha256']):
+                raise RuntimeError('Frozen pre-restoration collection manifest changed')
+            self.log('recovery-collection-preserved',checkpoint=checkpoint,
+                     legacyCheckpointUnavailable=not bool(checkpoint),
+                     complete=self.state.get('collectionComplete'),errors=self.state.get('collectionErrors',[]))
+        else:
+            try:
+                self.collect()
+            except Exception as error:
+                # Even an unexpected collector failure cannot prevent safe restoration.
+                self.state.setdefault('collectionErrors', []).append(
+                    {'path': 'collector', 'error': str(error), 'segment': None})
+                self.state['collectionComplete'] = False
+                self.log('collect-error', error=str(error), restorationStillRequired=True)
+            manifest=self.dir/'evidence/manifest.json'
+            self.state['finalCollectionCheckpoint']={'manifestSha256':sha(manifest) if manifest.is_file() else None,
+                'collectionComplete':self.state.get('collectionComplete'),
+                'collectionErrors':copy.deepcopy(self.state.get('collectionErrors',[])),
+                'basis':'Collected before any file restoration; subsequent recovery preserves this evidence and its unavailable labels'}
+            self.save()
         if self.state.get('collectionComplete') is False:
             self.state['result'] = 'failed'
             self.state['reason'] = (self.state.get('reason', '') + '; evidence collection incomplete').lstrip('; ')
