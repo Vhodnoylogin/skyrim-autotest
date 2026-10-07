@@ -227,7 +227,16 @@ class Backend:
                                    'unobservedIntervals': True}
         if window and max(gaps, default=0) > .5:
             raise ValueError('Held-reference sampler gap exceeds qualified maximum .5 seconds')
-        if first: value['item'] = self.item(first)
+        if first:
+            value['item'] = self.item(first)
+            raw = self.call('inspect', {'kind': 'refs', 'formId': first})
+            rows = [row for row in raw.get('refs', [])
+                    if int(row.get('formId', '0'), 16) == int(first, 16)]
+            if len(rows) != 1 or type(rows[0].get('quantityItems')) is not int or rows[0]['quantityItems'] < 1:
+                raise ValueError('Actual held-reference quantity unavailable')
+            value['quantity'] = {'items': rows[0]['quantityItems']}
+            value['quantityBasis'] = 'native reference count after held sampling; sequential non-atomic read'
+            value['quantityProviderObservation'] = raw
         if 'referenceTag' in req: value['matchesRequestedReference'] = first == self.tagged(req)
         return {'hand': value}
 
@@ -478,10 +487,25 @@ class Backend:
             raise ValueError('Fixture reference limit16 reached')
         if references:
             self.s.validate_probe_reference(timeout=min(3, self.remaining()))
-        if req['quantityItems'] != 1: raise ValueError('Only a single fixture world reference is supported')
+        if req['quantityItems'] not in (1, 5): raise ValueError('Only fixture reference quantities1or5 are supported')
         base = self.resolve(req['item'])
         cursor = self.s.capture_probe_cursor() if not references else None
-        observed = self.pap('ObjectReference', 'PlaceAtMe', [{'form': base}, 1, True, True], '0x14')
+        if req['quantityItems'] == 1:
+            observed = self.pap('ObjectReference', 'PlaceAtMe', [{'form': base}, 1, True, True], '0x14')
+        else:
+            # Owned disposable fixture only. DropObject returns one actual ref;
+            # its native quantity, never its requested count, gates acceptance.
+            before = self.pap('ObjectReference', 'GetItemCount', [{'form': base}], '0x14')
+            if type(before) is not int or before < 0:
+                raise ValueError('Fixture pre-drop inventory quantity unavailable')
+            self.pap('ObjectReference', 'AddItem', [{'form': base}, 5, True], '0x14')
+            after_add = self.pap('ObjectReference', 'GetItemCount', [{'form': base}], '0x14')
+            if type(after_add) is not int or after_add != before + 5:
+                raise ValueError('Fixture stack inventory staging did not produce exact delta5')
+            observed = self.pap('ObjectReference', 'DropObject', [{'form': base}, 5], '0x14')
+            after_drop = self.pap('ObjectReference', 'GetItemCount', [{'form': base}], '0x14')
+            if type(after_drop) is not int or after_drop != before:
+                raise ValueError('Fixture stack drop did not restore exact inventory baseline')
         if not isinstance(observed, dict) or not observed.get('formId'): raise ValueError('Fixture spawn identity missing')
         ref = observed['formId']
         if any(int(entry['id'], 16) == int(ref, 16) for entry in references.values()):
@@ -494,6 +518,12 @@ class Backend:
             self.s.validate_probe_reference(timeout=min(3, self.remaining()))
         self.s.state.setdefault('platformReferences', {})[req['referenceTag']] = {'id': ref}
         self.s.save()
+        if req['quantityItems'] == 5:
+            raw = self.call('inspect', {'kind': 'refs', 'formId': ref})
+            rows = [row for row in raw.get('refs', [])
+                    if int(row.get('formId', '0'), 16) == int(ref, 16)]
+            if len(rows) != 1 or type(rows[0].get('quantityItems')) is not int or rows[0]['quantityItems'] != 5:
+                raise ValueError('Actual single-reference stack quantity is not5')
         heading = math.radians(self.pap('ObjectReference', 'GetAngleZ', target='0x14'))
         self.pap('ObjectReference', 'MoveTo', [{'form': '0x14'}, math.sin(heading)*42, math.cos(heading)*42, 20., False], ref)
         self.pap('ObjectReference', 'Enable', [False], ref)

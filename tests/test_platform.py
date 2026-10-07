@@ -465,3 +465,50 @@ class MultiTagAlchemyTests(unittest.TestCase):
         platform.validate({'operation': 'world.read', 'request': {'observation': 'form.alchemy',
                           'form': {'plugin': 'Skyrim.esm', 'localId': '03EADD'}}})
         self.assertIn('alchemy.effects', operations()['world.read']['fields'])
+
+
+class NativeStackTests(unittest.TestCase):
+    backend = MultiTagAlchemyTests.backend
+    request = MultiTagAlchemyTests.request
+    def stack(self, native_count=5, inventory=(7,12,7)):
+        session = Session();session.save = lambda: None
+        backend = self.backend(session);calls=[];counts=iter(inventory)
+        def pap(script,function,values=None,target=None):
+            calls.append((function,values))
+            if function == 'GetItemCount': return next(counts)
+            return {'DropObject':{'formId':'0xFF005678'},'GetAngleZ':0,
+                    'Is3DLoaded':True,'GetMass':1}.get(function)
+        backend.pap=pap;backend.resolve=lambda spec:'0x0003EADD'
+        backend.call=lambda *args:{'refs':[{'formId':'0xFF005678','quantityItems':native_count}]}
+        backend.xyz=lambda ref:[1,2,3];backend.pause=lambda seconds:None;backend.remaining=lambda:30
+        return session,backend,calls
+
+    def test_stack5_uses_single_native_drop_and_measures_actual_count(self):
+        session,backend,calls=self.stack();req=self.request();req['quantityItems']=5
+        with patch.object(platform.time,'monotonic',side_effect=range(100)):
+            backend.mutate(req)
+        names=[c[0] for c in calls]
+        self.assertEqual(names.count('DropObject'),1)
+        self.assertEqual(names.count('AddItem'),1)
+        self.assertNotIn('PlaceAtMe',names)
+        self.assertEqual(session.state['platformReferences']['poison']['id'],'0xFF005678')
+
+    def test_requested5_cannot_substitute_for_native_count1(self):
+        session,backend,calls=self.stack(native_count=1);req=self.request();req['quantityItems']=5
+        with self.assertRaisesRegex(ValueError,'quantity is not5'):backend.mutate(req)
+        self.assertEqual(sum(c[0]=='DropObject' for c in calls),1)
+        self.assertFalse(any(c[0]=='MoveTo' for c in calls))
+
+    def test_stack_staging_delta_failure_never_repeats_or_drops(self):
+        session,backend,calls=self.stack(inventory=(7,11));req=self.request();req['quantityItems']=5
+        with self.assertRaisesRegex(ValueError,'delta5'):backend.mutate(req)
+        self.assertEqual(sum(c[0]=='AddItem' for c in calls),1)
+        self.assertFalse(any(c[0]=='DropObject' for c in calls))
+
+    def test_held_quantity_is_native_exact_reference_not_requested_count(self):
+        backend=self.backend();backend.pap=lambda *a,**k:{'formId':'0xFF001234'}
+        backend.item=lambda ref:{'plugin':'Skyrim.esm','localId':'03EADD'}
+        backend.call=lambda *a:{'refs':[{'formId':'0xFF001234','quantityItems':5}]}
+        self.assertEqual(backend.held({'hand':'right'})['hand']['quantity']['items'],5)
+        backend.call=lambda *a:{'refs':[{'formId':'0xFF009999','quantityItems':5}]}
+        with self.assertRaisesRegex(ValueError,'quantity unavailable'):backend.held({'hand':'right'})

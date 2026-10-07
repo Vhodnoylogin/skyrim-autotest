@@ -105,3 +105,15 @@ poison classification. Requested names/types never substitute for these values.
 These are sequential read-only queries, not an atomic form snapshot. Raw provider
 responses remain in normal logs. Qualification must verify real healing, poison
 and incompatible-effect identities before any subject filter test.
+
+The next candidate supports `create_fixture_reference` quantityItems5 through
+one native DropObject after adding exactly5to attempt-owned player inventory.
+Actual GetItemCount must observe the staging delta and restored baseline. Native
+inspect refs must observe quantityItems5on the returned single exact reference
+before placement; no PlaceAtMe5or requested quantity substitution is accepted.
+Mutations are never retried; split/null/incorrect-count results fail fixture
+preparation. Only1and5are currently supported. `hand.held_item` now requires
+actual native quantity on the sampled held reference and exposes
+hand.quantity.items; HIGGS splitting a stack is visible, not hidden. This is a
+sequential observation, not uninterrupted holding proof. Both changes require
+new live qualification before the operator may deploy them.
