@@ -3,6 +3,46 @@ from pathlib import Path
 import shutil
 
 
+def snapshot_log(path, target):
+    """Pin a bounded twice-read prefix of one open live log, allowing append.
+
+    No atomic snapshot/history claim: subsequent bytes and intervening writes
+    are unobserved. Rewrite, truncation or path replacement still fail.
+    """
+    import os,hashlib
+    selected=path.lstat()
+    with path.open('rb',buffering=0) as source:
+        before=os.fstat(source.fileno())
+        if (selected.st_dev,selected.st_ino)!=(before.st_dev,before.st_ino):
+            raise ValueError('Live log path replaced before open')
+        if before.st_size>64*1024*1024:raise ValueError('Collection artifact exceeds64MiB bound')
+        length=before.st_size
+        def transfer(destination=None):
+            remaining=length;digest=hashlib.sha256()
+            while remaining:
+                data=source.read(min(1024*1024,remaining))
+                if not data:raise ValueError('Live log truncated during prefix collection')
+                remaining-=len(data);digest.update(data)
+                if destination is not None:destination.write(data)
+            return digest.hexdigest()
+        with target.open('wb') as destination:copied=transfer(destination)
+        source.seek(0);verified=transfer()
+        after=os.fstat(source.fileno());current=path.lstat()
+        if path.is_symlink() or getattr(current,'st_file_attributes',0)&0x400:
+            raise ValueError('Live log path became a link during collection')
+        if (current.st_dev,current.st_ino)!=(before.st_dev,before.st_ino):
+            raise ValueError('Live log path replaced during collection')
+        if after.st_size<length or current.st_size<length or copied!=verified:
+            raise ValueError('Live log prefix changed during collection')
+        return {'mode':'two-pass-verified-prefix','byteStart':0,'byteEndExclusive':length,
+                'sourceSizeAtOpen':length,'sourceSizeAfterVerification':after.st_size,
+                'sourceSizeAtPathRecheck':current.st_size,'prefixSha256':copied,
+                'tailOutsideSnapshot':max(after.st_size,current.st_size)>length,
+                'fileIdentity':{'device':before.st_dev,'inode':before.st_ino},
+                'atomicSnapshot':False,'completeRecordBoundaryProven':False,
+                'basis':'same open file prefix read twice identically; later tail and intervening writes unobserved'}
+
+
 def collect(session, segment=None):
     from .runner import P, atomic_json, read_json, sha
     import re
@@ -34,16 +74,23 @@ def collect(session, segment=None):
             if name.casefold() in names:
                 raise ValueError('Duplicate collection artifact name')
             names.add(name.casefold())
-            before = sha(path)
             target = dest / name
-            shutil.copy2(path, target)
-            digest = sha(target)
-            if digest != before or sha(path) != before:
-                raise ValueError('Collection source changed during copy')
+            snapshot=None
+            if kind in ('skse-log','steamvr-log','bridge-log'):
+                snapshot=snapshot_log(path,target)
+                digest=sha(target)
+                if digest!=snapshot['prefixSha256']:raise ValueError('Collected log target changed after verification')
+            else:
+                before = sha(path)
+                shutil.copy2(path, target)
+                digest = sha(target)
+                if digest != before or sha(path) != before:
+                    raise ValueError('Collection source changed during copy')
             manifest.append({'name': name, 'source': str(path), 'kind': kind,
                              'sha256': digest, 'bytes': target.stat().st_size,
                              'mtime': stat.st_mtime})
             if kind == 'skse-log': manifest[-1]['fresh'] = True
+            if snapshot is not None:manifest[-1]['snapshot']=snapshot
             return manifest[-1]
         except (OSError, ValueError) as exception:
             error(path, exception)
@@ -114,7 +161,9 @@ def collect(session, segment=None):
                     source = folder/name
                     if sha(source) != entry.get('sha256'):
                         raise ValueError('Restart artifact hash mismatch')
-                    copy(source, folder.name+'--'+name, 'restart-artifact', required=True)
+                    projected=copy(source, folder.name+'--'+name, 'restart-artifact', required=True)
+                    if projected is not None and 'snapshot' in entry:
+                        projected['sourceSnapshot']=entry['snapshot']
             except (OSError, ValueError, KeyError, TypeError) as exception: error(folder, exception)
     atomic_json(dest/'manifest.json', manifest)
     session.state.setdefault('collectionErrors', []).extend(errors)

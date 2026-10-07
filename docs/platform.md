@@ -1,5 +1,12 @@
 # Semantic platform backend
 
+Live SKSE/SteamVR/bridge log collection pins the initial byte range from one open
+file and verifies the same prefix twice. Appended tail bytes are recorded as outside
+that snapshot; this is not an atomic or complete-history claim. Prefix rewrite,
+truncation, replacement and read failures remain errors. Restart projection retains
+the source snapshot metadata. Declared outputs/settings still require stable full
+bytes; a live-log policy never relaxes their consistency checks.
+
 Body-slot approaches correct the current observed target error using local
 calibration. They do not assume a rigid absolute controller-to-skeleton mapping:
 the avatar's response can change with pose and grip. Each update remains at most .01m; five seconds

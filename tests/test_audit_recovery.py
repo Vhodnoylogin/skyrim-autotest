@@ -25,11 +25,7 @@ class CollectionRecoveryTests(unittest.TestCase):
 
     def test_log_sharing_violation_retains_error_but_restores_files(self):
         (self.steam/'vrserver.txt').write_text('diagnostic')
-        real=runner.shutil.copy2
-        def copy(source,target,*a,**kw):
-            if Path(source)==self.steam/'vrserver.txt': raise PermissionError('sharing violation')
-            return real(source,target,*a,**kw)
-        with patch.object(runner.shutil,'copy2',side_effect=copy): self.session.cleanup()
+        with patch('skyrim_autotest.collection.snapshot_log',side_effect=PermissionError('sharing violation')): self.session.cleanup()
         self.assertEqual(self.file.read_bytes(),b'original')
         self.assertTrue(self.session.state['restored'])
         self.assertFalse(self.session.state['collectionComplete'])
@@ -64,6 +60,17 @@ class CollectionRecoveryTests(unittest.TestCase):
         self.assertTrue(self.session.state['restored'])
         self.assertFalse(self.session.state['collectionComplete'])
         self.assertEqual(self.session.state['result'],'failed')
+
+    def test_append_policy_never_relaxes_declared_output_whole_file_consistency(self):
+        output=self.root/'output.json';output.write_bytes(b'{"value":1}')
+        self.config.value['collected_files']=[str(output)]
+        original=runner.shutil.copy2
+        def changing_copy(source,target,*args,**kwargs):
+            value=original(source,target,*args,**kwargs)
+            if Path(source)==output:output.write_bytes(b'{"value":2}')
+            return value
+        with patch.object(runner.shutil,'copy2',side_effect=changing_copy):self.assertFalse(self.session.collect())
+        self.assertIn('source changed',self.session.state['collectionErrors'][0]['error'])
 
     def test_fixture_settings_each_variant_collected_before_original_restore(self):
         self.config.value['extra_files']=[str(self.file)]
@@ -112,6 +119,9 @@ class CollectionRecoveryTests(unittest.TestCase):
                          'before-restart-1--mo2aibridge.log'} <= names)
         for p in entries:self.assertEqual(runner.sha(self.directory/'evidence'/p['name']),p['sha256'])
         self.assertEqual((self.directory/'evidence/before-restart-1--vrserver.txt').read_bytes(),b'before restart')
+        projected=next(p for p in entries if p['name']=='before-restart-1--vrserver.txt')
+        self.assertEqual(projected['sourceSnapshot']['mode'],'two-pass-verified-prefix')
+        self.assertEqual(projected['sourceSnapshot']['prefixSha256'],projected['sha256'])
 
     def test_foreign_game_still_blocks_restore_after_collection_error(self):
         with patch.object(native,'processes',return_value=[{'pid':5,'name':'SkyrimVR.exe','parent':1}]), \
