@@ -376,6 +376,17 @@ class Backend:
         frame[hand]['controller'].update(pressed=4 if grip == 'closed' else 0,
                                          touched=4 if grip == 'closed' else 0,
                                          axes=[[0,0] for _ in range(5)])
+        if action == 'pose_and_grip':
+            from .platform_math import pose_frames
+            start = self.frame()
+            frames = list(pose_frames(start, frame))
+            if len(frames)*.05 + req.get('durationSeconds', 1) >= self.remaining():
+                raise TimeoutError('Insufficient operation time for bounded pose motion')
+            self.s.log('platform-smooth-pose', frames=len(frames), maximumStepMetres=.01,
+                       gripPolicy='preserve previous buttons during motion; requested grip at endpoint')
+            for intermediate in frames:
+                self.publish(intermediate, 10)
+                self.pause(.05)
         duration = req.get('durationSeconds', req.get('holdSeconds', req.get('settleSeconds', 1)))
         response = self.publish(frame, duration)
         self.pause(duration)

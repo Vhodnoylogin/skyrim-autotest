@@ -82,3 +82,10 @@ the dynamic bottle before its grip edge in run20261007-105504-b826e7. This is
 platform geometry, not a measured palm transform or selection acknowledgement.
 Keep the original request reach bound, dynamic reobservation, small increments
 and exact HIGGS held-reference assertions. Live qualification is required.
+
+Pose-and-grip motion interpolates rigid device poses in increments at most.01m,
+with a50ms minimum settling interval. Previous controller buttons stay held during
+the motion; requested grip changes occur at the endpoint. The original absolute
+operation deadline and final pose/hold assertions remain mandatory. This avoids
+teleporting a held object with a.9m hand jump; interpolation alone is not proof
+of retained HIGGS ownership.

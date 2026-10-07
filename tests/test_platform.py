@@ -319,3 +319,50 @@ class PlatformTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+class PoseMotionTests(unittest.TestCase):
+    def test_large_held_translation_keeps_grip_and_rigid_rotations(self):
+        import copy, math
+        from skyrim_autotest.hardware import neutral, quaternion
+        from skyrim_autotest.platform_math import pose_frames
+        start=neutral();start['left']['controller']['pressed']=4
+        target=copy.deepcopy(start);target['left']['matrix'][7]+= .9
+        target['left']['matrix'][:3]=[-1,0,0]
+        target['left']['matrix'][4:7]=[0,-1,0]
+        frames=list(pose_frames(start,target)); previous=start
+        self.assertGreaterEqual(len(frames),90)
+        for frame in frames:
+            self.assertEqual(frame['left']['controller']['pressed'],4)
+            for role in ('hmd','left','right'):
+                a,b=previous[role]['matrix'],frame[role]['matrix']
+                self.assertLessEqual(math.dist([a[i] for i in (3,7,11)],[b[i] for i in (3,7,11)]),.0100001)
+                quaternion(b)
+            previous=frame
+        for a,b in zip(frames[-1]['left']['matrix'],target['left']['matrix']):self.assertAlmostEqual(a,b)
+        self.assertEqual(start['left']['matrix'][7],neutral()['left']['matrix'][7])
+
+    @patch('skyrim_autotest.vr_probe.ensure_owned_focus')
+    def test_pose_controller_publishes_smooth_held_path_before_endpoint(self, focus):
+        import copy, math
+        from skyrim_autotest.hardware import neutral
+        session=Session();session.log=lambda *a,**k: None;session.state['hardwareFrame']=neutral()
+        session.state['hardwareFrame']['left']['controller'].update(pressed=4,touched=4)
+        session.state['hardwareFrame']['left']['matrix'][7]=.3
+        backend=platform.Backend(session,platform.time.monotonic()+30);backend.pause=lambda seconds: None
+        start=copy.deepcopy(session.state['hardwareFrame']);frames=[]
+        def publish(frame,duration):
+            frames.append(copy.deepcopy(frame));session.state['hardwareFrame']=copy.deepcopy(frame)
+            return {'published':True}
+        backend.publish=publish
+        req={'action':'pose_and_grip','hand':'left','trackingPosition':{'units':'metres','xyz':[-.4,1.2,-.5]},
+             'trackingOrientation':{'quaternionXYZW':[0,0,0,1]},'referenceHeadPosition':{'units':'metres','xyz':[0,1.65,0]},
+             'otherHandPosition':{'units':'metres','xyz':[.4,1.2,-.5]},'grip':'closed','durationSeconds':1.5}
+        backend.controller(req)
+        previous=start
+        self.assertGreater(len(frames),90)
+        for frame in frames:
+            self.assertEqual(frame['left']['controller']['pressed'],4)
+            self.assertLessEqual(math.dist([previous['left']['matrix'][i] for i in (3,7,11)],
+                                          [frame['left']['matrix'][i] for i in (3,7,11)]),.0100001)
+            previous=frame
