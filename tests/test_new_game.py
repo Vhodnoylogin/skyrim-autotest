@@ -69,7 +69,7 @@ class NewGameTests(unittest.TestCase):
         def loaded(*args):
             session.open = True
             return {'playerLoaded': True, 'cell': {'editorId': 'RealmLorkhan'}}
-        with patch.object(bootstrap.vr_probe, 'wait_test_cell', side_effect=loaded):
+        with patch('skyrim_autotest.initial_world.InitialWorld'), patch.object(bootstrap.vr_probe, 'wait_test_cell', side_effect=loaded):
             with self.assertRaisesRegex(AssertionError, 'unclassified modal'):
                 bootstrap.prepare_gameplay(session, {'cell': 'RealmLorkhan'})
         self.assertNotIn('gameplayBootstrap', session.state)

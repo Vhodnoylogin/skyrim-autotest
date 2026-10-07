@@ -28,10 +28,10 @@ class NewGameTransitionTests(unittest.TestCase):
         s=Session(); order=[]
         initial={'playerLoaded':True,'cell':{'editorId':initial_cell}}
         final={'playerLoaded':True,'cell':{'editorId':'QASmoke'}}
-        def ready(session,cell,new_game):
+        def ready(session,cell,new_game,**kwargs):
             order.append(('ready',cell,new_game,len(s.calls)))
             return (initial if cell is None else final),{}
-        with patch.object(bootstrap,'prepare_startup_screen'),patch.object(bootstrap,'start_new_game') as start, \
+        with patch('skyrim_autotest.initial_world.InitialWorld'), patch.object(bootstrap,'prepare_startup_screen'),patch.object(bootstrap,'start_new_game') as start, \
              patch.object(bootstrap,'wait_gameplay_ready',side_effect=ready), \
              patch.object(bootstrap.vr_probe,'guard_fixture_modal',return_value=False), \
              patch.object(bootstrap.vr_probe,'wait_test_cell',return_value=final):

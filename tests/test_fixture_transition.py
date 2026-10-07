@@ -18,11 +18,11 @@ class FixtureTransitionTests(unittest.TestCase):
                         timeline.append((name, args))
                         return {'cell': {'editorId': 'VRPlayroom01'}, 'frame': 100}
                 ready_scene = {'playerLoaded': True, 'cell': {'editorId': 'QASmoke'}}
-                def ready(session, cell, new_game):
+                def ready(session, cell, new_game, **kwargs):
                     timeline.append(('stable', cell))
                     return ({'playerLoaded': True, 'cell': {'editorId': loaded_cell}}
                             if cell is None else ready_scene), {'openMenus': ['HUD Menu']}
-                with patch.object(bootstrap, 'advance_calibration', return_value=True), \
+                with patch('skyrim_autotest.initial_world.InitialWorld'), patch.object(bootstrap, 'advance_calibration', return_value=True), \
                      patch.object(bootstrap, 'wait_gameplay_ready', side_effect=ready), \
                      patch.object(bootstrap.vr_probe, 'guard_fixture_modal', return_value=False), \
                      patch.object(bootstrap.vr_probe, 'wait_test_cell', return_value=ready_scene), \

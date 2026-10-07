@@ -156,7 +156,7 @@ class MobilityProbeTests(unittest.TestCase):
                                                           pausesGame=False,modal=False,usesCursor=False,
                                                           usesMenuContext=False,freezeFramePause=False)]}
         session=Session();scene={'playerLoaded':True,'cell':{'editorId':'RealmLorkhan'}}
-        with patch.object(bootstrap,'advance_calibration',return_value=True), \
+        with patch('skyrim_autotest.initial_world.InitialWorld'), patch.object(bootstrap,'advance_calibration',return_value=True), \
                 patch.object(bootstrap.vr_probe,'guard_fixture_modal',return_value=False), \
                 patch.object(bootstrap.vr_probe,'wait_test_cell',return_value=scene), \
                 patch.object(bootstrap.time,'monotonic',side_effect=iter(range(100))), \
@@ -175,7 +175,7 @@ class MobilityProbeTests(unittest.TestCase):
             def tool(self,name,args,**kwargs):
                 return {'cell':{'editorId':'Other'}} if name=='inspect' else {'openMenus':['Main Menu']}
         session=Session()
-        with patch.object(bootstrap.vr_probe,'guard_fixture_modal'), \
+        with patch('skyrim_autotest.initial_world.InitialWorld'), patch.object(bootstrap.vr_probe,'guard_fixture_modal'), \
                 patch.object(bootstrap.vr_probe,'wait_test_cell',return_value={'playerLoaded':True,'cell':{'editorId':'RealmLorkhan'}}), \
                 patch.object(bootstrap.time,'monotonic',side_effect=iter(range(1000))), \
                 patch.object(bootstrap.time,'sleep'):

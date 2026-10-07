@@ -355,7 +355,7 @@ def dismiss_navigation_gate(session, menus, attempted, deadline):
     return False
 
 
-def wait_gameplay_ready(session, cell, new_game, deadline=None):
+def wait_gameplay_ready(session, cell, new_game, deadline=None, lifecycle_poll=None):
     """Require a quiet startup interval; late menus reset readiness."""
     from .readiness_state import menus_block_gameplay, world_loaded, gameplay_ready
     deadline = min(time.monotonic() + 90, deadline) if deadline is not None else time.monotonic() + 90
@@ -365,6 +365,8 @@ def wait_gameplay_ready(session, cell, new_game, deadline=None):
     character_seen = False
     navigation_attempts = set()
     while time.monotonic() < deadline:
+        if lifecycle_poll is not None:
+            lifecycle_poll()
         menus = session.tool('menu', {'action': 'list', 'includeFlags': True})
         if menus.get('messageBoxOpen'):
             vr_probe.guard_fixture_modal(session)
@@ -425,25 +427,21 @@ def prepare_gameplay(session, scenario):
     if not cell and not fixture:
         raise AssertionError('Gameplay scenario requires an initial cell or pinned save')
     prepare_startup_screen(session)
+    from .initial_world import InitialWorld
+    initial = InitialWorld(session, 'fixture' if fixture else 'new-game' if new_game else 'cell')
     if new_game:
         start_new_game(session, cell)
         session.phase('gameplay-new-game-initial-world', 120)
-        loaded_scene, _ = wait_gameplay_ready(session, None, True)
+        loaded_scene, _ = wait_gameplay_ready(session, None, True, lifecycle_poll=initial.read)
         session.log('gameplay-new-game-initial-world-ready', scene=loaded_scene,
                     requestedFixtureCell=cell, subjectStarted=False)
     if fixture:
-        from .runner import request
         session.phase('gameplay-load-pinned-fixture', 120)
-        before = session.tool('inspect', {'kind': 'state'})
         session.tool('game', {'action': 'load', 'name': fixture['saveStem']})
         end = time.monotonic() + 90
         while time.monotonic() < end:
-            events = request(session.state['port'], 'api/events')
-            loaded = [event for event in events.get('events', [])
-                      if event.get('topic') == 'lifecycle' and 'postLoadGame' in json.dumps(event)
-                      and event.get('frame', 0) >= before['frame']]
-            if loaded:
-                session.log('gameplay-fixture-loaded', events=loaded)
+            if initial.fixture_loaded():
+                session.log('gameplay-fixture-loaded', events=initial.record['events'])
                 break
             time.sleep(1)
         else:
@@ -451,7 +449,7 @@ def prepare_gameplay(session, scenario):
         # postLoadGame is a lifecycle signal, not settled render/gameplay state.
         # Never overlap a second world transition with save initialization.
         session.phase('gameplay-loaded-fixture-stabilization', 120)
-        loaded_scene, _ = wait_gameplay_ready(session, None, False)
+        loaded_scene, _ = wait_gameplay_ready(session, None, False, lifecycle_poll=initial.read)
         session.log('gameplay-fixture-stable', scene=loaded_scene)
     session.phase('gameplay-world-ready', 120)
     vr_probe.guard_fixture_modal(session)
@@ -472,7 +470,8 @@ def prepare_gameplay(session, scenario):
         # New-game scripts may post their notification only after cell loading.
         # Re-read the world after answering a classified notification.
         scene = session.tool('inspect', {'kind': 'scene'})
-    scene, menus = wait_gameplay_ready(session, cell, False)
+    scene, menus = wait_gameplay_ready(session, cell, False, lifecycle_poll=initial.read)
+    initial.complete(scene, menus)
     session.state['gameplayBootstrap'] = {'completed': True, 'cell': cell,
                                           'loadedFixture': bool(fixture), 'startMode': scenario.get('startMode'),
                                           'scene': scene, 'menus': menus}

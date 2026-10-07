@@ -196,12 +196,14 @@ class Backend:
         return {'plugin': plugin, 'localId': f'{fid & 0xFFFFFF:06X}', 'runtimeId': base['formId']}
 
     def guard_world(self):
-        """A completed owned load establishes a new world, not a live old probe."""
+        """Initial bootstrap or a completed owned load establishes a guarded epoch."""
         state = self.s.state
         if state.get('probeObjectLive') is True:
             self.s.validate_probe_reference(timeout=min(self.remaining(),3))
             return
-        transition = state.get('ownedLoadTransition',{})
+        # An attempted later load must never fall back to the earlier bootstrap.
+        key = 'ownedLoadTransition' if state.get('ownedLoadTransition') else 'initialWorldTransition'
+        transition = state.get(key,{})
         if (transition.get('completed') is not True or transition.get('worldInvalidated') is True or
                 state.get('gameplayBootstrap',{}).get('completed') is not True or
                 state.get('game') != transition.get('afterGame') or not state.get('game') or
@@ -220,7 +222,7 @@ class Backend:
         transition['cursor'] = events.cursor
         self.s.save()
         self.s.log('platform-current-world-validated',game=state['game'],generation=state['ownedWorldGeneration'],
-                   cursor=events.cursor,basis='completed owned load and contiguous native lifecycle; old probe remains invalid')
+                   cursor=events.cursor,basis=key+' and contiguous native lifecycle; old probe remains invalid')
 
     def tagged(self, req):
         self.guard_world()

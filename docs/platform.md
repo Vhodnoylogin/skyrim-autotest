@@ -378,3 +378,18 @@ pinned same-run state, result and event before classifying auxiliary technical
 coverage. The name or provenance flag alone is not proof. A technical check never
 establishes subject start or subject coverage. Legacy artifacts stay unchanged;
 missing corroboration remains unknown rather than silently becoming a tool pass.
+
+## Initial world continuity
+
+The common bootstrap records its own initial-world transition before any scenario
+action. A pinned save requires one contiguous ordered native pre/postLoadGame pair;
+New Game retains the verified native main-menu/loading/cell transition, and a
+cell bootstrap requires a fresh native cell-loaded event. Settled native gameplay,
+the exact owned process identity and a retained lifecycle cursor establish the
+executor world epoch. This is separate from later owned-save transitions and does
+not spawn a probe or reload a save merely to enable world observations.
+
+The world guard accepts this completed initial epoch while keeping stream gaps,
+later loads, process changes and incomplete transitions terminal. A subsequent
+owned-load attempt cannot fall back to the original bootstrap epoch. The epoch is
+an executor continuity guard, not an atomic engine generation contract.
