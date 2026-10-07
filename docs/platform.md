@@ -17,8 +17,12 @@ installed form lookup, exact reference/native loose stack quantity, inventory,
 VRIK slot state, HIGGS held reference, existing Observer physics snapshots,
 bounded physical controller poses/grip/release and explicit fixture-only
 spawn/inventory/health/hand seeding. There is no subject-name switch. The current
-fixture adapter supports one tagged reference and the explicitly accepted
-placement specification. Dynamic-reference reads are protected by the existing
+candidate fixture adapter supports up to16 independently tagged single-item
+references per world and the explicitly accepted placement specification. Tags
+are never overwritten, and reused reference IDs are rejected conservatively.
+The legacy probeObject stores the shared lifecycle cursor anchor; consuming
+that first item does not invalidate other tags. No reference-incarnation proof
+is implied. The new multi-tag behavior requires separate live qualification. Dynamic-reference reads are protected by the existing
 contiguous lifecycle cursor; a world change invalidates tags. This is not an
 atomic engine generation transaction.
 
@@ -89,3 +93,15 @@ the motion; requested grip changes occur at the endpoint. The original absolute
 operation deadline and final pose/hold assertions remain mandatory. This avoids
 teleporting a held object with a.9m hand jump; interpolation alone is not proof
 of retained HIGGS ownership.
+
+Candidate `world.read` observation `form.alchemy` accepts a plugin/localId form
+selector and requires actual ALCH type. It reads native Potion IsPoison, IsHostile,
+IsFood, GetNumEffects and each effect's identity, magnitude, area and duration,
+plus MagicEffect hostile/detrimental flags (1/4). At most32 effects are supported;
+missing/wrong-typed values fail, never become false flags. `alchemy.effects`
+contains index/runtimeId/detrimental/hostile/magnitude/area/durationSeconds.
+`hasDetrimentalEffect` is the OR of actual effect flags, distinct from potion
+poison classification. Requested names/types never substitute for these values.
+These are sequential read-only queries, not an atomic form snapshot. Raw provider
+responses remain in normal logs. Qualification must verify real healing, poison
+and incompatible-effect identities before any subject filter test.

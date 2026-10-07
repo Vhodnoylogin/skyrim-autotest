@@ -5,7 +5,9 @@ def operations():
     fields = {
         'state.read': ['world.ready'],
         'player.read': ['player.health.points'],
-        'world.read': ['form.runtimeId', 'hand.occupied', 'hand.reference.id',
+        'world.read': ['alchemy.runtimeId', 'alchemy.poison', 'alchemy.hostile', 'alchemy.food',
+                       'alchemy.effectCount', 'alchemy.effects', 'alchemy.hasDetrimentalEffect',
+                       'form.runtimeId', 'hand.occupied', 'hand.reference.id',
                        'hand.item.plugin', 'hand.item.localId', 'hand.matchesRequestedReference',
                        'hand.continuousHold.seconds', 'inventory.entries', 'inventory.quantity.items',
                        'body_slot.allowSmall', 'body_slot.displayed', 'body_slot.position.x.gameUnits',

@@ -366,3 +366,102 @@ class PoseMotionTests(unittest.TestCase):
             self.assertLessEqual(math.dist([previous['left']['matrix'][i] for i in (3,7,11)],
                                           [frame['left']['matrix'][i] for i in (3,7,11)]),.0100001)
             previous=frame
+
+
+class MultiTagAlchemyTests(unittest.TestCase):
+    def backend(self, session=None):
+        return platform.Backend(session or Session(), platform.time.monotonic()+60)
+
+    def test_second_tag_independent_of_consumed_anchor(self):
+        session = Session()
+        session.state['platformReferences']['poison'] = {'id': '0xFF005678'}
+        backend = self.backend(session)
+        # Lifecycle validation reads event continuity, never the anchor's object.
+        self.assertEqual(backend.tagged({'referenceTag': 'poison'}), '0xFF005678')
+        session.state['probeObjectLive'] = False
+        with self.assertRaisesRegex(ValueError, 'generation'):
+            backend.tagged({'referenceTag': 'poison'})
+        self.assertEqual(session.calls, [])
+
+    def request(self, tag='poison'):
+        return {'action': 'create_fixture_reference', 'referenceTag': tag,
+                'item': {'plugin': 'Skyrim.esm', 'localId': '03EADD'},
+                'quantityItems': 1,
+                'placement': 'settled reachable surface away from slot 13 and mouth'}
+
+    def test_duplicate_cap_and_stale_world_refuse_before_mutation(self):
+        for reason in ('duplicate', 'cap', 'stale'):
+            session = Session()
+            req = self.request()
+            if reason == 'duplicate': req['referenceTag'] = 'seed-potion'
+            if reason == 'cap':
+                session.state['platformReferences'] = {str(i): {'id': hex(i+1)} for i in range(16)}
+            if reason == 'stale': session.state['probeObjectLive'] = False
+            with self.assertRaises(ValueError): self.backend(session).mutate(req)
+            self.assertEqual(session.calls, [])
+
+    def test_new_tag_preserves_prior_and_does_not_rebind_world(self):
+        session = Session()
+        session.save = lambda: None
+        session.capture_probe_cursor = lambda: self.fail('must preserve old cursor')
+        session.bind_probe_reference = lambda *args: self.fail('must not rebind world')
+        backend = self.backend(session)
+        calls = []
+        def pap(script, function, values=None, target=None):
+            calls.append(function)
+            return {'PlaceAtMe': {'formId': '0xFF005678'}, 'GetAngleZ': 0,
+                    'Is3DLoaded': True, 'GetMass': 1}.get(function)
+        backend.pap = pap
+        backend.resolve = lambda spec: '0x0003EADD'
+        backend.xyz = lambda ref: [1, 2, 3]
+        backend.pause = lambda value: None
+        backend.remaining = lambda: 30
+        with patch.object(platform.time, 'monotonic', side_effect=range(100)):
+            backend.mutate(self.request())
+        self.assertEqual(session.state['platformReferences'], {
+            'seed-potion': {'id': '0xFF001234'}, 'poison': {'id': '0xFF005678'}})
+        self.assertEqual(session.state['probeObject'], '0xFF001234')
+        self.assertEqual(calls.count('PlaceAtMe'), 1)
+        self.assertGreaterEqual(session.validations, 3)
+
+    def test_recycled_reference_id_not_adopted(self):
+        session = Session()
+        backend = self.backend(session)
+        backend.resolve = lambda spec: '0x0003EADD'
+        backend.pap = lambda *a, **k: {'formId': '0xFF001234'}
+        with self.assertRaisesRegex(ValueError, 'ID reused'):
+            backend.mutate(self.request())
+        self.assertEqual(list(session.state['platformReferences']), ['seed-potion'])
+
+    def alchemy_backend(self, overrides=None):
+        backend = self.backend()
+        values = {'IsPoison': True, 'IsHostile': False, 'IsFood': False,
+                  'GetNumEffects': 1, 'GetNthEffectMagicEffect': {'formId': '0x00012345'},
+                  'GetNthEffectMagnitude': 17.5, 'GetNthEffectArea': 0, 'GetNthEffectDuration': 3}
+        values.update(overrides or {})
+        backend.resolve = lambda spec: '0x0003EADD' if spec['type'] == 'ALCH' else None
+        backend.call = lambda *a: {'refs': [{'formType': 'MGEF'}]}
+        backend.pap = lambda script, function, values_arg=None, target=None: (
+            values_arg == [4] if function == 'IsEffectFlagSet' else values[function])
+        return backend
+
+    def test_alchemy_actual_flags_effects_and_no_poison_hostile_conflation(self):
+        value = self.alchemy_backend().observe({'observation': 'form.alchemy', 'form': {}})['alchemy']
+        self.assertTrue(value['poison'])
+        self.assertFalse(value['hostile'])
+        self.assertTrue(value['hasDetrimentalEffect'])
+        self.assertEqual(value['effects'][0]['runtimeId'], '0x00012345')
+        self.assertEqual(value['effects'][0]['magnitude'], 17.5)
+        self.assertEqual(value['effects'][0]['durationSeconds'], 3)
+
+    def test_alchemy_missing_or_unbounded_values_fail_closed(self):
+        for override in ({'IsPoison': None}, {'GetNumEffects': True}, {'GetNumEffects': 33},
+                         {'GetNthEffectMagicEffect': None}, {'GetNthEffectMagnitude': float('nan')},
+                         {'GetNthEffectArea': True}):
+            with self.subTest(override=override), self.assertRaises(ValueError):
+                self.alchemy_backend(override).alchemy({})
+
+    def test_alchemy_request_is_validated_and_mapping_exposes_observed_fields(self):
+        platform.validate({'operation': 'world.read', 'request': {'observation': 'form.alchemy',
+                          'form': {'plugin': 'Skyrim.esm', 'localId': '03EADD'}}})
+        self.assertIn('alchemy.effects', operations()['world.read']['fields'])

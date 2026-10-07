@@ -16,7 +16,7 @@ ACTIONS = {
 }
 OBSERVATIONS = {'form.identity', 'body_slot.settings', 'body_slot.display',
                 'hand.held_item', 'inventory.quantity', 'inventory.alchemy',
-                'reference.state', 'reference.physics'}
+                'reference.state', 'reference.physics', 'form.alchemy'}
 
 
 def menus_block_gameplay(observation):
@@ -67,6 +67,7 @@ def validate(args):
         raise ValueError('Unsupported semantic action')
     selectors = {
         'form.identity': ({'observation', 'form'}, set()),
+        'form.alchemy': ({'observation', 'form'}, set()),
         'body_slot.settings': ({'observation', 'slot'}, set()),
         'body_slot.display': ({'observation', 'slot'}, set()),
         'hand.held_item': ({'observation', 'hand', 'continuityWindowSeconds'}, {'referenceTag'}),
@@ -176,7 +177,7 @@ class Backend:
     def tagged(self, req):
         self.s.validate_probe_reference(timeout=min(3, self.remaining()))
         entry = self.s.state.get('platformReferences', {}).get(req['referenceTag'])
-        if not entry or entry['id'] != self.s.state.get('probeObject'):
+        if not entry or not entry.get('id'):
             raise ValueError('Reference tag is unavailable in this world generation')
         return entry['id']
 
@@ -230,9 +231,49 @@ class Backend:
         if 'referenceTag' in req: value['matchesRequestedReference'] = first == self.tagged(req)
         return {'hand': value}
 
+    def alchemy(self, spec):
+        # The ALCH check is mandatory even if the caller omitted form.type:
+        # native null/wrong-self defaults must not masquerade as observations.
+        form = self.resolve(dict(spec, type='ALCH'))
+        flags = {}
+        for key, function in (('poison', 'IsPoison'), ('hostile', 'IsHostile'), ('food', 'IsFood')):
+            value = self.pap('Potion', function, target=form)
+            if type(value) is not bool:
+                raise ValueError('Actual alchemy flag unavailable: ' + key)
+            flags[key] = value
+        count = self.pap('Potion', 'GetNumEffects', target=form)
+        if type(count) is not int or not 0 <= count <= 32:
+            raise ValueError('Alchemy effect count unavailable or exceeds bound32')
+        effects = []
+        for index in range(count):
+            effect = self.pap('Potion', 'GetNthEffectMagicEffect', [index], form)
+            if not isinstance(effect, dict) or not effect.get('formId'):
+                raise ValueError('Actual magic effect identity unavailable')
+            eid = effect['formId']
+            rows = self.call('inspect', {'kind': 'refs', 'formId': eid}).get('refs', [])
+            if len(rows) != 1 or rows[0].get('formType') != 'MGEF':
+                raise ValueError('Actual magic effect type unavailable')
+            harmful = self.pap('MagicEffect', 'IsEffectFlagSet', [4], eid)
+            hostile = self.pap('MagicEffect', 'IsEffectFlagSet', [1], eid)
+            if type(harmful) is not bool or type(hostile) is not bool:
+                raise ValueError('Actual magic effect flags unavailable')
+            magnitude = self.pap('Potion', 'GetNthEffectMagnitude', [index], form)
+            area = self.pap('Potion', 'GetNthEffectArea', [index], form)
+            duration = self.pap('Potion', 'GetNthEffectDuration', [index], form)
+            number(magnitude, -1e12, 1e12)
+            if any(type(v) is not int or not 0 <= v <= 0xFFFFFFFF for v in (area, duration)):
+                raise ValueError('Actual magic effect area/duration unavailable')
+            effects.append({'index': index, 'runtimeId': eid, 'detrimental': harmful,
+                            'hostile': hostile, 'magnitude': magnitude,
+                            'area': area, 'durationSeconds': duration})
+        return {'alchemy': {'runtimeId': form, **flags, 'effectCount': count,
+                            'effects': effects, 'hasDetrimentalEffect': any(e['detrimental'] for e in effects),
+                            'basis': 'native Potion and MagicEffect queries; sequential non-atomic snapshot'}}
+
     def observe(self, req):
         kind = req['observation']
         if kind == 'hand.held_item': return self.held(req)
+        if kind == 'form.alchemy': return self.alchemy(req['form'])
         if kind == 'form.identity': return {'form': {'runtimeId': self.resolve(req['form'])}}
         if kind == 'inventory.alchemy':
             raw = self.call('inspect', {'kind': 'inventory', 'formType': 'ALCH', 'limit': 100})
@@ -430,15 +471,28 @@ class Backend:
             self.pap('HiggsVR', 'GrabObject', [{'form': ref}, req['hand'] == 'left'])
             self.pause(req.get('settleSeconds', 1.2))
             return self.held({'hand': req['hand'], 'referenceTag': req['referenceTag']})
-        if self.s.state.get('platformReferences'): raise ValueError('Only one scoped fixture reference per world is supported')
+        references = self.s.state.get('platformReferences', {})
+        if req['referenceTag'] in references:
+            raise ValueError('Fixture reference tag already exists; mutation refused')
+        if len(references) >= 16:
+            raise ValueError('Fixture reference limit16 reached')
+        if references:
+            self.s.validate_probe_reference(timeout=min(3, self.remaining()))
         if req['quantityItems'] != 1: raise ValueError('Only a single fixture world reference is supported')
         base = self.resolve(req['item'])
-        cursor = self.s.capture_probe_cursor()
+        cursor = self.s.capture_probe_cursor() if not references else None
         observed = self.pap('ObjectReference', 'PlaceAtMe', [{'form': base}, 1, True, True], '0x14')
         if not isinstance(observed, dict) or not observed.get('formId'): raise ValueError('Fixture spawn identity missing')
         ref = observed['formId']
-        self.s.bind_probe_reference(ref, cursor)
-        self.s.state['platformReferences'] = {req['referenceTag']: {'id': ref}}
+        if any(int(entry['id'], 16) == int(ref, 16) for entry in references.values()):
+            raise ValueError('Fixture reference ID reused; incarnation cannot be established')
+        if not references:
+            self.s.bind_probe_reference(ref, cursor)
+        else:
+            # Keep the original world cursor, including creation-time events.
+            # probeObject is a legacy lifecycle anchor, never an existence check.
+            self.s.validate_probe_reference(timeout=min(3, self.remaining()))
+        self.s.state.setdefault('platformReferences', {})[req['referenceTag']] = {'id': ref}
         self.s.save()
         heading = math.radians(self.pap('ObjectReference', 'GetAngleZ', target='0x14'))
         self.pap('ObjectReference', 'MoveTo', [{'form': '0x14'}, math.sin(heading)*42, math.cos(heading)*42, 20., False], ref)
@@ -454,6 +508,7 @@ class Backend:
                 else: stable = None
                 last = point
             self.pause(.1)
+        self.s.validate_probe_reference(timeout=min(3, self.remaining()))
         return {'reference': {'id': ref, 'settledPositionGameUnits': last}}
 
 
