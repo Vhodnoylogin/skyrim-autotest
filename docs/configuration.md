@@ -93,3 +93,12 @@ unrelated profile, automatic recovery stops with retained backups instead of
 writing settings under an unknown instance. Recovery of that boundary is not yet
 automated. Activation-hand startup selftest fixtures are unsupported in this
 candidate. It is not a replacement for all existing recovery qualification.
+
+Restoration waits up to30seconds for the verified borrowed MO2/Root Builder busy
+status to clear after owned game exit. Each wait iteration rechecks process and
+Bridge identity; a new game/VR process or identity failure stops recovery. Busy
+responses remain logged as `bridge-restoration-idle-wait`; profile selection is
+issued only once after an idle read. Setup continues to refuse a busy MO2 without
+waiting. The first live reuse candidate exposed an immediate-busy cleanup failure;
+its independent guardian subsequently restored the original profile/files. That
+historical normal failure remains a failed qualification, not a retroactive pass.

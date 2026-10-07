@@ -486,13 +486,28 @@ class Session:
         if not native.alive(borrowed):
             raise Blocked('Borrowed MO2 identity changed')
         token = P.bridge_token.read_text().strip()
-        actual = request(P.bridge_port, 'session', token=token)
         expected = self.state['preflight']['bridgeSession']
-        if any(actual.get(k) != expected.get(k) for k in ('mo2Pid', 'serverBootId', 'instanceId', 'profilesPath')):
-            raise Blocked('MO2 Bridge session changed')
-        procs = request(P.bridge_port, 'procs', token=token)
-        if procs.get('busy') or procs.get('running') or procs.get('launchedByMO2'):
-            raise Blocked('MO2 is busy; profile selection refused')
+        # MO2/Root Builder can remain locked briefly after the game exits.
+        # Only restoration may wait; setup still refuses an occupied instance.
+        idle_deadline = time.monotonic() + 30
+        while True:
+            if not native.alive(borrowed):
+                raise Blocked('Borrowed MO2 identity changed during idle wait')
+            actual = request(P.bridge_port, 'session', token=token, timeout=3)
+            if any(actual.get(k) != expected.get(k) for k in ('mo2Pid', 'serverBootId', 'instanceId', 'profilesPath')):
+                raise Blocked('MO2 Bridge session changed')
+            procs = request(P.bridge_port, 'procs', token=token, timeout=3)
+            if not (procs.get('busy') or procs.get('running') or procs.get('launchedByMO2')):
+                break
+            if not restoring:
+                raise Blocked('MO2 is busy; profile selection refused')
+            if any(p['name'].lower() in GAME_NAMES | VR_NAMES for p in native.processes()):
+                raise Blocked('Unexpected game/VR process during MO2 idle wait')
+            if time.monotonic() >= idle_deadline:
+                raise Blocked('MO2 remained busy after bounded restoration idle wait')
+            self.log('bridge-restoration-idle-wait', procs=procs,
+                     remainingSeconds=max(0, idle_deadline-time.monotonic()))
+            time.sleep(.5)
         ping = request(P.bridge_port, 'ping', token=token)
         original = self.state['preflight']['originalBridgeProfile']
         allowed = {original, self.state.get('testProfileName')}

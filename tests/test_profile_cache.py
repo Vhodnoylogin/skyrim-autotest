@@ -83,6 +83,69 @@ class ProfileCacheTests(unittest.TestCase):
 
 
 class BorrowedMO2RecoveryTests(unittest.TestCase):
+    def test_restoration_waits_for_transient_busy_then_selects_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            token = Path(tmp) / 'token'
+            token.write_text('secret')
+            bridge = {'mo2Pid': 17, 'serverBootId': 'boot', 'instanceId': 'instance', 'profilesPath': tmp}
+            state = {'borrowedMO2': {'pid': 17}, 'preflight': {
+                'bridgeSession': bridge, 'originalBridgeProfile': 'Owner'}, 'testProfileName': 'Test'}
+            session = runner.Session(Path(tmp), state)
+            responses = [bridge, {'busy': True}, bridge, {}, {'profile': 'Test'},
+                         {'applied': True, 'current': 'Owner'}, {'profile': 'Owner'}]
+            with patch.dict(runner.P.value, {'bridge_token': str(token), 'bridge_port': 1}), \
+                    patch.object(native, 'alive', return_value=True), patch.object(native, 'processes', return_value=[]), \
+                    patch.object(runner.time, 'sleep') as sleep, \
+                    patch.object(runner, 'request', side_effect=responses) as request:
+                session.bridge_profile('Owner', restoring=True)
+            self.assertEqual(sum(c.args[1] == 'profiles/select' for c in request.call_args_list), 1)
+            sleep.assert_called_once_with(.5)
+
+    def test_busy_restoration_timeout_never_selects_or_closes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            token = Path(tmp) / 'token'
+            token.write_text('secret')
+            bridge = {'mo2Pid': 17}
+            session = runner.Session(Path(tmp), {'borrowedMO2': {'pid': 17},
+                'preflight': {'bridgeSession': bridge}})
+            with patch.dict(runner.P.value, {'bridge_token': str(token), 'bridge_port': 1}), \
+                    patch.object(native, 'alive', return_value=True), patch.object(native, 'processes', return_value=[]), \
+                    patch.object(native, 'close') as close, \
+                    patch.object(runner.time, 'monotonic', side_effect=[0, 31]), \
+                    patch.object(runner, 'request', side_effect=[bridge, {'busy': True}]) as request:
+                with self.assertRaisesRegex(runner.Blocked, 'bounded restoration'):
+                    session.bridge_profile('Owner', restoring=True)
+            self.assertEqual(request.call_count, 2)
+            close.assert_not_called()
+
+    def test_new_game_during_busy_wait_blocks_profile_switch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            token = Path(tmp) / 'token'
+            token.write_text('secret')
+            session = runner.Session(Path(tmp), {'borrowedMO2': {'pid': 17},
+                'preflight': {'bridgeSession': {'mo2Pid': 17}}})
+            with patch.dict(runner.P.value, {'bridge_token': str(token), 'bridge_port': 1}), \
+                    patch.object(native, 'alive', return_value=True), \
+                    patch.object(native, 'processes', return_value=[{'name': 'SkyrimVR.exe', 'pid': 20}]), \
+                    patch.object(runner, 'request', side_effect=[{'mo2Pid': 17}, {'busy': True}]) as request:
+                with self.assertRaisesRegex(runner.Blocked, 'Unexpected game/VR'):
+                    session.bridge_profile('Owner', restoring=True)
+            self.assertEqual(request.call_count, 2)
+
+    def test_setup_busy_never_waits_or_replays_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            token = Path(tmp) / 'token'
+            token.write_text('secret')
+            session = runner.Session(Path(tmp), {'borrowedMO2': {'pid': 17},
+                'preflight': {'bridgeSession': {'mo2Pid': 17}}})
+            with patch.dict(runner.P.value, {'bridge_token': str(token), 'bridge_port': 1}), \
+                    patch.object(native, 'alive', return_value=True), patch.object(runner.time, 'sleep') as sleep, \
+                    patch.object(runner, 'request', side_effect=[{'mo2Pid': 17}, {'busy': True}]) as request:
+                with self.assertRaisesRegex(runner.Blocked, 'MO2 is busy'):
+                    session.bridge_profile('Test')
+            sleep.assert_not_called()
+            self.assertEqual(request.call_count, 2)
+
     def test_keeps_borrowed_mo2_alive_and_restores_profile_via_bridge(self):
         with tempfile.TemporaryDirectory() as tmp:
             idle = {'pid': 17, 'birth': 123, 'path': str(Path(tmp) / 'ModOrganizer.exe')}
