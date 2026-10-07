@@ -17,6 +17,7 @@ class PublicationTests(unittest.TestCase):
             started=threading.Event()
             second_wrote=threading.Event()
             errors=[]
+            receipts={}
             replace=os.replace
             write=Path.write_text
             def replacing(source,destination):
@@ -36,6 +37,7 @@ class PublicationTests(unittest.TestCase):
                     frame=hardware.neutral()
                     frame['seq']=sequence
                     hardware.publish(frame)
+                    receipts[sequence]=frame['_publication']
                 except Exception as error:
                     errors.append(error)
             with patch.object(hardware,'PATH',target),patch.object(hardware.os,'replace',side_effect=replacing),patch.object(Path,'write_text',writing):
@@ -54,7 +56,11 @@ class PublicationTests(unittest.TestCase):
                         newer.join(3)
             self.assertFalse(older.is_alive() or newer.is_alive())
             self.assertEqual(errors,[])
-            self.assertEqual(target.read_text().split()[0],'2')
+            fields=target.read_text().split()
+            self.assertEqual(fields[:2],['SKYRIM_AUTOTEST','2'])
+            self.assertEqual(fields[6],receipts[2]['command'])
+            self.assertEqual(int(fields[3]),receipts[2]['sequence'])
+            self.assertGreater(receipts[2]['sequence'],receipts[1]['sequence'])
             self.assertFalse(target.with_suffix('.tmp').exists())
     def test_expired_heartbeat_cannot_overwrite_new_pressed_frame(self):
         class Once:
@@ -110,7 +116,8 @@ class PublicationTests(unittest.TestCase):
             self.assertEqual(session.state['hardwareFrame']['seq'],2)
             self.assertEqual(session.state['hardwareFrame']['right']['controller']['pressed'],4)
             fields=(folder/'frame.txt').read_text().split()
-            self.assertEqual(fields[0],'2')
-            self.assertEqual(int(fields[35]),4) # right pressed after head and left values
+            self.assertEqual(fields[:2],['SKYRIM_AUTOTEST','2'])
+            self.assertEqual(fields[6],session.state['hardwareFrame']['_publication']['command'])
+            self.assertEqual(int(fields[40]),4) # version2 header plus head and left values
 
 if __name__=='__main__':unittest.main()

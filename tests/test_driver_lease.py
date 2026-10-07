@@ -15,11 +15,12 @@ def main():
     runner.configure(load(args.config))
     build = runner.ROOT / 'dependencies/driver-build'
     manifest = runner.read_json(build / 'manifest.json')
+    includes = Path(manifest.get('buildDirectory',str(build)))
     with tempfile.TemporaryDirectory(prefix='driver-lease-', dir=runner.ROOT) as name:
         directory = Path(name)
-        source = Path(__file__).with_suffix('.cpp').resolve()
+        source = Path(__file__).with_name('test_driver_protocol_v2.cpp').resolve()
         exe = directory / 'lease-test.exe'
-        command = ['cl.exe', '/nologo', '/std:c++17', '/EHsc', '/I' + str(build),
+        command = ['cl.exe', '/nologo', '/std:c++17', '/EHsc', '/I' + str(includes),
                    str(source), '/Fe:' + str(exe)]
         batch = directory / 'test.cmd'
         batch.write_text('@echo off\ncall "' + manifest['visualStudio'] + '\\Common7\\Tools\\VsDevCmd.bat" -arch=amd64 -host_arch=amd64 >nul\nif errorlevel 1 exit /b 1\n' + subprocess.list2cmdline(command) + '\n', encoding='utf-8')

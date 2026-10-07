@@ -12,8 +12,9 @@ for the exact build, measured scope, retained failures and prototype limits.
 The automation adapter is maintained here as our own backend. Devkit's author
 has explained that a full automation API is outside that project's planned scope;
 we do not assume this adapter will disappear after upstream changes. It remains
-a prototype file protocol: versioned ownership, sequence acknowledgements and
-monotonic lease hardening are future interface work. See [ownership and credits](docs/ownership.md).
+a versioned file protocol with exclusive owner tokens, monotonic leases and
+driver component acknowledgements. Protocol v2 has native harness coverage;
+its separate live-game qualification is still pending. See [ownership and credits](docs/ownership.md).
 
 This is an external developer tool, not an SKSE mod. Skyrim World Observer is an
 optional in-game data provider; install/stage it separately when a scenario uses
@@ -115,10 +116,14 @@ operator-reviewed live qualification; no mod order selects provider versions.
 Generic scenarios use DevBench tools with explicit returned-state assertions.
 `tool: "driver"` is routed to our owned physical adapter, not to DevBench input
 injection. Full HMD/left/right frames have bounded leases, then buttons/axes are
-released. A published frame is not an acknowledged frame or proof of game behavior.
+released. Driver status returns a separate ACK tied to the exact owned VR
+process, owner, command and publication sequence. It records pose submission
+and successful component updates; game consumption and physical effects require
+their own observations.
 Healthy-run button/axis release is checked at one-second heartbeat intervals;
 short leases do not guarantee exact short-pulse timing. Driver expiry after client
-loss is five seconds and uses wall clock in this prototype.
+loss is five seconds. Protocol v2 uses the Windows boot clock for publication age
+and a driver-local monotonic clock for expiry; replaying a file cannot renew it.
 A test containing only frame-publication checks cannot pass.
 
 The built-in `vr-hand-probe` enters QASmoke, verifies both hands, spawns dynamic

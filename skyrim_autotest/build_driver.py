@@ -85,10 +85,17 @@ def main():
     if runner.sha(header) != SDK_HASH:
         raise RuntimeError('Pinned OpenVR SDK header hash mismatch')
     shutil.copy2(HERE / 'autotest_protocol.h', build / 'autotest_protocol.h')
+    shutil.copy2(HERE / 'driver_protocol_v2.h', build / 'driver_protocol_v2.h')
     device = build / 'csampledevicedriver.cpp'
     text = device.read_text(encoding='utf-8-sig')
     text = '#include "autotest_protocol.h"\n' + text
     text = replace_function(text, 'vr::DriverPose_t CSampleDeviceDriver::GetPose()', 'return autotest::Pose(0);')
+    text = replace_function(text, 'void CSampleDeviceDriver::RunFrame()', '''auto frame=autotest::Read();
+if (m_unObjectId != vr::k_unTrackedDeviceIndexInvalid) {
+    auto pose=autotest::PoseFor(frame,0);
+    vr::VRServerDriverHost()->TrackedDevicePoseUpdated(m_unObjectId,pose,sizeof(vr::DriverPose_t));
+    autotest::Applied(frame,0,true);
+}''')
     device.write_text(text, encoding='utf-8')
     controller = build / 'csamplecontrollerdriver.cpp'
     text = '#include "autotest_protocol.h"\n' + controller.read_text(encoding='utf-8-sig')
@@ -102,17 +109,20 @@ def main():
     text = replace_function(text, 'vr::DriverPose_t CSampleControllerDriver::GetPose()', 'return autotest::Pose(ControllerIndex);')
     body = '''auto frame=autotest::Read();
 auto &d=frame.devices[ControllerIndex];
+bool successful=autotest::SupportedComponents(d);
 const int bits[15]={0,1,2,3,4,5,6,7,-1,-1,-1,33,-1,32,32};
 for (int i=0; i<15; ++i) {
     if (i==12) continue; // trigger scalar has a separate handle
     bool pressed=bits[i]>=0 && ((i==14 ? d.touched : d.pressed) & (1ULL << bits[i]));
-    if (HButtons[i]) vr::VRDriverInput()->UpdateBooleanComponent(HButtons[i], pressed, 0);
+    if (HButtons[i]) successful &= vr::VRDriverInput()->UpdateBooleanComponent(HButtons[i], pressed, 0)==vr::VRInputError_None;
+    else if (pressed) successful=false;
 }
-vr::VRDriverInput()->UpdateScalarComponent(HAnalog[0], (float)d.axes[0], 0);
-vr::VRDriverInput()->UpdateScalarComponent(HAnalog[1], (float)d.axes[1], 0);
-vr::VRDriverInput()->UpdateScalarComponent(HAnalog[2], (float)d.axes[2], 0);
-if (m_unObjectId != vr::k_unTrackedDeviceIndexInvalid)
-    vr::VRServerDriverHost()->TrackedDevicePoseUpdated(m_unObjectId, GetPose(), sizeof(vr::DriverPose_t));'''
+for(int i=0;i<3;++i) successful &= HAnalog[i] && vr::VRDriverInput()->UpdateScalarComponent(HAnalog[i],(float)d.axes[i],0)==vr::VRInputError_None;
+if (m_unObjectId != vr::k_unTrackedDeviceIndexInvalid) {
+    auto pose=autotest::PoseFor(frame,ControllerIndex);
+    vr::VRServerDriverHost()->TrackedDevicePoseUpdated(m_unObjectId,pose,sizeof(vr::DriverPose_t));
+    autotest::Applied(frame,ControllerIndex,successful);
+}'''
     text = replace_function(text, 'void CSampleControllerDriver::RunFrame()', body)
     controller.write_text(text, encoding='utf-8')
     vswhere = Path(os.environ['ProgramFiles(x86)']) / 'Microsoft Visual Studio/Installer/vswhere.exe'
@@ -124,16 +134,18 @@ if (m_unObjectId != vr::k_unTrackedDeviceIndexInvalid)
                *[str(p) for p in files], '/link', '/OUT:' + str(build / 'driver_null.dll'), 'user32.lib']
     batch = build / 'build.cmd'
     batch.write_text('@echo off\ncall "' + vs + '\\Common7\\Tools\\VsDevCmd.bat" -arch=amd64 -host_arch=amd64 >nul\nif errorlevel 1 exit /b 1\nwhere cl.exe > compiler-path.txt\nif errorlevel 1 exit /b 1\n' + subprocess.list2cmdline(command) + '\n', encoding='utf-8')
-    with (build / 'build.log').open('w', encoding='utf-8') as output:
-        subprocess.run(['cmd.exe', '/d', '/c', str(batch)], cwd=build, check=True, stdout=output, stderr=subprocess.STDOUT, timeout=300)
+    with (build / 'build.log').open('w', encoding='utf-8') as build_log:
+        subprocess.run(['cmd.exe', '/d', '/c', str(batch)], cwd=build, check=True, stdout=build_log, stderr=subprocess.STDOUT, timeout=300)
     compiler = Path((build/'compiler-path.txt').read_text(encoding='utf-8-sig').splitlines()[0].strip())
     if not compiler.is_file(): raise RuntimeError('Actual compiler identity unavailable')
     manifest = {'source': URL, 'commit': COMMIT, 'sdkHeader': SDK_URL, 'sdkHeaderSha256': runner.sha(header),
                 'sourceFileHashes': pins['files'], 'sourceCatalogueSha256': runner.sha(HERE / 'driver_sources.json'),
-                'ownProtocolSha256': runner.sha(HERE / 'autotest_protocol.h'), 'buildScriptSha256': runner.sha(Path(__file__)),
+                'ownProtocolSha256': runner.sha(HERE / 'autotest_protocol.h'),
+                'protocolVersion':2,'protocolV2Sha256':runner.sha(HERE/'driver_protocol_v2.h'),
+                'buildScriptSha256': runner.sha(Path(__file__)),
                 'dllSha256': runner.sha(build / 'driver_null.dll'), 'visualStudio': vs,
                 'buildDirectory':str(build), 'compilationSources':[p.name for p in files],
-                'transformedInputs':{p.name:runner.sha(p) for p in [*[build/name for name in pins['files']],header,build/'autotest_protocol.h']},
+                'transformedInputs':{p.name:runner.sha(p) for p in [*[build/name for name in pins['files']],header,build/'autotest_protocol.h',build/'driver_protocol_v2.h']},
                 'compiler':{'path':str(compiler),'sha256':runner.sha(compiler)},
                 'command':command,'buildLogSha256':runner.sha(build/'build.log')}
     runner.atomic_json(build / 'manifest.json', manifest)

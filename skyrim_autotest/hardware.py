@@ -4,10 +4,23 @@ import time
 from pathlib import Path
 import os
 import threading
+import uuid
+import re
 from . import runner
 
 PATH = Path(os.environ['PROGRAMDATA']) / 'SkyrimVR Autotest/frame.txt'
 _PUBLISH_LOCK = threading.RLock()
+_OWNER = uuid.uuid4().hex
+_SEQUENCES = {}
+
+
+def tick_ms():
+    if os.name == 'nt':
+        import ctypes
+        fn=ctypes.windll.kernel32.GetTickCount64
+        fn.restype=ctypes.c_ulonglong
+        return fn()
+    return time.monotonic_ns()//1_000_000
 
 
 def quaternion(matrix):
@@ -44,11 +57,26 @@ def publish(frame):
     # Session.lock orders frame selection/lease updates. This lock also protects
     # the file transaction if independent callers publish on separate threads.
     with _PUBLISH_LOCK:
-        _publish(frame)
+        return _publish(frame)
 
 
 def _publish(frame):
-    values = [int(frame.get('seq', 1)), time.time()+5]
+    owner=frame.setdefault('_owner', _OWNER)
+    command=frame.setdefault('_command', uuid.uuid4().hex)
+    if any(not isinstance(v,str) or not re.fullmatch(r'[0-9a-f]{32}',v) for v in (owner,command)):
+        raise ValueError('Driver owner/command token must be32lowercase hex digits')
+    tick=tick_ms()
+    sequence=max(tick*1024,_SEQUENCES.get(owner,0)+1)
+    # A recovered executor keeps the same owner but starts a fresh Python process.
+    # The durable atomic file carries the last sequence across that handoff.
+    try:
+        if PATH.stat().st_size<=8192:
+            previous=PATH.read_text(encoding='ascii').split()
+            if previous[:3]==['SKYRIM_AUTOTEST','2',owner] and len(previous)>3:
+                sequence=max(sequence,int(previous[3])+1)
+    except (OSError,UnicodeError,ValueError):pass
+    if not 0<sequence<2**63:raise ValueError('Driver publication sequence outside domain')
+    values = ['SKYRIM_AUTOTEST',2,owner,sequence,tick,5000,command]
     for role in ('hmd', 'left', 'right'):
         m = frame[role]['matrix']
         if len(m) != 12 or not all(math.isfinite(v) for v in m):
@@ -68,13 +96,46 @@ def _publish(frame):
     for attempt in range(40):
         try:
             os.replace(temp, PATH)
-            return
+            _SEQUENCES[owner]=sequence
+            frame['_publication']={'version':2,'owner':owner,'sequence':sequence,'command':command,
+                                   'publishedTickMs':tick,'expiresTickMs':tick+5000}
+            return frame['_publication']
         except PermissionError:
             if attempt == 39:
                 raise
             time.sleep(.01)
 
 
+def acknowledgement(frame):
+    expected=frame.get('_publication',{})
+    result={'acknowledgedByDriver':False,'gameConsumptionProven':False,'protocolVersion':2}
+    path=PATH.with_name('ack.txt')
+    try:
+        if path.stat().st_size>1024:raise ValueError('Oversized driver acknowledgement')
+        raw=path.read_text(encoding='ascii')
+        if len(raw)>1024:raise ValueError('Growing driver acknowledgement exceeds bound')
+        fields=raw.split()
+        result.update(rawAcknowledgement=raw,observedTickMs=tick_ms())
+        if len(fields)!=11 or fields[:2]!=['SKYRIM_AUTOTEST_ACK','2']:
+            raise ValueError('Unknown driver acknowledgement format')
+        instance,owner,sequence,command,at,until,roles,errors,expired=fields[2:]
+        if not re.fullmatch(r'[1-9][0-9]*-[1-9][0-9]*',instance):raise ValueError('Driver identity unavailable')
+        sequence,at,until,roles,errors,expired=map(int,(sequence,at,until,roles,errors,expired))
+        now=tick_ms()
+        if (owner!=expected.get('owner') or command!=expected.get('command') or
+                sequence<expected.get('sequence',2**63) or not 0<=now-at<=2000 or
+                not now<until<=now+5000 or not 0<=roles<=7 or not 0<=errors<=7 or expired not in (0,1)):
+            raise ValueError('Stale, foreign, expired or mismatched driver acknowledgement')
+        result.update(driverInstance=instance,sequence=sequence,command=command,rolesUpdated=roles,
+                      errorRoles=errors,expired=bool(expired),acknowledgedByDriver=roles==7 and errors==0 and expired==0,
+                      basis='Exact version/owner/command/sequence; driver submitted pose and successful component updates. Game consumption is separate.')
+    except (OSError,UnicodeError,ValueError) as error:result['unavailableReason']=str(error)
+    return result
+
+
 def release(frame):
+    changed=any(frame[role]['controller']['pressed'] or frame[role]['controller']['touched'] or
+                any(v for pair in frame[role]['controller']['axes'] for v in pair) for role in ('left','right'))
     for role in ('left', 'right'):
         frame[role]['controller'].update(pressed=0, touched=0, axes=[[0, 0] for _ in range(5)])
+    if changed:frame['_command']=uuid.uuid4().hex

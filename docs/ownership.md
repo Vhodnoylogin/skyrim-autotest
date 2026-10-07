@@ -15,9 +15,10 @@ On 2026-10-04, the Devkit author (DubiousDodo on Nexus; DubiousDuo on GitHub)
 explained that a full automation API is outside the project's scope and allowed
 maintenance/release of our own credited fork. Therefore this adapter is an owned
 automation-backend candidate, not a temporary patch awaiting promised Devkit API
-implementation. The existing qualified file protocol still lacks a public
-versioned ownership/sequence/ACK contract and monotonic leases. Current tests
-assert observed game outcomes; publication does not mean driver acknowledgement.
+implementation. The historical qualified file protocol is retained in frozen
+platforms. Source protocol v2 adds versioned ownership, sequence/command ACKs and
+monotonic leases; its native harness passes, with live-game qualification pending.
+Current tests assert observed game outcomes; a driver ACK alone cannot prove them.
 The author plans installer extraction/version verification changes, rather than
 adopting the full requested automation contract. Planned changes are not treated
 as available installed behavior.

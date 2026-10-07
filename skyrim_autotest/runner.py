@@ -358,9 +358,9 @@ class Session:
                 self.state['heartbeat'] = time.time()
                 if self.state.get('hardwareFrame') and not self.state.get('restoringFiles') and not self.state.get('focusInputPaused'):
                     from . import hardware
-                    if time.time() > self.state.get('hardwareHoldUntil', float('inf')):
+                    if hardware.tick_ms() >= self.state.get('hardwareHoldUntilTickMs', 0):
                         hardware.release(self.state['hardwareFrame'])
-                    hardware.publish(self.state['hardwareFrame'])
+                    self.publish_hardware(self.state['hardwareFrame'])
                 self.discover()
                 self.save()
 
@@ -375,8 +375,9 @@ class Session:
             self.state['focusInputPaused'] = True
             if frame:
                 hardware.release(frame)
-                hardware.publish(frame)
+                self.publish_hardware(frame, new_command=True)
                 self.state['hardwareHoldUntil'] = time.time()
+                self.state['hardwareHoldUntilTickMs'] = hardware.tick_ms()
             self.save()
             self.log('focus-input-paused', activeInputReleased=active)
             return active
@@ -396,26 +397,46 @@ class Session:
         action = args.get('action')
         with self.lock:
             if action == 'status':
-                result = {'backend': 'physical-driver', 'published': bool(self.state.get('hardwareFrame')), 'holdUntil': self.state.get('hardwareHoldUntil'), 'acknowledgedByDriver': False}
+                result = {'backend': 'physical-driver', 'published': bool(self.state.get('hardwareFrame')), 'holdUntil': self.state.get('hardwareHoldUntil')}
+                result.update(self.driver_acknowledgement())
             elif action == 'release':
                 hardware.release(self.state['hardwareFrame'])
                 self.state['hardwareHoldUntil'] = time.time()
-                hardware.publish(self.state['hardwareFrame'])
-                result = {'published': True, 'released': True, 'acknowledgedByDriver': False}
+                self.state['hardwareHoldUntilTickMs'] = hardware.tick_ms()
+                self.publish_hardware(self.state['hardwareFrame'], new_command=True)
+                result = {'published': True, 'released': True, **self.driver_acknowledgement()}
             elif action == 'publish':
                 if self.state.get('focusInputPaused'):
                     raise Blocked('Input publication paused while waiting for owned game focus')
                 frame = copy.deepcopy(args['frame'])
                 duration = args['holdSeconds']
-                hardware.publish(frame)
+                self.publish_hardware(frame, new_command=True)
                 self.state['hardwareFrame'] = frame
                 self.state['hardwareHoldUntil'] = time.time() + duration
-                result = {'published': True, 'holdSeconds': duration, 'acknowledgedByDriver': False}
+                self.state['hardwareHoldUntilTickMs'] = hardware.tick_ms()+int(duration*1000)
+                result = {'published': True, 'holdSeconds': duration, **self.driver_acknowledgement()}
             else:
                 raise ValueError('Unknown driver action')
             self.save()
             self.log('driver', action=action, result=result)
             return result
+
+    def publish_hardware(self, frame, new_command=False):
+        from . import hardware
+        frame['_owner']=self.state.setdefault('hardwareOwner',uuid.uuid4().hex)
+        if new_command:frame['_command']=uuid.uuid4().hex
+        return hardware.publish(frame)
+
+    def driver_acknowledgement(self):
+        from . import hardware
+        result=hardware.acknowledgement(self.state.get('hardwareFrame') or {})
+        if result.get('driverInstance'):
+            pid,birth=map(int,result['driverInstance'].split('-'))
+            actual=native.identity(pid)
+            owned=[p['identity'] for p in self.state.get('owned',[]) if p['role']=='vr']
+            if actual not in owned or actual is None or actual['birth']!=birth:
+                result.update(acknowledgedByDriver=False,unavailableReason='Acknowledging driver is not an exact owned VR process')
+        return result
 
     def invalidate_probe_reference(self, reason):
         self.state['probeObjectLive'] = False
@@ -728,6 +749,8 @@ class Session:
             here = Path(__file__).resolve().parent
             if sha(build / 'driver_null.dll') != manifest['dllSha256'] or sha(here / 'autotest_protocol.h') != manifest['ownProtocolSha256'] or sha(here / 'build_driver.py') != manifest['buildScriptSha256'] or sha(here / 'driver_sources.json') != manifest.get('sourceCatalogueSha256'):
                 raise Blocked('External driver adapter is stale; run build_driver.py')
+            if manifest.get('protocolVersion')!=2 or sha(here/'driver_protocol_v2.h')!=manifest.get('protocolV2Sha256'):
+                raise Blocked('External driver adapter protocol mismatch; rebuild the owned adapter')
             self.write(driver / 'bin/win64/driver_null.dll', (build / 'driver_null.dll').read_bytes())
             signature = driver / 'bin/win64/driver_null.dll.sig'
             if signature.exists():
@@ -736,9 +759,12 @@ class Session:
             from . import hardware
             with self.lock:
                 self.snapshot(hardware.PATH)
+                self.snapshot(hardware.PATH.with_name('ack.txt'))
+                self.snapshot(hardware.PATH.with_name('ack.tmp'))
                 self.state['hardwareFrame'] = hardware.neutral()
+                self.state['hardwareHoldUntilTickMs']=hardware.tick_ms()
                 self.save()
-                hardware.publish(self.state['hardwareFrame'])
+                self.publish_hardware(self.state['hardwareFrame'], new_command=True)
         settings = read_json(info['settings']) if Path(info['settings']).exists() else {}
         settings.setdefault('driver_null', {}).update(enable=True)
         settings.setdefault('steamvr', {}).update(forcedDriver='null', requireHmd=True,
@@ -849,7 +875,7 @@ class Session:
             from . import hardware
             with self.lock:
                 hardware.release(self.state['hardwareFrame'])
-                hardware.publish(self.state['hardwareFrame'])
+                self.publish_hardware(self.state['hardwareFrame'], new_command=True)
                 self.save()
         self.discover()
         if self.state.get('game') and native.alive(self.state['game']):
