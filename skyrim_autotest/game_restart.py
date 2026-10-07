@@ -31,9 +31,10 @@ def settle_owned_loaders(backend):
             ident = native.identity(process['pid'])
             rows.append(dict(process, identity=ident, owned=ident is not None and ident in allowed))
         s.log('owned-game-restart-residuals', processes=rows)
-        if any(not row['owned'] or row['name'].lower() != 'sksevr_loader.exe' or
-               Path(row['identity']['path']).name.lower() != 'sksevr_loader.exe' for row in rows):
-            raise ValueError('Foreign, unidentified or unexpected game/loader blocks restart launch')
+        if any(row['identity'] is not None and
+               (not row['owned'] or row['name'].lower() != 'sksevr_loader.exe' or
+                Path(row['identity']['path']).name.lower() != 'sksevr_loader.exe') for row in rows):
+            raise ValueError('Foreign or unexpected game/loader blocks restart launch')
         return rows
     rows = residuals()
     # A launcher often survives its child for a short interval. An enum entry
@@ -42,6 +43,8 @@ def settle_owned_loaders(backend):
     while rows and time.monotonic() < finish:
         b.pause(.2)
         rows = residuals()
+    if any(row['identity'] is None for row in rows):
+        raise ValueError('Unidentified game/loader persisted after bounded resampling; no relaunch')
     for row in rows:
         result = native.close(row['identity'])
         s.log('owned-game-restart-loader-close', identity=row['identity'], result=result)
@@ -49,6 +52,8 @@ def settle_owned_loaders(backend):
     while rows and time.monotonic() < finish:
         b.pause(.2)
         rows = residuals()
+    if any(row['identity'] is None for row in rows):
+        raise ValueError('Unidentified game/loader during loader shutdown; no termination or relaunch')
     for row in rows:
         s.log('owned-game-restart-loader-forced-stop', identity=row['identity'])
         native.terminate(row['identity'])  # native rechecks creation time on its handle

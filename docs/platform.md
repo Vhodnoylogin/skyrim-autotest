@@ -271,3 +271,9 @@ exact owned identity with creation-time recheck and four-second confirmation.
 Foreign/unidentified/reused identities or unexpected games block relaunch.
 All waits use the original action deadline. No other launch-chain process is
 adopted or stopped. This repair requires live restart qualification.
+
+An enumerated process may already have exited before its native identity read.
+Unavailable identities trigger read-only bounded resampling, never ownership
+inference or termination. Relaunch still requires the entire game/loader list
+to become empty. A later readable foreign/reused identity blocks immediately;
+an unreadable entry that persists beyond the wait blocks without any mutation.

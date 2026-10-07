@@ -130,10 +130,32 @@ class RestartTests(unittest.TestCase):
             with self.subTest(actual=actual), \
                  patch.object(native,'processes',return_value=[dict(pid=18,name='sksevr_loader.exe')]), \
                  patch.object(native,'identity',return_value=actual), \
+                 patch.object(game_restart.time,'monotonic',side_effect=lambda:self.clock), \
                  patch.object(native,'close') as close, patch.object(native,'terminate') as stop:
-                with self.assertRaisesRegex(ValueError,'Foreign, unidentified'):
+                with self.assertRaisesRegex(ValueError,'Foreign|Unidentified'):
                     game_restart.settle_owned_loaders(b)
             close.assert_not_called();stop.assert_not_called()
+
+    def test_exited_game_snapshot_without_identity_is_resampled_until_absent(self):
+        b,ident=self.loader_backend()
+        def processes():return [dict(pid=17,name='SkyrimVR.exe')] if self.clock<.4 else []
+        with patch.object(native,'processes',side_effect=processes), \
+             patch.object(native,'identity',return_value=None), \
+             patch.object(game_restart.time,'monotonic',side_effect=lambda:self.clock), \
+             patch.object(native,'close') as close, patch.object(native,'terminate') as stop:
+            game_restart.settle_owned_loaders(b)
+        self.assertGreaterEqual(self.clock,.4)
+        close.assert_not_called();stop.assert_not_called()
+
+    def test_unknown_snapshot_replaced_by_foreign_reused_pid_blocks_before_mutation(self):
+        b,ident=self.loader_backend()
+        with patch.object(native,'processes',return_value=[dict(pid=17,name='SkyrimVR.exe')]), \
+             patch.object(native,'identity',side_effect=[None,dict(pid=17,birth=99,path='SkyrimVR.exe')]), \
+             patch.object(game_restart.time,'monotonic',side_effect=lambda:self.clock), \
+             patch.object(native,'close') as close, patch.object(native,'terminate') as stop:
+            with self.assertRaisesRegex(ValueError,'Foreign'):game_restart.settle_owned_loaders(b)
+        self.assertLess(self.clock,1)
+        close.assert_not_called();stop.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()
