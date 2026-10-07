@@ -147,7 +147,7 @@ class MobilityProbeTests(unittest.TestCase):
             def phase(self,*args):pass
             def log(self,*args,**kwargs):pass
             def save(self):pass
-            def tool(self,name,args):
+            def tool(self,name,args,**kwargs):
                 self.calls.append((name,args))
                 if name=='inspect':return ({'cell':{'editorId':'VRPlayroom01'}} if len(self.calls)==1 else
                                           {'playerLoaded':True,'cell':{'editorId':'RealmLorkhan'}})
@@ -172,14 +172,14 @@ class MobilityProbeTests(unittest.TestCase):
             def phase(self,*args):pass
             def log(self,*args,**kwargs):pass
             def save(self):pass
-            def tool(self,name,args):
+            def tool(self,name,args,**kwargs):
                 return {'cell':{'editorId':'Other'}} if name=='inspect' else {'openMenus':['Main Menu']}
         session=Session()
         with patch.object(bootstrap.vr_probe,'guard_fixture_modal'), \
                 patch.object(bootstrap.vr_probe,'wait_test_cell',return_value={'playerLoaded':True,'cell':{'editorId':'RealmLorkhan'}}), \
                 patch.object(bootstrap.time,'monotonic',side_effect=iter(range(1000))), \
                 patch.object(bootstrap.time,'sleep'):
-            with self.assertRaisesRegex(AssertionError,'not ready'):
+            with self.assertRaises((AssertionError,TimeoutError)):
                 bootstrap.prepare_gameplay(session,{'cell':'RealmLorkhan'})
         self.assertNotIn('gameplayBootstrap',session.state)
 
@@ -190,7 +190,7 @@ class MobilityProbeTests(unittest.TestCase):
     def test_unknown_startup_screen_does_not_receive_input(self):
         class Session:
             def __init__(self): self.calls = []
-            def tool(self, name, args):
+            def tool(self, name, args, **kwargs):
                 self.calls.append((name, args))
                 return {'openMenus': ['Main Menu']}
         session=Session()
@@ -200,7 +200,7 @@ class MobilityProbeTests(unittest.TestCase):
     def test_calibration_input_requires_playroom_identity(self):
         class Session:
             def __init__(self): self.calls=[]
-            def tool(self, name, args):
+            def tool(self, name, args, **kwargs):
                 self.calls.append((name,args))
                 return {'openMenus':['CalibrationOptionMenu']} if name=='menu' else {'cell':{'editorId':'Other'}}
         session=Session()
@@ -214,7 +214,7 @@ class MobilityProbeTests(unittest.TestCase):
             def __init__(self): self.calls=[];self.menus=0
             def phase(self,name,seconds):pass
             def log(self,*args,**kwargs):pass
-            def tool(self,name,args):
+            def tool(self,name,args,**kwargs):
                 self.calls.append((name,args))
                 if name=='menu':
                     self.menus+=1
@@ -233,7 +233,7 @@ class MobilityProbeTests(unittest.TestCase):
             def __init__(self):self.calls=[]
             def phase(self,*args):pass
             def log(self,*args,**kwargs):pass
-            def tool(self,name,args):
+            def tool(self,name,args,**kwargs):
                 self.calls.append((name,args))
                 return {'openMenus':['CalibrationOptionMenu']} if name=='menu' else {'cell':{'editorId':'VRPlayroom01'}}
         session=Session()
@@ -268,7 +268,7 @@ class MobilityProbeTests(unittest.TestCase):
         class Session:
             state = {'id': 'test-owner'}
             def __init__(self): self.calls = []
-            def tool(self, name, args): self.calls.append((name, args))
+            def tool(self, name, args, **kwargs): self.calls.append((name, args))
         session = Session()
         def fail(): raise RuntimeError('read failed')
         with self.assertRaisesRegex(RuntimeError, 'read failed'):
@@ -283,7 +283,7 @@ class MobilityProbeTests(unittest.TestCase):
         class Session:
             state = {'id': 'test-owner'}
             def __init__(self): self.calls = []
-            def tool(self, name, args):
+            def tool(self, name, args, **kwargs):
                 self.calls.append(args)
                 raise RuntimeError('conflicting owner')
         session = Session()

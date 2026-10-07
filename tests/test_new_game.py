@@ -21,7 +21,7 @@ class Session:
     def phase(self, *args): pass
     def save(self): pass
     def log(self, *args, **kwargs): pass
-    def tool(self, name, args):
+    def tool(self, name, args, **kwargs):
         self.calls.append((name, args))
         if name == 'menu': return {'openMenus': ['Main Menu']}
         if name == 'inspect': return {'frame': 10}
@@ -56,7 +56,7 @@ class NewGameTests(unittest.TestCase):
             def phase(self, *args): pass
             def save(self): pass
             def log(self, name, **values): self.logs.append((name, values))
-            def tool(self, name, args):
+            def tool(self, name, args, **kwargs):
                 if name == 'inspect': return {'cell': {'editorId': 'RealmLorkhan'}}
                 if name == 'console': return {}
                 if name == 'menu' and args['action'] == 'list':
@@ -140,7 +140,7 @@ class NewGameTests(unittest.TestCase):
             def __init__(self): self.lists = 0; self.actions = []
             def phase(self, *args): pass
             def log(self, *args, **kwargs): pass
-            def tool(self, name, args):
+            def tool(self, name, args, **kwargs):
                 if name == 'inspect': return {'cell': {'editorId': 'VRPlayroom01'}}
                 if name == 'driver': self.actions.append(args['action']); return {}
                 self.lists += 1

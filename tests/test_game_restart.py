@@ -47,6 +47,7 @@ class RestartTests(unittest.TestCase):
             if tool=='console':self.old_live=False
             return {}
         b.call=call
+        session.tool=lambda name,args,timeout=12,deadline=None:call(name,args)
         self.frames=iter([3,4])
         def request(port,route,body=None,**kwargs):
             self.calls.append((route,body))

@@ -238,7 +238,7 @@ def perform(backend, req):
         from .game_restart import start
         from .bootstrap import prepare_startup_screen
         start(b)
-        prepare_startup_screen(BoundSession(b))
+        prepare_startup_screen(BoundSession(b), deadline=b.end)
         saved(b,tag) # Reverify the exact owned pair and native mapping in the new process.
         cursor=b.s.capture_probe_cursor()
         transition['cursorBefore']=cursor

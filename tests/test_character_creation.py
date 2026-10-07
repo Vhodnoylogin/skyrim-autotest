@@ -82,7 +82,7 @@ class CharacterTests(unittest.TestCase):
     def test_late_character_menu_resets_stability_before_readiness(self):
         clock=Clock(); session=CharacterSession(); session.stage='closed'; session.logs=[]
         original=session.tool
-        def tool(name,args):
+        def tool(name,args, **kwargs):
             if name=='inspect': return {'playerLoaded':True,'cell':{'editorId':'RealmLorkhan'}}
             if name=='menu' and args['action']=='list':
                 names=['RaceSex Menu'] if 1<=clock.now<2 else ['HUD Menu']
@@ -96,5 +96,6 @@ class CharacterTests(unittest.TestCase):
              patch.object(bootstrap.time,'sleep',clock.sleep), \
              patch.object(bootstrap,'complete_character_creation',side_effect=lambda s:clock.sleep(2)) as finish:
             bootstrap.wait_gameplay_ready(session,'RealmLorkhan',True)
-        finish.assert_called_once_with(session)
+        finish.assert_called_once()
+        self.assertIs(finish.call_args.args[0].session,session)
         self.assertGreaterEqual(clock.now,11)

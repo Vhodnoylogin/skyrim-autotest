@@ -277,3 +277,13 @@ Unavailable identities trigger read-only bounded resampling, never ownership
 inference or termination. Relaunch still requires the entire game/loader list
 to become empty. A later readable foreign/reused identity blocks immediately;
 an unreadable entry that persists beyond the wait blocks without any mutation.
+
+Common startup and quiet-world reads may wait when the exact pinned DevBench
+pre-execution timeout says a queued task was abandoned before starting. Supported
+reads are inspect state/scene, menu list/describe and Papyrus describe. Retain
+every failure and require an actual successful response within the original
+deadline; cap the first postrestart task-ready observation at35seconds. Generic
+HTTP504, started-task timeout, arbitrary server/transport failure and all
+mutations remain terminal. This is a readiness wait, never a repeated launch,
+load, button, answer or subject action. Eight-second quiet-world confirmation
+still follows the successful native reads.

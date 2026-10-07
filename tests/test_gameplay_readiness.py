@@ -19,7 +19,7 @@ class Session:
                                                    usesCursor=False, usesMenuContext=False,
                                                    freezeFramePause=False)])
         self.scene = scene or dict(playerLoaded=True, cell=dict(editorId='QASmoke'))
-    def tool(self, tool, args):
+    def tool(self, tool, args, **kwargs):
         self.calls.append((tool, args))
         return copy.deepcopy(self.menus if tool == 'menu' else self.scene)
     def log(self, *args, **kwargs): pass
@@ -57,7 +57,7 @@ class ReadinessTests(unittest.TestCase):
     def test_late_native_pause_resets_stable_interval(self):
         session, clock = Session(), Clock()
         original = session.tool
-        def tool(name, args):
+        def tool(name, args, **kwargs):
             result = original(name, args)
             if name == 'menu': result['menuStates'][0]['pausesGame'] = 3 <= clock.now < 4
             return result
@@ -74,7 +74,7 @@ class ReadinessTests(unittest.TestCase):
     def test_known_navigation_is_closed_once_then_world_stable_verified(self):
         session, clock = self.navigation(), Clock()
         original=session.tool
-        def tool(name,args):
+        def tool(name,args, **kwargs):
             result=original(name,args)
             if name=='menu' and args['action']=='close':
                 session.menus.update(openMenus=[],menuStates=[])

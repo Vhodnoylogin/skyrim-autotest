@@ -329,6 +329,8 @@ def wait_gameplay_ready(session, cell, new_game, deadline=None):
     """Require a quiet startup interval; late menus reset readiness."""
     from .platform import menus_block_gameplay
     deadline = min(time.monotonic() + 90, deadline) if deadline is not None else time.monotonic() + 90
+    from .readiness_reads import ReadinessSession
+    session = ReadinessSession(session, deadline)
     stable_since = None
     character_seen = False
     navigation_attempts = set()
@@ -369,10 +371,12 @@ def wait_gameplay_ready(session, cell, new_game, deadline=None):
     raise AssertionError('Initialized gameplay is not ready after stable startup/menu checks')
 
 
-def prepare_startup_screen(session):
+def prepare_startup_screen(session, deadline=None):
     """Common application-start transition, also used by an owned game restart."""
     session.phase('gameplay-startup-screen', 35)
-    end = time.monotonic() + 15
+    from .readiness_reads import ReadinessSession
+    end = min(time.monotonic()+35,deadline) if deadline is not None else time.monotonic()+35
+    session = ReadinessSession(session, end)
     while True:
         scene = session.tool('inspect', {'kind': 'scene'})
         if scene.get('cell', {}).get('editorId') != 'VRPlayroom01':

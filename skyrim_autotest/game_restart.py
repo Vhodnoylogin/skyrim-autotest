@@ -141,7 +141,8 @@ def start(backend):
                 state.update(game=game,port=game_port)
                 state['gameRestartTransition'].update(stage='loading',afterGame=game)
                 s.save()
-                b.call('inspect',{'kind':'state'})
+                from .readiness_reads import ReadinessSession
+                ReadinessSession(s,min(b.end,time.monotonic()+35)).tool('inspect',{'kind':'state'})
                 s.log('owned-game-restart-task-ready',beforeGame=before,afterGame=game,health=health)
                 return
             first=marker

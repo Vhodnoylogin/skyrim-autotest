@@ -14,7 +14,7 @@ class FixtureTransitionTests(unittest.TestCase):
                     def phase(self, *args): pass
                     def log(self, *args, **kwargs): pass
                     def save(self): pass
-                    def tool(self, name, args):
+                    def tool(self, name, args, **kwargs):
                         timeline.append((name, args))
                         return {'cell': {'editorId': 'VRPlayroom01'}, 'frame': 100}
                 ready_scene = {'playerLoaded': True, 'cell': {'editorId': 'QASmoke'}}
