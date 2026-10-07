@@ -45,6 +45,12 @@ def main():
     def verify(label,command):
         call(command,empty,env)
         checks.append(label)
+    for name in ('RuntimeFixtures.cpp','RuntimeFixtures.h'):
+        relative='native/devbench/'+name
+        if hashlib.sha256((portable/relative).read_bytes()).hexdigest()!=manifest['sourceFiles'][relative]:
+            raise RuntimeError('Native integration input missing or changed: '+relative)
+    checks.append('portable-owned-native-integration-inputs')
+    verify('portable-native-recipe-unrelated-cwd',[sys.executable,str(portable/'tools/apply_devbench_fixture_provider.py'),'--help'])
     verify('portable-version-unrelated-cwd',[sys.executable,str(portable/'run.py'),'--version'])
     verify('portable-agent-guide',[sys.executable,str(portable/'run.py'),'guide'])
     verify('portable-init-unrelated-cwd',[sys.executable,str(portable/'run.py'),'init','--directory',str(work/'config')])

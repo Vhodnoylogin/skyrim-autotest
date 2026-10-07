@@ -10,6 +10,31 @@ from skyrim_autotest import restart_budget
 
 
 class RestartTests(unittest.TestCase):
+    def test_offline_fixture_callback_runs_after_exit_before_exact_single_launch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            b,new,request=self.backend(Path(tmp))
+            def prepare():
+                self.assertFalse(self.old_live)
+                self.assertFalse(any(route=='run' for route,args in self.calls))
+                self.calls.append(('fixture-write',None))
+            with patch.object(native,'alive',side_effect=lambda i:self.old_live if i['pid']==17 else True), \
+                 patch.object(native,'processes',return_value=[]),patch.object(runner,'request',side_effect=request):
+                game_restart.start(b,before_launch=prepare)
+            routes=[route for route,args in self.calls]
+            self.assertEqual(routes.count('fixture-write'),1)
+            self.assertLess(routes.index('console'),routes.index('fixture-write'))
+            self.assertLess(routes.index('fixture-write'),routes.index('run'))
+
+    def test_fixture_write_fault_prevents_relaunch_and_preserves_failed_owned_transition(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            b,new,request=self.backend(Path(tmp))
+            with patch.object(native,'alive',side_effect=lambda i:self.old_live if i['pid']==17 else True), \
+                 patch.object(native,'processes',return_value=[]),patch.object(runner,'request',side_effect=request):
+                with self.assertRaisesRegex(ValueError,'fixture failed'):
+                    game_restart.start(b,before_launch=lambda:(_ for _ in ()).throw(ValueError('fixture failed')))
+            self.assertFalse(any(route=='run' for route,args in self.calls))
+            self.assertFalse(b.s.state['gameRestartTransition']['completed'])
+
     def state(self):
         old={'pid':17,'birth':1,'path':'SkyrimVR.exe'}
         return {'configuration':{'allow_owned_save_load':True},'game':old,

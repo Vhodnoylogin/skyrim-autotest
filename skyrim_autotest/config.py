@@ -37,11 +37,13 @@ def configure(value, base=None):
     missing = sorted(k for k in REQUIRED if not value.get(k))
     if missing:
         raise ConfigurationError("Missing configuration fields: " + ", ".join(missing))
-    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry"}
+    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings"}
     if unknown:
         raise ConfigurationError("Unknown configuration fields: " + ", ".join(sorted(unknown)))
     base = Path(base or Path.cwd()).resolve()
     result = dict(value)
+    if 'native_runtime_fixtures' in result and type(result['native_runtime_fixtures']) is not bool:
+        raise ConfigurationError('native_runtime_fixtures must be boolean')
     if 'physical_grip_geometry' in result:
         geometry=result['physical_grip_geometry']
         if not isinstance(geometry,dict) or set(geometry)!={'palmPositionGameUnits','palmDirection','nearCastDistanceMetres'}:
@@ -91,6 +93,42 @@ def configure(value, base=None):
         raise ConfigurationError('collected_files must be explicit snapshotted extra_files')
     if len(result['collected_files']) != len({p.casefold() for p in result['collected_files']}):
         raise ConfigurationError('Duplicate collected_files')
+    bindings=result.get('subject_state_bindings',{})
+    if not isinstance(bindings,dict) or len(bindings)>16:raise ConfigurationError('Bounded subject state bindings object required')
+    normalized_bindings={}
+    write_fields={'settingsDestination','bodySlotsDestination','bodySlotsSource','handednessProfileIni'}
+    destinations=set()
+    for subject,binding in bindings.items():
+        if not isinstance(subject,str) or not 1<=len(subject)<=96 or any(ord(c)<32 for c in subject):raise ConfigurationError('Stable subject binding name required')
+        if (not isinstance(binding,dict) or 'inspectKind' not in binding or set(binding)-{'inspectKind'}-write_fields or
+                not isinstance(binding['inspectKind'],str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,96}',binding['inspectKind'])):
+            raise ConfigurationError('Subject binding requires exact inspect extension key')
+        normalized_bindings[subject]=binding=dict(binding)
+        if set(binding)&write_fields:
+            if (not write_fields<=set(binding) or not isinstance(binding['handednessProfileIni'],str) or
+                    binding['handednessProfileIni'].lower() not in ('skyrimprefs.ini','skyrimvr.ini')):
+                raise ConfigurationError('Complete owned subject fixture write binding required')
+            for key,suffix in (('settingsDestination','.json'),('bodySlotsDestination','.ini')):
+                relative=binding[key]
+                if (not isinstance(relative,str) or PureWindowsPath(relative).is_absolute() or PureWindowsPath(relative).drive or
+                        not relative.lower().startswith('skse/plugins/') or not relative.lower().endswith(suffix) or
+                        any(part in ('','.','..') for part in relative.replace('\\','/').split('/'))):
+                    raise ConfigurationError('Fixture destination must be a safe explicit overwrite SKSE/Plugins path')
+                target=Path(result['overwrite'])/relative
+                if str(target).casefold() in destinations:raise ConfigurationError('Conflicting fixture write destinations')
+                destinations.add(str(target).casefold())
+                for path in (target,target.with_name(target.name+'.autotest-fixture.tmp')):
+                    resolved=str(path.resolve())
+                    if resolved.casefold() not in {x.casefold() for x in result['extra_files']}:result['extra_files'].append(resolved)
+            source=binding['bodySlotsSource']
+            if (not isinstance(source,dict) or set(source)!={'path','sha256'} or not isinstance(source['path'],str) or
+                    not isinstance(source['sha256'],str) or not re.fullmatch(r'[0-9a-f]{64}',source['sha256'])):
+                raise ConfigurationError('Pinned immutable external body-slot baseline required')
+            path=(base/Path(source['path'])).resolve()
+            if any(path.is_relative_to(Path(result[key])) for key in ('mods','profiles','overwrite','game')):
+                raise ConfigurationError('Body-slot baseline must be an immutable external copy')
+            binding['bodySlotsSource']={**source,'path':str(path)}
+    result['subject_state_bindings']=normalized_bindings
     plugins = result.setdefault("staged_plugins", [])
     if not isinstance(plugins, list):
         raise ConfigurationError("staged_plugins must be a list")

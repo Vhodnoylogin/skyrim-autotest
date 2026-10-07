@@ -64,7 +64,7 @@ def settle_owned_loaders(backend):
     if rows: raise ValueError('Exact owned loader did not stop; refusing restart launch')
 
 
-def start(backend):
+def start(backend,before_launch=None):
     from . import native
     from .runner import request, read_json, GAME_NAMES
     b,s,state=backend,backend.s,backend.s.state
@@ -114,6 +114,11 @@ def start(backend):
     if native.alive(before):raise ValueError('Exact owned game did not stop; no relaunch')
     settle_owned_loaders(b)
     bridge_ready()
+    if before_launch is not None:
+        b.remaining()
+        before_launch()
+        b.remaining()
+        bridge_ready()
     update(state, stage='launching')
     state.pop('port',None);state.pop('game',None)
     state['launchIntents']['game']={'at':time.time(),'directory':state['configuration']['game']}

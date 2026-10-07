@@ -122,3 +122,16 @@ launch and validates the loaded native setting before any save or load. Generate
 ESS/SKSE files stay in that disposable profile and its evidence archive. Require
 an exact live qualification of the opt-in configuration; it does not enable
 process restart or access to owner saves.
+
+Additional opt-in candidates are `native_runtime_fixtures:true` and
+`subject_state_bindings`. Read docs/runtime-fixtures.md and
+docs/subject-state-provider.md before configuring/qualifying them. A read-only
+binding maps a stable subject name to `inspectKind`; owned settings variants also
+require exact overwrite-relative JSON/INI destinations, an allowed private
+profile INI name and an external immutable slot-baseline path/SHA256. Configuration
+automatically snapshots the declared overwrite targets and temporary files.
+Never point the baseline at mutable mods/profiles/overwrite or edit installed
+subject files during a run. Bytes written and native settings observed are
+separate evidence. Collection pins every owned variant before restoration.
+These capabilities do not install their providers, release orders or grant
+launch authority. They remain pending live qualification in the paused setup.

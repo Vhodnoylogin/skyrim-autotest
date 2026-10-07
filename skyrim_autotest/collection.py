@@ -68,6 +68,14 @@ def collect(session, segment=None):
     # Backup files/settings are never published by enumerating all snapshots.
     for index, path in enumerate(P.value.get('collected_files', [])):
         copy(path, f'output-{index:03d}-{Path(path).name}', 'declared-output', required=True)
+    for index, record in enumerate(session.state.get('fixtureSettingsWrites',{}).values()):
+        path=Path(record['path'])
+        allowed=({str(Path(p).resolve()).casefold() for p in P.value.get('extra_files',[])} if not record.get('profileLocal')
+                 else {str((Path(session.state['testProfile'])/binding['handednessProfileIni']).resolve()).casefold()
+                       for binding in P.value.get('subject_state_bindings',{}).values() if 'handednessProfileIni' in binding})
+        if str(path.resolve()).casefold() not in allowed:error(path,'Fixture setting output not explicitly configured')
+        elif not path.is_file() or sha(path)!=record['sha256']:error(path,'Fixture setting output changed after owned write')
+        else:copy(path,f'fixture-settings-{index:03d}-{path.name}','fixture-settings',required=True)
     if segment is None:
         # The old consumer deliberately accepts only flat, safe artifact names.
         # Project declared restart artifacts into this manifest without weakening it.

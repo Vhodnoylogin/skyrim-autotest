@@ -181,6 +181,13 @@ outside the checkout. Fresh extraction and wheel installation checks are in
 programs, archives, source headers, saves or tokens. `dependencies.json` records
 how to reacquire dependencies and honestly leaves unknown hashes unset.
 
+The portable source also includes our native fixture integration and its
+external-build recipes; the wheel provides the runtime clients and docs.
+See [runtime fixtures](docs/runtime-fixtures.md) and
+[effective subject state](docs/subject-state-provider.md) for the new opt-in
+candidates and required live qualification. Structural support for a scenario
+is not evidence that its gameplay assertions passed.
+
 Fault injection is available only for deliberate recovery acceptance:
 `run ... --fault after-setup`, `after-ready` or `while-held`. These runs are
 expected to fail; guardian logs and verified restoration are their acceptance

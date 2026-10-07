@@ -67,6 +67,15 @@
     "status": "Native215 tests and eight decoder cases passed; Body live qualification pending. Not an upstream release or an installed-version claim.",
     "note": "Generated binary hashes may differ on another build; pin the resulting matching DLL/PDB. No foreign binaries/source bundled."
   },
+  "runtimeFixtureCandidate": {
+    "source": "https://github.com/Vhodnoylogin/devbench.git",
+    "commit": "fa9c998868471aaa78c694f2e8759b4dc51c50be",
+    "commonlibCommit": "9106d402cfc7dcbc5bf7458be6748af19d7fc914",
+    "rebuild": "python tools/build_devbench_fork.py --runtime-fixtures --build-dir D:/svb-fixture-build",
+    "ownedIntegrationSource": "native/devbench; tools/apply_devbench_fixture_provider.py",
+    "status": "Native DLL compiled offline; not installed or game-qualified. Requires separate native subject state binding for effective settings/assignment counts.",
+    "note": "Use an external short Windows build path. Record actual DLL/PDB, compiler and dependency-lock hashes; do not assume bit-identical builds. No third-party source/binary bundled."
+  },
   "driver": {
     "source": "https://github.com/DubiousDuo/VR-Emulator-Driver---SkyrimVR-Devkit",
     "commit": "dedb8ab33fc46b25ecee191f882951c064422505",

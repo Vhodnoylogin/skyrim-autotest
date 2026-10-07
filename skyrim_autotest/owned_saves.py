@@ -207,7 +207,7 @@ def saved(backend, tag):
     return record
 
 
-def perform(backend, req):
+def perform(backend, req, restart_prepare=None):
     b, state, tag = backend, backend.s.state, req['saveTag']
     target = directory(b)
     records = state.setdefault('ownedSaves', {})
@@ -251,6 +251,8 @@ def perform(backend, req):
     old_tags = sorted(state.get('platformReferences', {}))
     state.setdefault('invalidatedReferenceTags', []).extend(old_tags)
     state['platformReferences'] = {}
+    state['invalidatedRuntimeItemTags']=sorted(set(state.get('invalidatedRuntimeItemTags',[]))|set(state.get('runtimeItems',{})))
+    state['runtimeItems']={}
     b.s.invalidate_probe_reference('owned save load requested')
     state['gameplayBootstrap']['completed'] = False
     history=state.setdefault('ownedLoadHistory',[])
@@ -260,11 +262,12 @@ def perform(backend, req):
     history.append(copy.deepcopy(transition))
     b.s.save()
     if state.get('hardwareFrame'): b.call('driver', {'action':'release'})
-    restarting=req['action']=='restart_game'
+    restarting=req['action'] in ('restart_game','restart_with_fixture_subject_settings')
     if restarting:
         from .game_restart import start
         from .bootstrap import prepare_startup_screen
-        start(b)
+        if restart_prepare is None:start(b)
+        else:start(b,before_launch=restart_prepare)
         prepare_startup_screen(BoundSession(b), deadline=b.end)
         saved(b,tag) # Reverify the exact owned pair and native mapping in the new process.
         cursor=b.s.capture_probe_cursor()

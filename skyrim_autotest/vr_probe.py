@@ -519,7 +519,7 @@ def execute(session, scenario):
     gripping = copy.deepcopy(moved)
     button = scenario.get('button', 'grip')
     mask = {'grip': 4, 'trigger': 1 << 33}[button]
-    gripping['right']['controller'].update(pressed=mask, touched=mask, packetNumber=1200)
+    gripping['right']['controller'].update(pressed=mask, touched=mask & (1 << 32), packetNumber=1200)
     if button == 'trigger':
         gripping['right']['controller']['axes'][1] = [1, 0]
     session.phase('prove-controller-grab', 60)

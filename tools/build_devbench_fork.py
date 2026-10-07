@@ -12,20 +12,24 @@ from build_devbench_compat import sha, XMAKE_URL, XMAKE_SHA
 SOURCE = 'https://github.com/Vhodnoylogin/devbench.git'
 COMMIT = '0d8caaec64ff4cfc904c1ff5914533c295003119'
 COMMONLIB = '9106d402cfc7dcbc5bf7458be6748af19d7fc914'
+RUNTIME_FIXTURES = 'fa9c998868471aaa78c694f2e8759b4dc51c50be'
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build-dir', type=Path, required=True)
-    output = parser.parse_args().build_dir.resolve()
+    parser.add_argument('--runtime-fixtures', action='store_true', help='Build the unqualified native runtime ALCH fixture candidate')
+    args = parser.parse_args()
+    output = args.build_dir.resolve()
+    commit = RUNTIME_FIXTURES if args.runtime_fixtures else COMMIT
     if output.is_relative_to(ROOT) or any((p / '.git').exists() for p in [output, *output.parents]):
         raise ValueError('Build directory must be new and outside Git')
     output.mkdir(parents=True, exist_ok=False)
     env = os.environ.copy()
     for key in ('SkyrimPluginTargets', 'COMMONLIB_PREBUILT', 'GITHUB_ACTIONS'):
         env.pop(key, None)
-    manifest = {'sourceRepository': SOURCE, 'sourceCommit': COMMIT, 'commonlibCommit': COMMONLIB,
+    manifest = {'sourceRepository': SOURCE, 'sourceCommit': commit, 'commonlibCommit': COMMONLIB,
                 'completed': False, 'liveQualification': 'pending', 'installationChanged': False,
                 'xmake': {'url': XMAKE_URL, 'sha256': XMAKE_SHA}}
     def save():
@@ -52,7 +56,7 @@ def main():
         xmake = str(matches[0])
         source = output / 'source'
         run(['git', 'clone', '--no-checkout', SOURCE, str(source)])
-        run(['git', 'checkout', COMMIT], source)
+        run(['git', 'checkout', commit], source)
         run(['git', 'submodule', 'update', '--init', '--recursive'], source)
         actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source / 'lib/commonlibsse-ng', text=True).strip()
         if actual != COMMONLIB:

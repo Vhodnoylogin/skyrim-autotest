@@ -12,6 +12,17 @@ from skyrim_autotest import config, runner, hardware, queue
 from skyrim_autotest.scenarios import validate, resolve_args, check, execute
 
 class PortabilityTests(unittest.TestCase):
+    def test_subject_write_binding_snapshots_only_declared_overwrite_targets_and_temps(self):
+        binding={'inspectKind':'any_state','settingsDestination':'SKSE/Plugins/any.json',
+                 'handednessProfileIni':'skyrimprefs.ini','bodySlotsDestination':'SKSE/Plugins/slots.ini',
+                 'bodySlotsSource':{'path':str(self.root/'pinned-baseline.ini'),'sha256':'0'*64}}
+        value=config.configure(dict(self.value,subject_state_bindings={'Any Subject':binding}))
+        self.assertEqual(len(value['extra_files']),4)
+        self.assertTrue(all(Path(p).is_relative_to(Path(value['overwrite'])) for p in value['extra_files']))
+        for change in ({'settingsDestination':'../escape.json'},{'handednessProfileIni':'../skyrimprefs.ini'},
+                       {'bodySlotsSource':{'path':str(Path(value['mods'])/'mutable.ini'),'sha256':'0'*64}}):
+            with self.assertRaises(config.ConfigurationError):config.configure(dict(self.value,subject_state_bindings={'Any Subject':dict(binding,**change)}))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

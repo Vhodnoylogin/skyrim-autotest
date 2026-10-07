@@ -27,6 +27,9 @@ class Backend:
             return None
         return self.values.get((function, tuple(args or [])), self.values.get(function))
 
+    def pap_read_batch(self,calls):
+        return [self.pap(c['script'],c['function'],c['args']) for c in calls]
+
 
 class SpeechDomainTests(unittest.TestCase):
     def test_roundtrip_requires_new_correlated_native_pong(self):
@@ -102,6 +105,32 @@ class SpeechDomainTests(unittest.TestCase):
             with self.assertRaises(ValueError):domain.validate('world.read',dict(req,idRange=bad))
         with self.assertRaises(ValueError):domain.validate('object.perform',req)
         with self.assertRaises(ValueError):domain.validate('object.perform',{'action':domain.ACTION,'count':True,'target':'speech-broker'})
+
+    def test_utterance_namespace_selection_reads_actual_getters_without_demo_routing(self):
+        b=Backend();b.values={'GetText':'heard','GetTopic':'topic','GetOutcome':'accepted',
+            'GetWinner':'MySubscriber','GetEngineId':'native','GetLatencyMs':12,'GetScore':.7,
+            'GetComplete':1.,'IsFinal':True,('GetVocabularyScore',(1,'MySubscriber')):.8,
+            ('GetDenyReason',(1,'MySubscriber')):''}
+        req={'observation':'speech.utterances','idRange':{'first':1,'last':1},'subscriberNamespaces':['MySubscriber']}
+        domain.validate('world.read',req)
+        row=domain.observe(b,req)['speech']['utterances']['records'][0]
+        self.assertEqual(row['subscribers'],{'MySubscriber':{'vocabularyScore':.8,'denial':''}})
+        self.assertNotIn('greedyVocabulary',row)
+        self.assertFalse(any('DemoGreedy' in (c[2] or []) for c in b.calls))
+        self.assertEqual(sum(c[1]=='GetText' for c in b.calls),2)
+        for bad in ([],['X','X'],['1','2','3','4']):
+            with self.assertRaises(ValueError):domain.validate('world.read',dict(req,subscriberNamespaces=bad))
+
+    def test_evicted_utterance_during_getters_is_unavailable(self):
+        b=Backend();b.values={('GetText',(1,)):'original',('GetVocabularyScore',(1,'N')):.8}
+        old=b.pap_read_batch
+        def batch(calls):
+            if any(c['function']=='GetVocabularyScore' for c in calls):b.values[('GetText',(1,))]='replacement'
+            return old(calls)
+        b.pap_read_batch=batch
+        with self.assertRaisesRegex(ValueError,'changed'):
+            domain.observe(b,{'observation':'speech.door_recognition','idRange':{'first':1,'last':1},
+                              'namespace':'N','minimumVocabularyScoreExclusive':.5})
 
 
 if __name__ == '__main__':unittest.main()

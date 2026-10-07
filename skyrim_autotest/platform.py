@@ -11,9 +11,9 @@ import time
 READS = {'state.read', 'player.read', 'world.read', 'menu.read'}
 ACTIONS = {
     'input.perform': {'save_game', 'load_game', 'restart_game'},
-    'controller.perform': {'pose_and_grip', 'reach_and_grip_reference', 'release_reference', 'release_all'},
+    'controller.perform': {'pose_and_grip', 'reach_and_grip_reference', 'release_reference', 'release_all','pose_hand_at_body_slot'},
     'object.perform': {'create_fixture_reference', 'place_fixture_reference_in_hand', 'tag_held_reference',
-                       'set_fixture_inventory_quantity', 'set_fixture_health'},
+                       'set_fixture_inventory_quantity', 'set_fixture_health', 'save_game'},
 }
 OBSERVATIONS = {'form.identity', 'body_slot.settings', 'body_slot.display',
                 'hand.held_item', 'inventory.quantity', 'inventory.alchemy',
@@ -48,6 +48,10 @@ def validate(args):
     if actor_domain.validate(operation, req): return
     from . import speech_domain
     if speech_domain.validate(operation, req): return
+    from . import runtime_items
+    if runtime_items.validate(operation,req):return
+    from . import subject_state
+    if subject_state.validate(operation,req):return
     if operation in ('state.read', 'player.read') and req:
         raise ValueError('State/player read takes no request')
     if operation == 'world.read' and req.get('observation') not in OBSERVATIONS:
@@ -64,13 +68,14 @@ def validate(args):
         'form.alchemy': ({'observation', 'form'}, set()),
         'body_slot.settings': ({'observation', 'slot'}, set()),
         'body_slot.display': ({'observation', 'slot'}, set()),
-        'hand.held_item': ({'observation', 'hand', 'continuityWindowSeconds'}, {'referenceTag'}),
+        'hand.held_item': ({'observation', 'hand', 'continuityWindowSeconds'}, {'referenceTag','item'}),
         'inventory.quantity': ({'observation', 'owner', 'item', 'units'}, set()),
         'inventory.alchemy': ({'observation', 'owner'}, set()),
         'reference.state': ({'observation', 'referenceTag'}, set()),
         'reference.physics': ({'observation', 'referenceTag'}, set()),
         'pose_and_grip': ({'action', 'hand', 'grip', 'durationSeconds', 'trackingPosition',
                            'trackingOrientation', 'otherHandPosition', 'referenceHeadPosition'}, set()),
+        'pose_hand_at_body_slot': ({'action','hand','slot','grip','offset','durationSeconds','targetBasis','avoidMouth'},set()),
         'reach_and_grip_reference': ({'action', 'hand', 'grip', 'holdSeconds', 'maximumReachMetres', 'referenceTag'}, set()),
         'release_reference': ({'action', 'hand', 'referenceTag', 'settleSeconds', 'zone'}, set()),
         'release_all': ({'action'}, {'settleSeconds'}),
@@ -85,14 +90,14 @@ def validate(args):
         required, optional = selectors[selector]
         if not required <= set(req) or set(req) - required - optional:
             raise ValueError('Semantic request contains unsupported/missing fields')
-    if operation == 'input.perform' and req.get('scope') != 'owned-disposable-profile':
+    if (operation == 'input.perform' or req.get('action') == 'save_game') and req.get('scope') != 'owned-disposable-profile':
         raise ValueError('Save/load requires owned-disposable-profile scope')
     for key in ('saveTag', 'afterSaveTag'):
         if key in req and (not isinstance(req[key], str) or not re.fullmatch(r'[a-z][a-z0-9-]{0,31}', req[key])):
             raise ValueError('Invalid owned save tag')
     if 'owner' in req and req['owner'] != 'player': raise ValueError('Only player inventory supported')
     if operation == 'menu.read' and req: raise ValueError('Only unfiltered menu read supported')
-    if req.get('action') == 'create_fixture_reference' and req.get('placement') != 'settled reachable surface away from slot 13 and mouth':
+    if req.get('action') == 'create_fixture_reference' and req.get('placement') not in ('settled reachable surface away from slot 13 and mouth','settled reachable surface away from pouch and mouth','settled reachable surface away from body slots and mouth'):
         raise ValueError('Unsupported fixture placement specification')
     if req.get('action') == 'place_fixture_reference_in_hand' and req.get('keepGripClosed') is not True:
         raise ValueError('Fixture hand seed requires explicit closed grip')
@@ -111,6 +116,7 @@ def validate(args):
     for key in ('item', 'form'):
         if key in req:
             form = req[key]
+            if runtime_items.selector(form):continue
             if not isinstance(form, dict) or not re.fullmatch(r'[A-Za-z0-9 _.-]+\.(esm|esp)', form.get('plugin', ''), re.I) or not re.fullmatch(r'[0-9a-fA-F]{1,6}', form.get('localId', '')):
                 raise ValueError('Form requires plugin and local hex ID')
     if 'quantityItems' in req and (type(req['quantityItems']) is not int or not 0 <= req['quantityItems'] <= 1000):
@@ -118,6 +124,11 @@ def validate(args):
     for key in ('durationSeconds', 'holdSeconds', 'settleSeconds', 'continuityWindowSeconds'):
         if key in req: number(req[key], 0, 10)
     if 'maximumReachMetres' in req: number(req['maximumReachMetres'], .01, 1)
+    if req.get('action')=='pose_hand_at_body_slot':
+        from .body_scene import TARGET_BASIS
+        if not 1<=req['slot']<=14 or req['avoidMouth'] is not True or req['targetBasis']!=TARGET_BASIS:
+            raise ValueError('Actual VRIK slot centre and explicit mouth avoidance required')
+        vector(req['offset'])
     if req.get('action') == 'pose_and_grip':
         for key in ('trackingPosition', 'otherHandPosition', 'referenceHeadPosition'): vector(req[key])
         q = req.get('trackingOrientation', {}).get('quaternionXYZW')
@@ -154,7 +165,13 @@ class Backend:
         if seconds >= self.remaining(): raise TimeoutError('Insufficient operation time for settling')
         time.sleep(seconds)
 
+    def pap_read_batch(self, calls):
+        from .read_batch import execute
+        return execute(self.s, calls, self.end)
+
     def resolve(self, spec):
+        from . import runtime_items
+        if runtime_items.selector(spec):return runtime_items.resolve(self,spec)
         observed = self.pap('Game', 'GetFormFromFile', [int(spec['localId'], 16), spec['plugin']])
         if not isinstance(observed, dict) or not observed.get('formId'):
             raise ValueError('Required form not resolved from installed plugin')
@@ -165,6 +182,10 @@ class Backend:
         return observed['formId']
 
     def item(self, reference):
+        from .config import P
+        if P.value.get('native_runtime_fixtures') is True:
+            from .runtime_items import identity
+            return identity(self,reference,reference=True)
         base = self.pap('ObjectReference', 'GetBaseObject', target=reference)
         if not isinstance(base, dict) or not base.get('formId'):
             raise ValueError('Reference base identity unavailable')
@@ -369,6 +390,9 @@ class Backend:
             value['quantityBasis'] = 'native reference count after held sampling; sequential non-atomic read'
             value['quantityProviderObservation'] = raw
         if 'referenceTag' in req: value['matchesRequestedReference'] = first == self.tagged(req)
+        if 'item' in req:
+            wanted=self.resolve(req['item'])
+            value['matchesRequestedItem']=bool(first and int(value['item']['runtimeId'],16)==int(wanted,16))
         if 'probeObject' in self.s.state: self.guard_world()
         return {'hand': value}
 
@@ -412,6 +436,8 @@ class Backend:
                             'basis': 'native Potion and MagicEffect queries; sequential non-atomic snapshot'}}
 
     def observe(self, req):
+        from . import subject_state
+        if req.get('observation')=='subject.settings':return subject_state.observe(self,req['subject'])
         from . import speech_domain
         if req.get('observation') in speech_domain.OBSERVATIONS: return speech_domain.observe(self, req)
         if 'quantity' in req:
@@ -443,7 +469,11 @@ class Backend:
             if allow not in (0, 1) or type(allow) not in (int, float):
                 raise ValueError('Slot boolean value is not exactly zero or one')
             for coordinate in coords.values(): number(coordinate['gameUnits'], -100000, 100000)
-            return {'body_slot': {'allowSmall': bool(allow), 'position': coords}}
+            result={'body_slot': {'allowSmall': bool(allow), 'position': coords}}
+            from .config import P
+            if P.value.get('subject_state_bindings'):
+                result['body_slot']['suspended']=subject_state.slot_suspended(self,slot)
+            return result
         ref = self.tagged(req)
         if kind == 'reference.physics':
             raw = self.call('inspect', {'kind': 'world_observer', 'physics': {'refs': [ref]}})
@@ -473,6 +503,9 @@ class Backend:
 
     def controller(self, req):
         action = req['action']
+        if action=='pose_hand_at_body_slot':
+            from .body_scene import pose
+            return pose(self,req)
         if action == 'release_all':
             observed = self.call('driver', {'action': 'release'})
             self.pause(req.get('settleSeconds', 0))
@@ -575,7 +608,7 @@ class Backend:
             if math.dist(hand_position, current_target) >= 3:
                 raise AssertionError('Fixture reference moved away before physical grip')
         frame[hand]['controller'].update(pressed=4 if grip == 'closed' else 0,
-                                         touched=4 if grip == 'closed' else 0,
+                                         touched=0,
                                          axes=[[0,0] for _ in range(5)])
         if action == 'pose_and_grip':
             from .platform_math import pose_frames
@@ -605,6 +638,10 @@ class Backend:
 
     def mutate(self, req):
         action = req['action']
+        from . import subject_state
+        if action==subject_state.ACTION:return subject_state.perform(self,req)
+        from . import runtime_items
+        if action==runtime_items.ACTION:return runtime_items.create(self,req)
         from . import actor_domain
         if action in actor_domain.ACTIONS: return actor_domain.perform(self, req)
         from . import speech_domain
@@ -648,7 +685,7 @@ class Backend:
         if action == 'place_fixture_reference_in_hand':
             ref = self.tagged(req)
             frame = self.frame()
-            frame[req['hand']]['controller'].update(pressed=4, touched=4)
+            frame[req['hand']]['controller'].update(pressed=4, touched=0)
             self.publish(frame, req.get('settleSeconds', 1.2))
             self.pap('HiggsVR', 'GrabObject', [{'form': ref}, req['hand'] == 'left'])
             self.pause(req.get('settleSeconds', 1.2))
@@ -661,6 +698,11 @@ class Backend:
         if len(references) >= 16:
             raise ValueError('Fixture reference limit16 reached')
         placement_slot=len(references)
+        generic_placement=req.get('placement')!='settled reachable surface away from slot 13 and mouth'
+        if generic_placement:
+            from .body_scene import plan_placement
+            plan_placement(self,'settled reachable surface away from pouch and mouth')
+            placement_slot=self._generic_placement_index
         if references:
             self.guard_world()
         if req['quantityItems'] not in (1, 5): raise ValueError('Only fixture reference quantities1or5 are supported')
@@ -719,6 +761,9 @@ class Backend:
                 last = point
             self.pause(.1)
         self.guard_world()
+        if generic_placement:
+            from .body_scene import verify_settled
+            verify_settled(self,ref)
         return {'reference': {'id': ref, 'settledPositionGameUnits': last}}
 
 
@@ -770,7 +815,7 @@ def execute(session, args, deadline):
         result = observe_actor(backend, {'reference': '0x00000014', 'base': '0x00000007'})
         result.update(player={'health': {'points': raw['actorValues']['health']['current']}}, playerObservation=raw)
         return result
-    if op == 'input.perform':
+    if op == 'input.perform' or (op == 'object.perform' and req['action'] == 'save_game'):
         from .owned_saves import perform
         return perform(backend, req)
     if op == 'world.read': return backend.observe(req)

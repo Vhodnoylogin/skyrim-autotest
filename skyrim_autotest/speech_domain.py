@@ -20,7 +20,13 @@ def validate(operation, req):
     if selector in ('speech.utterances', 'speech.door_recognition', 'speech.door_awards'): expected |= {'idRange'}
     if selector in ('speech.door_recognition', 'speech.door_awards'): expected |= {'namespace', 'minimumVocabularyScoreExclusive'}
     if selector == ACTION: expected = {'action', 'count', 'target'}
-    if set(req) != expected: raise ValueError('Unsupported/missing speech fields')
+    optional = {'subscriberNamespaces'} if selector == 'speech.utterances' else set()
+    if not expected <= set(req) or set(req)-expected-optional: raise ValueError('Unsupported/missing speech fields')
+    if 'subscriberNamespaces' in req:
+        names=req['subscriberNamespaces']
+        if not isinstance(names,list) or not 1<=len(names)<=3 or len(set(names))!=len(names):
+            raise ValueError('One to three unique subscriber namespaces required')
+        for name in names:text(name,96,pattern=r'[A-Za-z0-9 _.-]+')
     if 'idRange' in req:
         scope = req['idRange']
         if (not isinstance(scope, dict) or set(scope) != {'first', 'last'} or
@@ -53,6 +59,10 @@ def strings(value):
 
 
 def native(b, fn, args=None): return b.pap('SpeechBroker', fn, args)
+
+
+def reads(b, calls):
+    return b.pap_read_batch([{'script':'SpeechBroker','function':fn,'args':args} for fn,args in calls])
 
 
 def log_file(): return P.skse_logs / 'SpeechBroker.log'
@@ -125,37 +135,55 @@ def observe(b, req):
     kind = req['observation']
     if kind == 'speech.event_roundtrip': return roundtrip(b)
     if kind == 'speech.broker.status':
-        available = native(b, 'IsAvailable'); version = native(b, 'GetInterfaceVersion')
+        available, version, adapters, source = reads(b,[('IsAvailable',[]),('GetInterfaceVersion',[]),
+                                                      ('GetAdapters',[]),('GetSource',['asr'])])
         if type(available) is not bool or type(version) is not int or version <= 0:
             raise ValueError('Native broker availability/version unavailable')
         return {'speech': {'broker': {'available': available, 'interfaceVersion': version,
-                'adapters': strings(native(b, 'GetAdapters')), 'asrSource': text(native(b, 'GetSource', ['asr']), 1024)}}}
+                'adapters': strings(adapters), 'asrSource': text(source, 1024)}}}
     if kind == 'speech.subscribers': return {'speech': {'subscribers': {'namespaces': strings(native(b, 'GetNamespaces'))}}}
     if kind == 'speech.vocabulary': return {'speech': {'vocabulary': {'phrase': text(native(b, 'Translate', [req['key']]))}}}
     records = []; count = 0
-    for ident in range(req['idRange']['first'], req['idRange']['last']+1):
-        utterance = text(native(b, 'GetText', [ident]))
+    ids=list(range(req['idRange']['first'], req['idRange']['last']+1))
+    texts=reads(b,[('GetText',[ident]) for ident in ids])
+    for ident, observed_text in zip(ids,texts):
+        utterance = text(observed_text)
         if not utterance: continue  # Broker's documented absence result, not a fabricated utterance.
         if kind == 'speech.utterances':
             row = {'id': ident, 'text': utterance}
-            for name, function in [('topic','GetTopic'),('outcome','GetOutcome'),('winner','GetWinner'),('engineId','GetEngineId')]:
-                row[name] = text(native(b, function, [ident]))
-            latency = native(b, 'GetLatencyMs', [ident])
+            names=req.get('subscriberNamespaces',['DemoGreedy','DemoShared'])
+            functions=['GetTopic','GetOutcome','GetWinner','GetEngineId','GetLatencyMs','GetScore','GetComplete','IsFinal']
+            calls=[(fn,[ident]) for fn in functions]
+            for namespace in names:calls.extend([('GetVocabularyScore',[ident,namespace]),('GetDenyReason',[ident,namespace])])
+            # Re-read text to detect eviction/replacement during these non-atomic reads.
+            calls.append(('GetText',[ident]))
+            values=reads(b,calls)
+            if text(values[-1])!=utterance:raise ValueError('Native utterance changed during observation')
+            for name, value in zip(('topic','outcome','winner','engineId'),values[:4]):row[name]=text(value)
+            latency = values[4]
             if type(latency) is not int or latency < 0: raise ValueError('Native latency milliseconds unavailable')
             row['latencyMs'] = latency
-            for name, function in [('score','GetScore'),('complete','GetComplete')]: row[name] = number(native(b, function, [ident]), 0, 1)
-            row['isFinal'] = native(b, 'IsFinal', [ident])
+            for name, value in zip(('score','complete'),values[5:7]): row[name] = number(value, 0, 1)
+            row['isFinal'] = values[7]
             if type(row['isFinal']) is not bool: raise ValueError('Native utterance final flag unavailable')
-            row['greedyVocabulary'] = number(native(b, 'GetVocabularyScore', [ident, 'DemoGreedy']), 0, 1)
-            row['greedyDenial'] = text(native(b, 'GetDenyReason', [ident, 'DemoGreedy']))
-            row['sharedDenial'] = text(native(b, 'GetDenyReason', [ident, 'DemoShared']))
+            row['subscribers']={namespace:{'vocabularyScore':number(values[8+2*i],0,1),
+                                           'denial':text(values[9+2*i])} for i,namespace in enumerate(names)}
+            if 'subscriberNamespaces' not in req:
+                row['greedyVocabulary']=row['subscribers']['DemoGreedy']['vocabularyScore']
+                row['greedyDenial']=row['subscribers']['DemoGreedy']['denial']
+                row['sharedDenial']=row['subscribers']['DemoShared']['denial']
             records.append(row)
         else:
-            score = number(native(b, 'GetVocabularyScore', [ident, req['namespace']]), 0, 1)
+            calls=[('GetVocabularyScore',[ident,req['namespace']])]
+            if kind == 'speech.door_awards':calls.append(('IsWinner',[ident,req['namespace']]))
+            calls.append(('GetText',[ident]))
+            values=reads(b,calls)
+            if text(values[-1])!=utterance:raise ValueError('Native utterance changed during observation')
+            score = number(values[0], 0, 1)
             matched = score > req['minimumVocabularyScoreExclusive']
             row = {'id': ident, 'text': utterance, 'vocabularyScore': score}
             if kind == 'speech.door_awards':
-                winner = native(b, 'IsWinner', [ident, req['namespace']])
+                winner = values[1]
                 if type(winner) is not bool: raise ValueError('Native winner flag unavailable')
                 matched &= winner; row['isWinner'] = winner
             count += int(matched); records.append(row)

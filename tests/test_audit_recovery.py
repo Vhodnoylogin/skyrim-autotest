@@ -65,6 +65,28 @@ class CollectionRecoveryTests(unittest.TestCase):
         self.assertFalse(self.session.state['collectionComplete'])
         self.assertEqual(self.session.state['result'],'failed')
 
+    def test_fixture_settings_each_variant_collected_before_original_restore(self):
+        self.config.value['extra_files']=[str(self.file)]
+        self.session.state['fixtureSettingsWrites']={str(self.file):{'path':str(self.file),'sha256':runner.sha(self.file),'profileLocal':False}}
+        self.assertTrue(self.session.collect('before-restart-1'))
+        self.file.write_bytes(b'second variant')
+        self.session.state['fixtureSettingsWrites'][str(self.file)]['sha256']=runner.sha(self.file)
+        self.session.cleanup()
+        self.assertEqual(self.file.read_bytes(),b'original')
+        entries=runner.read_json(self.directory/'evidence/manifest.json')
+        self.assertEqual((self.directory/'evidence/fixture-settings-000-original.ini').read_bytes(),b'second variant')
+        self.assertEqual((self.directory/'evidence/before-restart-1--fixture-settings-000-original.ini').read_bytes(),b'modified')
+        for row in entries:self.assertEqual(runner.sha(self.directory/'evidence'/row['name']),row['sha256'])
+        self.assertTrue(self.session.state['restored']);self.assertTrue(self.session.state['collectionComplete'])
+
+    def test_unowned_or_changed_fixture_settings_cannot_be_successful_evidence(self):
+        for allowed,digest in (([],runner.sha(self.file)),([str(self.file)],'0'*64)):
+            self.config.value['extra_files']=allowed
+            self.session.state['fixtureSettingsWrites']={str(self.file):{'path':str(self.file),'sha256':digest,'profileLocal':False}}
+            self.assertFalse(self.session.collect())
+        self.session.cleanup()
+        self.assertTrue(self.session.state['restored']);self.assertFalse(self.session.state['collectionComplete'])
+
     def test_bridge_steam_and_restart_artifacts_are_all_manifest_pinned(self):
         (self.steam/'vrserver.txt').write_bytes(b'before restart')
         bridge=self.config.mo2/'plugins/mo2aibridge/mo2aibridge.log'

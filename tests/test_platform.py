@@ -26,6 +26,14 @@ class Session:
 
 
 class PlatformTests(unittest.TestCase):
+    def test_object_save_alias_uses_the_same_owned_save_contract_without_extra_mutation(self):
+        req={'action':'save_game','saveTag':'audit-empty','scope':'owned-disposable-profile'}
+        args={'operation':'object.perform','request':req};platform.validate(args)
+        with patch('skyrim_autotest.owned_saves.perform',return_value={'save':{'completed':True}}) as perform:
+            self.assertTrue(platform.execute(Session(),args,platform.time.monotonic()+10)['save']['completed'])
+            perform.assert_called_once();self.assertEqual(perform.call_args.args[1],req)
+        with self.assertRaises(ValueError):platform.validate({'operation':'object.perform','request':dict(req,scope='source-profile')})
+
     def backend(self, session):
         return platform.Backend(session, platform.time.monotonic()+30)
 

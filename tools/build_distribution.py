@@ -34,7 +34,7 @@ def main():
     entries = {str(p.relative_to(ROOT)).replace('\\','/'): p.read_bytes() for p in package_files()}
     for name in ('README.md', 'AGENTS.md', 'CLAUDE.md', 'LICENSE', 'dependencies.json', 'run.py', 'skyrim-autotest.cmd', 'pyproject.toml'):
         entries[name] = (ROOT / name).read_bytes()
-    for folder in ('docs','tests','tools'):
+    for folder in ('docs','tests','tools','native'):
         for p in (ROOT/folder).rglob('*'):
             if p.is_file() and '__pycache__' not in p.parts:
                 entries[str(p.relative_to(ROOT)).replace('\\','/')] = p.read_bytes()

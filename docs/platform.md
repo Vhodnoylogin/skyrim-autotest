@@ -33,7 +33,12 @@ utterance data. Recognition counts use actual nonempty text and native vocabular
 score strictly above the requested threshold; awards additionally require native
 IsWinner. Reads never inject utterances, register participants or bid. Returned
 utterance records retain the subject probe's fields and millisecond latency;
-they are sequential reads, not an atomic auction snapshot.
+they use bounded read batches, not an atomic auction snapshot. Batches contain
+only explicitly allowlisted getters, at most16 calls and four workers, bracketed
+by the same owned game identity and one absolute deadline. Missing/failed items
+fail the read; there is no setter, fallback or automatic request replay. A changed
+utterance text between record reads invalidates that record. Optional configured
+subscriber namespaces avoid routing generic reads through Demo Subscriber.
 
 One ordinary SelfTest request is recorded durably before dispatch. The current
 SpeechBroker.log must contain exactly one newly appended localized start token;
@@ -76,7 +81,10 @@ Reference stack quantity requires the owner DevBench fork's `quantityItems`
 native field; a PlaceAtMe requested count is never substituted. Papyrus reports
 numeric form types, so requested four-character type checks use inspect refs.
 Base plugin/local identity is read from the actual base and installed mod name,
-not copied from an expected item. Light/dynamic base IDs are unsupported here.
+not copied from an expected item. The legacy path rejects light/dynamic bases;
+the opt-in [runtime fixture candidate](runtime-fixtures.md) reads actual dynamic
+base/source identity through the owner DevBench fork. Effective subject settings
+and assignment counts use [native state bindings](subject-state-provider.md).
 
 Physical reach measures a local tracking-to-hand transform using three five-
 centimetre pose offsets; a singular transform or excessive reach fails. This
