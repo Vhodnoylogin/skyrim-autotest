@@ -36,7 +36,7 @@ class ObservedReachTests(unittest.TestCase):
     def test_runtime_near_distance_must_match_and_is_never_set(self):
         s=self.snapshot();b=self.backend(s)
         geometry={'palmPositionGameUnits':[0,-2.4,6],'palmDirection':[-.018,-.965,.261],'nearCastDistanceMetres':.15}
-        b.s.state={'configuration':{'physical_grip_geometry':geometry}}
+        b.s.state={'probeObjectLive':True,'configuration':{'physical_grip_geometry':geometry}}
         calls=[]
         b.pap=lambda script,function,args:(calls.append(function) or .15)
         b.reach_target('0xFF001234','right',[[70,0,0],[0,70,0],[0,0,70]])
@@ -87,6 +87,7 @@ class ObservedReachTests(unittest.TestCase):
 
     def backend(self,snapshot):
         class Session:
+            state={'probeObjectLive':True}
             def validate_probe_reference(self,**kwargs):pass
             def log(self,*a,**kwargs):pass
         b=Backend(Session(),time.monotonic()+30)

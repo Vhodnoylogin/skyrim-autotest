@@ -287,3 +287,13 @@ HTTP504, started-task timeout, arbitrary server/transport failure and all
 mutations remain terminal. This is a readiness wait, never a repeated launch,
 load, button, answer or subject action. Eight-second quiet-world confirmation
 still follows the successful native reads.
+
+After a completed owned load, generic hand reads and newly captured held tags
+use that load's current process, world generation and contiguous lifecycle
+cursor. They do not require the invalidated old probe reference to become live
+again. Old tags remain removed/invalidated. A later load, event gap, unreadable
+stream, mismatched process/epoch or incomplete transition rejects the guard;
+an observed invalidation is retained so it cannot be adopted by another read.
+HIGGS hand reads and held tagging remain bracketed by lifecycle checks. Once a
+fresh fixture binds a new probe, its existing creation-time lifecycle guard is
+used. This is sampled sequential evidence, not an atomic world snapshot.

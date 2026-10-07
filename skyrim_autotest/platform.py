@@ -186,8 +186,35 @@ class Backend:
         if not isinstance(plugin, str) or not plugin: raise ValueError('Base plugin identity unavailable')
         return {'plugin': plugin, 'localId': f'{fid & 0xFFFFFF:06X}', 'runtimeId': base['formId']}
 
+    def guard_world(self):
+        """A completed owned load establishes a new world, not a live old probe."""
+        state = self.s.state
+        if state.get('probeObjectLive') is True:
+            self.s.validate_probe_reference(timeout=min(self.remaining(),3))
+            return
+        transition = state.get('ownedLoadTransition',{})
+        if (transition.get('completed') is not True or transition.get('worldInvalidated') is True or
+                state.get('gameplayBootstrap',{}).get('completed') is not True or
+                state.get('game') != transition.get('afterGame') or not state.get('game') or
+                type(state.get('ownedWorldGeneration')) is not int or state['ownedWorldGeneration'] <= 0 or
+                state['ownedWorldGeneration'] != transition.get('worldGeneration')):
+            raise ValueError('Current world generation is unavailable or invalidated')
+        from .owned_saves import Events,lifecycle
+        try:
+            events = Events(Backend(self.s,min(self.end,time.monotonic()+3)),transition['cursor'])
+            if any(lifecycle(event) in ('preLoadGame','postLoadGame','newGame') for event in events.read()):
+                raise ValueError('Later world transition invalidates current world lifecycle')
+        except Exception:
+            transition['worldInvalidated'] = True
+            self.s.save()
+            raise
+        transition['cursor'] = events.cursor
+        self.s.save()
+        self.s.log('platform-current-world-validated',game=state['game'],generation=state['ownedWorldGeneration'],
+                   cursor=events.cursor,basis='completed owned load and contiguous native lifecycle; old probe remains invalid')
+
     def tagged(self, req):
-        self.s.validate_probe_reference(timeout=min(3, self.remaining()))
+        self.guard_world()
         entry = self.s.state.get('platformReferences', {}).get(req['referenceTag'])
         if not entry or not entry.get('id'):
             raise ValueError('Reference tag is unavailable in this world generation')
@@ -228,7 +255,7 @@ class Backend:
     def reference_center(self, ref, hand=None):
         """Native bounds plus observed row-major scene transform; no guessed Euler order."""
         from .platform_math import world_bounds_center
-        self.s.validate_probe_reference(timeout=min(3,self.remaining()))
+        self.guard_world()
         if not hasattr(self, '_grip_bounds'): self._grip_bounds = {}
         if ref not in self._grip_bounds:
             rows=self.call('inspect',{'kind':'refs','formId':ref}).get('refs',[])
@@ -314,7 +341,7 @@ class Backend:
 
     def held(self, req):
         if 'probeObject' in self.s.state:
-            self.s.validate_probe_reference(timeout=min(3, self.remaining()))
+            self.guard_world()
         window = req.get('continuityWindowSeconds', 0)
         first = None
         samples = []
@@ -324,7 +351,7 @@ class Backend:
             if current is not None and (not isinstance(current, dict) or not current.get('formId')):
                 raise ValueError('Held-reference identity is unavailable, not an empty hand')
             if 'probeObject' in self.s.state:
-                self.s.validate_probe_reference(timeout=min(3, self.remaining()))
+                self.guard_world()
             fid = current.get('formId') if isinstance(current, dict) else None
             samples.append({'monotonicSeconds': time.monotonic(), 'referenceId': fid})
             if len(samples) == 1:
@@ -354,6 +381,7 @@ class Backend:
             value['quantityBasis'] = 'native reference count after held sampling; sequential non-atomic read'
             value['quantityProviderObservation'] = raw
         if 'referenceTag' in req: value['matchesRequestedReference'] = first == self.tagged(req)
+        if 'probeObject' in self.s.state: self.guard_world()
         return {'hand': value}
 
     def alchemy(self, spec):
@@ -448,7 +476,7 @@ class Backend:
         self.s.log('platform-input-readiness-recovery', menus=menus, scene=scene,
                    subjectActionReplayed=False)
         wait_gameplay_ready(BoundSession(self), cell, False, deadline=self.end)
-        self.s.validate_probe_reference(timeout=min(3,self.remaining()))
+        self.guard_world()
 
     def controller(self, req):
         action = req['action']
@@ -589,7 +617,7 @@ class Backend:
             tag=req['referenceTag']
             if tag in references or tag in self.s.state.get('invalidatedReferenceTags',[]) or len(references)>=16:
                 raise ValueError('Held reference tag already used/invalidated or limit16 reached')
-            self.s.validate_probe_reference(timeout=min(3,self.remaining()))
+            self.guard_world()
             before=self.pap('HiggsVR','GetGrabbedObject',[req['hand']=='left'])
             if not isinstance(before,dict) or not before.get('formId'):
                 raise ValueError('No actual held reference to tag')
@@ -597,6 +625,7 @@ class Backend:
             after=self.pap('HiggsVR','GetGrabbedObject',[req['hand']=='left'])
             if not isinstance(after,dict) or after.get('formId')!=ref:
                 raise ValueError('Held reference changed while tagging')
+            self.guard_world()
             references[tag]={'id':ref,'incarnation':incarnation}
             self.s.save()
             return {'reference':{'id':ref,'incarnation':incarnation},
@@ -636,7 +665,7 @@ class Backend:
             raise ValueError('Fixture reference limit16 reached')
         placement_slot=len(references)
         if references:
-            self.s.validate_probe_reference(timeout=min(3, self.remaining()))
+            self.guard_world()
         if req['quantityItems'] not in (1, 5): raise ValueError('Only fixture reference quantities1or5 are supported')
         base = self.resolve(req['item'])
         cursor = self.s.capture_probe_cursor() if not references else None
@@ -665,7 +694,7 @@ class Backend:
         else:
             # Keep the original world cursor, including creation-time events.
             # probeObject is a legacy lifecycle anchor, never an existence check.
-            self.s.validate_probe_reference(timeout=min(3, self.remaining()))
+            self.guard_world()
         self.s.state.setdefault('platformReferences', {})[req['referenceTag']] = {'id': ref}
         self.s.save()
         if req['quantityItems'] == 5:
@@ -692,7 +721,7 @@ class Backend:
                 else: stable = None
                 last = point
             self.pause(.1)
-        self.s.validate_probe_reference(timeout=min(3, self.remaining()))
+        self.guard_world()
         return {'reference': {'id': ref, 'settledPositionGameUnits': last}}
 
 

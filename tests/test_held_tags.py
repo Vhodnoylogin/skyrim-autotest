@@ -12,7 +12,7 @@ class HeldTagTests(unittest.TestCase):
                        'refs':[{'status':'available','loaded3D':True,'deleted':False,'disabled':False,
                                 'identity':{'form':self.ref,'runtimeHandle':91,'loadGeneration':2}}]}
         self.held=[{'formId':self.ref},{'formId':self.ref}]
-        session=SimpleNamespace(state={'platformReferences':{'old-seed':{'id':self.ref}}},
+        session=SimpleNamespace(state={'probeObjectLive':True,'platformReferences':{'old-seed':{'id':self.ref}}},
                                 save=lambda:None,log=lambda *a,**k:None,
                                 validate_probe_reference=lambda **k:None)
         backend=Backend(session,time.monotonic()+30)
