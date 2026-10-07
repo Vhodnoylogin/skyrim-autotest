@@ -191,3 +191,27 @@ physical reach. Physics can move these objects after placement; stability is
 not reachability. The next actual body/target sample is authoritative and rejects
 an extreme target. Separate slots reduce initial overlap; they cannot guarantee
 no contact or prevent inherited DropObject velocity.
+
+
+Palm-cast targeting successor: qualification03 proved physical approach but the
+actual HIGGS held reference was a neighboring wrong-effect bottle. The12/10
+stand-off above is superseded. physical_grip_geometry is a pinned provider
+configuration with palmPositionGameUnits[3], palmDirection[3] and
+nearCastDistanceMetres. Obtain these from the actual winning HIGGS INI and pin
+that input/source recipe in the platform. Runtime GetSetting(NearCastDistance)
+must match; the executor never writes HIGGS settings. The HIGGS constructor
+captures palm position, while hand rotation/scale come from current observed
+first-person skeletal transforms. Left-hand X is mirrored as in HIGGS.
+
+The next desired hand-node position puts the model-bounds center at the
+configured palm near-cast endpoint. Conversion of cast metres to game units uses
+the measured tracking Jacobian rather than a guessed70constant. Reobserve and
+move incrementally; the cast model is not an acknowledgement of HIGGS selection.
+Exact HIGGS held identity and native stack count remain mandatory afterward.
+Missing geometry fails preparation/action instead of using the old stand-off.
+
+Do not invoke DevBench input.observe between Grip and subject assertions. It can
+dispatch controller callbacks and change the very state being tested. A mismatch
+logs actual GetGrabbedObject identity and existing published/raw Observer data
+without another controller read. This prevents diagnostics from erasing a
+wrong-reference acquisition before the test observes it.

@@ -260,11 +260,30 @@ class Backend:
                 if player_identity is not None and player_identity!=ident:raise ValueError('Observed body node identities differ')
                 player_identity=ident;points.append(point)
             self._reach_body={'shoulder':points[0],'elbow':points[1],'hand':points[2]}
+            self._reach_hand_transform=copy.deepcopy(node['world'])
             player_key=(snapshot['sessionId'],snapshot['loadGeneration'],player_identity['runtimeHandle'])
             if hasattr(self,'_reach_player_identity') and self._reach_player_identity!=player_key:
                 raise ValueError('Body reach player identity changed')
             self._reach_player_identity=player_key
         return center
+
+    def reach_target(self,ref,hand,columns):
+        from .platform_math import palm_cast_target
+        geometry=self.s.state.get('configuration',{}).get('physical_grip_geometry')
+        if not isinstance(geometry,dict):
+            raise ValueError('Pinned provider physical grip geometry required')
+        if not hasattr(self,'_near_distance_verified'):
+            actual=self.pap('HiggsVR','GetSetting',['NearCastDistance'])
+            if type(actual) not in (int,float) or not math.isfinite(actual) or abs(actual-geometry['nearCastDistanceMetres'])>1e-5:
+                raise ValueError('Actual HIGGS near distance differs from pinned grip geometry')
+            self._near_distance_verified=True
+        center=self.reference_center(ref,hand)
+        self._reach_center=list(center)
+        target=palm_cast_target(center,self._reach_hand_transform,geometry,columns,hand)
+        self.s.log('platform-palm-cast-target',reference=ref,hand=hand,centerGameUnits=center,
+                   handTransform=self._reach_hand_transform,geometry=geometry,targetHandGameUnits=target,
+                   basis='observed hand transform and pinned provider near-cast model; not selection acknowledgement')
+        return target
 
     def hand_xyz(self, hand):
         node = 'NPC L Hand [LHnd]' if hand == 'left' else 'NPC R Hand [RHnd]'
@@ -433,35 +452,21 @@ class Backend:
                 columns.append([(measured[i]-baseline[i])/.05 for i in range(3)])
                 self.publish(frame, 10)
                 self.pause(.15)
-            target = self.reference_center(ref, hand)
-            reference_position = list(target)
-            heading = math.radians(self.pap('ObjectReference', 'GetAngleZ', target='0x14'))
-            # The old 21-unit landmark was observed with long firewood. It can
-            # leave a small bottle outside the near cast. The 7/7 candidate
-            # pushed the bottle before grip in run20261007-105504-b826e7:
-            # it moved once the hand node came within about15 game units.
-            # Keep a12-behind/10-above stand-off candidate (15.6units),
-            # retaining the exact-reference physical-grip assertion.
-            # This is not a measured palm/collision transform or selection ACK.
-            target[0] -= math.sin(heading)*12
-            target[1] -= math.cos(heading)*12
-            target[2] += 10
+            target = self.reach_target(ref, hand, columns)
+            reference_position = list(self._reach_center)
             from .platform_math import solve3, body_reach_envelope
             start_tracking = [frame[hand]['matrix'][index] for index in (3,7,11)]
             self.s.log('platform-reach-geometry', reference=ref, referenceBoundsCenterGameUnits=reference_position,
                        targetPalmGameUnits=target, trackingStartMetres=start_tracking,
                        measuredGameUnitsPerMetre=columns, legacyMaximumReachMetres=req['maximumReachMetres'],
                        reachPolicy='incremental-observed-body-envelope; legacy travel budget superseded by owner direction',
-                       approachBasis='observed transformed model-bounds center plus stand-off; palm/selection unobserved')
+                       approachBasis='observed transformed center at pinned provider palm near-cast endpoint; selection unobserved')
             progress_at=time.monotonic()
             previous_hand=None
             for _ in range(256):
                 # Track the actual dynamic target, rather than pressing at a
                 # stale point after a teleported hand has displaced it.
-                target = self.reference_center(ref, hand)
-                target[0] -= math.sin(heading)*12
-                target[1] -= math.cos(heading)*12
-                target[2] += 10
+                target = self.reach_target(ref, hand, columns)
                 current = self._reach_body['hand']
                 envelope=body_reach_envelope(columns,self._reach_body['shoulder'],self._reach_body['elbow'],current,target)
                 if math.dist(current, target) < 2: break
@@ -492,11 +497,9 @@ class Backend:
             self.pause(.5)
             menus = self.call('menu', {'action': 'list', 'includeFlags': True})
             can_grab = self.pap('HiggsVR', 'CanGrabObject', [hand == 'left'])
-            reference_position = self.reference_center(ref, hand)
+            current_target = self.reach_target(ref, hand, columns)
+            reference_position = list(self._reach_center)
             hand_position = self._reach_body['hand']
-            current_target = [reference_position[0]-math.sin(heading)*12,
-                              reference_position[1]-math.cos(heading)*12,
-                              reference_position[2]+10]
             self.s.log('platform-grip-readiness', menus=menus, canGrab=can_grab,
                        handPositionGameUnits=hand_position,
                        referencePositionGameUnits=reference_position,
@@ -530,11 +533,11 @@ class Backend:
             self.s.log('platform-physical-grip-observation', requestedReference=ref, held=held,
                        acceptedAsSubjectResult=False)
             if not isinstance(held, dict) or held.get('formId') != ref:
-                # ReadController may dispatch callbacks: diagnose only after the
-                # requested grip interval, never before its tested rising edge.
-                self.s.log('platform-failed-grip-input',
-                           observation=self.call('input', {'device': 'vrTrackedSet', 'action': 'observe'}),
-                           acceptedAsAcquisitionProof=False)
+                # Input.observe can dispatch controller callbacks and release a
+                # held object. Preserve the failed actual identity, without
+                # altering state before the following exact-reference assertion.
+                self.s.log('platform-failed-grip-identity',requestedReference=ref,held=held,
+                           inputObservationOmitted='controller reads may dispatch callbacks')
         return {'inputIssued': True, 'observedGameplaySuccess': None, 'publication': response}
 
     def mutate(self, req):

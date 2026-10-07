@@ -97,3 +97,21 @@ def fixture_offset(index, heading):
     forward = 42. + 20.*(index // 4)
     return [math.sin(heading)*forward + math.cos(heading)*lateral,
             math.cos(heading)*forward - math.sin(heading)*lateral, 20.]
+
+
+def palm_cast_target(center, transform, geometry, columns, hand):
+    """Put the requested model center at the configured near-cast endpoint."""
+    position=list(geometry['palmPositionGameUnits'])
+    direction=list(geometry['palmDirection'])
+    if hand=='left':position[0]*=-1;direction[0]*=-1
+    # Reuse strict observed rigid-transform validation without assuming an Euler order.
+    world_bounds_center({'min':[0,0,0],'max':[0,0,0]},transform)
+    rotation=transform['rotationRowMajor'];scale=transform['scale']
+    offset=[scale*sum(rotation[i*3+j]*position[j] for j in range(3)) for i in range(3)]
+    ray=[sum(rotation[i*3+j]*direction[j] for j in range(3)) for i in range(3)]
+    norm=math.sqrt(sum(v*v for v in ray))
+    if norm<.1:raise ValueError('Palm direction unavailable')
+    ray=[v/norm for v in ray]
+    metres_per_unit=math.sqrt(sum(v*v for v in solve3(columns,ray)))
+    distance=geometry['nearCastDistanceMetres']/metres_per_unit
+    return [center[i]-offset[i]-ray[i]*distance for i in range(3)]

@@ -37,11 +37,24 @@ def configure(value, base=None):
     missing = sorted(k for k in REQUIRED if not value.get(k))
     if missing:
         raise ConfigurationError("Missing configuration fields: " + ", ".join(missing))
-    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load"}
+    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry"}
     if unknown:
         raise ConfigurationError("Unknown configuration fields: " + ", ".join(sorted(unknown)))
     base = Path(base or Path.cwd()).resolve()
     result = dict(value)
+    if 'physical_grip_geometry' in result:
+        geometry=result['physical_grip_geometry']
+        if not isinstance(geometry,dict) or set(geometry)!={'palmPositionGameUnits','palmDirection','nearCastDistanceMetres'}:
+            raise ConfigurationError('Physical grip geometry requires explicit palm position/direction and near distance')
+        for name,limit in [('palmPositionGameUnits',100),('palmDirection',1)]:
+            values=geometry[name]
+            if not isinstance(values,list) or len(values)!=3 or any(type(v) not in (int,float) or not math.isfinite(v) or abs(v)>limit for v in values):
+                raise ConfigurationError('Physical grip geometry vector unavailable')
+        if sum(v*v for v in geometry['palmDirection'])<.01:
+            raise ConfigurationError('Physical grip palm direction is zero')
+        distance=geometry['nearCastDistanceMetres']
+        if type(distance) not in (int,float) or not math.isfinite(distance) or not 0<distance<=1:
+            raise ConfigurationError('Physical grip near distance outside domain')
     if 'allow_background_physical_vr' in result and type(result['allow_background_physical_vr']) is not bool:
         raise ConfigurationError('allow_background_physical_vr must be boolean')
     if 'allow_owned_save_load' in result and type(result['allow_owned_save_load']) is not bool:

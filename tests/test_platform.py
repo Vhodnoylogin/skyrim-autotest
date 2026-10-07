@@ -259,6 +259,13 @@ class PlatformTests(unittest.TestCase):
                                          'elbow':[(a+b)/2 for a,b in zip(shoulder,position)]}
                     return backend.xyz(ref)
                 backend.reference_center = center
+                # Isolate measured transport from separately tested provider palm geometry.
+                def reach_target(ref,hand,columns):
+                    observed=center(ref,hand);backend._reach_center=list(observed)
+                    heading=260.2147521972656*3.141592653589793/180
+                    import math
+                    return [observed[0]-math.sin(heading)*12,observed[1]-math.cos(heading)*12,observed[2]+10]
+                backend.reach_target=reach_target
                 req = {'action': 'reach_and_grip_reference', 'hand': 'right', 'grip': 'closed',
                        'holdSeconds': 2, 'maximumReachMetres': .5, 'referenceTag': 'seed-potion'}
                 if escaped:

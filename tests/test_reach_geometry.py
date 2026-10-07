@@ -2,11 +2,48 @@ import copy
 import math
 import time
 import unittest
-from skyrim_autotest.platform_math import world_bounds_center, body_reach_envelope, fixture_offset, solve3
+from skyrim_autotest.platform_math import world_bounds_center, body_reach_envelope, fixture_offset, solve3, palm_cast_target
 from skyrim_autotest.platform import Backend
 
 
 class ObservedReachTests(unittest.TestCase):
+    def test_recorded_hand_rotation_places_cast_endpoint_on_requested_stack(self):
+        transform={'rotationRowMajor':[-.75489831,-.14217383,-.64024562,-.13020155,.98927778,-.06616315,.64278746,.03341424,-.76531482],
+                   'scale':.85,'translation':[-407.09384,2049.22119,6990.13037]}
+        geometry={'palmPositionGameUnits':[0,-2.4,6],'palmDirection':[-.018,-.965,.261],'nearCastDistanceMetres':.15}
+        columns=[[-11.897583,68.981934,0],[0,0,70],[68.981934,11.899414,0]]
+        center=[-419.139904,2048.486985,6980.112382]
+        target=palm_cast_target(center,transform,geometry,columns,'right')
+        rotation=transform['rotationRowMajor']
+        offset=[.85*sum(rotation[i*3+j]*geometry['palmPositionGameUnits'][j] for j in range(3)) for i in range(3)]
+        direction=[sum(rotation[i*3+j]*geometry['palmDirection'][j] for j in range(3)) for i in range(3)]
+        norm=math.sqrt(sum(v*v for v in direction));direction=[v/norm for v in direction]
+        distance=.15/math.sqrt(sum(v*v for v in solve3(columns,direction)))
+        endpoint=[target[i]+offset[i]+direction[i]*distance for i in range(3)]
+        self.assertLess(math.dist(endpoint,center),1e-6)
+        old_endpoint=[transform['translation'][i]+offset[i]+direction[i]*distance for i in range(3)]
+        self.assertGreater(math.dist(old_endpoint,center),10)
+
+    def test_grip_geometry_config_requires_explicit_valid_units_and_vectors(self):
+        from skyrim_autotest.config import configure,template,ConfigurationError
+        config=template();geometry={'palmPositionGameUnits':[0,-2.4,6],'palmDirection':[-.018,-.965,.261],'nearCastDistanceMetres':.15}
+        config['physical_grip_geometry']=geometry
+        configure(config)
+        for key,value in [('palmDirection',[0,0,0]),('nearCastDistanceMetres',float('nan')),('palmPositionGameUnits',[0,False,6])]:
+            bad=copy.deepcopy(config);bad['physical_grip_geometry'][key]=value
+            with self.assertRaises(ConfigurationError):configure(bad)
+
+    def test_runtime_near_distance_must_match_and_is_never_set(self):
+        s=self.snapshot();b=self.backend(s)
+        geometry={'palmPositionGameUnits':[0,-2.4,6],'palmDirection':[-.018,-.965,.261],'nearCastDistanceMetres':.15}
+        b.s.state={'configuration':{'physical_grip_geometry':geometry}}
+        calls=[]
+        b.pap=lambda script,function,args:(calls.append(function) or .15)
+        b.reach_target('0xFF001234','right',[[70,0,0],[0,70,0],[0,0,70]])
+        self.assertEqual(calls,['GetSetting'])
+        b=self.backend(s);b.s.state={'configuration':{'physical_grip_geometry':geometry}};b.pap=lambda *a:.10
+        with self.assertRaisesRegex(ValueError,'near distance differs'):b.reach_target('0xFF001234','right',[[70,0,0],[0,70,0],[0,0,70]])
+
     def test_rotated_scaled_asymmetric_bounds_use_observed_matrix(self):
         bounds={'min':[-4,-4,0],'max':[4,4,16]}
         transform={'translation':[10,20,30],'scale':2,
