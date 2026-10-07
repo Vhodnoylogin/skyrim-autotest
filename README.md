@@ -68,6 +68,11 @@ only exact-commit, hash-pinned source files/SDK header to `runtime/dependencies`
 compiler, source, protocol and binary hashes. Rebuild if that source changes.
 Downloads are checked by digest; no mutable-main source is used for the driver.
 
+The optional candidate `reuse_test_profile` lifecycle keeps an already-open idle
+MO2 and reuses a cached isolated profile within and between compatible series.
+See [configuration](docs/configuration.md) for prerequisites, non-game validation
+status and recovery limits. It is disabled by default pending live qualification.
+
 ## Session ownership and recovery
 
 Preflight refuses a running game/VR session. `--restart-idle-mo2` authorizes a

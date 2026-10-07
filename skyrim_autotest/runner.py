@@ -162,7 +162,10 @@ def preflight(profile, restart_idle_mo2=False):
             raise Blocked(f'Missing required file: {path}')
     busy = [p for p in native.processes() if p['name'].lower() in VR_NAMES | GAME_NAMES | {'modorganizer.exe'}]
     idle_mo2 = [p for p in busy if p['name'].lower() == 'modorganizer.exe']
-    if busy and not (restart_idle_mo2 and len(busy) == len(idle_mo2) == 1):
+    reuse = P.value.get('reuse_test_profile', False)
+    if reuse and not idle_mo2:
+        raise Blocked('Reusable profile mode requires the configured idle MO2 already open')
+    if busy and not ((restart_idle_mo2 or reuse) and len(busy) == len(idle_mo2) == 1):
         raise Blocked('Existing MO2/game/VR session; refusing to take it over: ' + str(busy))
     if idle_mo2:
         ident = native.identity(idle_mo2[0]['pid'])
@@ -172,6 +175,21 @@ def preflight(profile, restart_idle_mo2=False):
         procs = request(P.bridge_port, 'procs', token=token)
         if procs.get('busy') or procs.get('running') or procs.get('launchedByMO2'):
             raise Blocked('MO2 is busy; an idle restart is not allowed')
+    bridge_session = None
+    bridge_profile = None
+    if reuse:
+        ping = request(P.bridge_port, 'ping', token=token)
+        bridge_session = request(P.bridge_port, 'session', token=token)
+        bridge_profile = ping.get('profile')
+        if (ping.get('game') != 'SkyrimVR' or Path(ping.get('modsPath', '')).resolve() != P.mods.resolve()
+                or bridge_session.get('mo2Pid') != idle_mo2[0]['pid']
+                or Path(bridge_session.get('profilesPath', '')).resolve() != P.profiles.resolve()
+                or not bridge_session.get('serverBootId') or not bridge_session.get('instanceId')
+                or not bridge_profile or not (P.profiles / bridge_profile).is_dir()):
+            raise Blocked('Reusable profile Bridge instance identity mismatch')
+        caps = request(P.bridge_port, 'profiles/capabilities', token=token)
+        if caps.get('profileSelect') != 'nativeQt':
+            raise Blocked('Reusable profiles require native Bridge profile selection')
     vrpaths = P.openvr_paths
     paths = read_json(vrpaths)
     runtime = Path(paths['runtime'][0])
@@ -206,7 +224,8 @@ def preflight(profile, restart_idle_mo2=False):
                 if not file.resolve().is_relative_to(root):
                     raise Blocked('Configuration symlink escapes its mod directory')
                 configs[str(file)] = sha(file)
-    return {'profile': profile, 'runtime': str(runtime), 'settings': str(config),
+    return {'profile': profile, 'bridgeSession': bridge_session, 'originalBridgeProfile': bridge_profile,
+            'runtime': str(runtime), 'settings': str(config),
             'viveInputProfile': str(vive_profile), 'viveInputProfileHash': sha(vive_profile),
             'idleMO2': native.identity(idle_mo2[0]['pid']) if idle_mo2 else None,
             'vrpaths': str(vrpaths), 'stockOpenVR': str(original), 'stockOpenVRHash': sha(original),
@@ -298,6 +317,10 @@ class Session:
             # foreign. Require ancestry through a recorded launch identity. A
             # dead launcher's PID is allowed only when no reused PID conflicts.
             ancestors = {p['identity']['pid']: p['identity'] for p in self.state['owned']}
+            if self.state.get('borrowedMO2'):
+                borrowed = self.state['borrowedMO2']
+                if native.alive(borrowed):
+                    ancestors[borrowed['pid']] = borrowed
             if self.state.get('runner'):
                 ancestors[self.state['runner']['pid']] = self.state['runner']
             parent = item['parent']
@@ -457,10 +480,46 @@ class Session:
             raise ToolError(name, args, result)
         return result
 
+    def bridge_profile(self, desired, restoring=False):
+        """No writes to MO2's in-memory selected profile or settings on disk."""
+        borrowed = self.state['borrowedMO2']
+        if not native.alive(borrowed):
+            raise Blocked('Borrowed MO2 identity changed')
+        token = P.bridge_token.read_text().strip()
+        actual = request(P.bridge_port, 'session', token=token)
+        expected = self.state['preflight']['bridgeSession']
+        if any(actual.get(k) != expected.get(k) for k in ('mo2Pid', 'serverBootId', 'instanceId', 'profilesPath')):
+            raise Blocked('MO2 Bridge session changed')
+        procs = request(P.bridge_port, 'procs', token=token)
+        if procs.get('busy') or procs.get('running') or procs.get('launchedByMO2'):
+            raise Blocked('MO2 is busy; profile selection refused')
+        ping = request(P.bridge_port, 'ping', token=token)
+        original = self.state['preflight']['originalBridgeProfile']
+        allowed = {original, self.state.get('testProfileName')}
+        if ping.get('profile') not in allowed:
+            raise Blocked('Owner changed the MO2 profile; recovery must not override it')
+        if ping.get('profile') != desired:
+            self.state['bridgeSelectionIntent'] = {'from': ping['profile'], 'to': desired, 'restoring': restoring}
+            self.save()
+            body = {'profile': desired, 'expectedProfile': ping['profile'],
+                    'expectedServerBootId': expected['serverBootId'], 'expectedInstance': expected['instanceId'],
+                    'iUnderstandTheRisk': 'yes-I-read-the-docs-and-accept-irreversible-changes'}
+            result = request(P.bridge_port, 'profiles/select', body, token=token, timeout=40)
+            if result.get('applied') is not True or result.get('current') != desired:
+                raise Blocked('MO2 did not confirm profile selection')
+            self.log('bridge-profile-selected', result=result, restoring=restoring)
+        ping = request(P.bridge_port, 'ping', token=token)
+        if ping.get('profile') != desired or not native.alive(borrowed):
+            raise Blocked('MO2 profile selection verification failed')
+
     def setup(self):
         self.phase('snapshot', 180)
         info = self.state['preflight']
-        if info.get('idleMO2'):
+        if P.value.get('reuse_test_profile', False):
+            self.state['borrowedMO2'] = info['idleMO2']
+            self.save()
+            self.bridge_profile(info['originalBridgeProfile'])
+        elif info.get('idleMO2'):
             self.state['reopenMO2'] = True
             self.save()
             self.log('idle-mo2-graceful-close', identity=info['idleMO2'],
@@ -502,7 +561,8 @@ class Session:
             self.snapshot(file)
         for name in ('GameData.json', 'BuildData.json'):
             self.snapshot(Path(info['rootBuilderData']) / name)
-        self.snapshot(P.mo2_ini)
+        if not self.state.get('borrowedMO2'):
+            self.snapshot(P.mo2_ini)
         self.snapshot(info['settings'])
         # Existing mod configuration may be rewritten by the game, even when
         # our APIs change settings only in memory. Preserve those inputs too.
@@ -528,18 +588,30 @@ class Session:
         if old_build.exists():
             old_build.unlink()
         # Isolated profile: never load or autosave over the owner's original saves.
-        profile_name = 'Autotest-' + self.state['id']
-        test_profile = P.profiles / profile_name
-        if test_profile.exists():
-            raise Blocked('Generated test profile already exists')
-        self.state['testProfile'] = str(test_profile)
-        self.state['testProfileName'] = profile_name
-        self.save()
-        test_profile.mkdir()
-        (test_profile / 'saves').mkdir()
-        for file in (P.profiles / info['profile']).iterdir():
-            if file.is_file():
-                shutil.copy2(file, test_profile / file.name)
+        if self.state.get('borrowedMO2'):
+            from . import profile_cache
+            key, profile_name = profile_cache.identity(P.profiles / info['profile'], P.profiles)
+            self.state['reusableProfile'] = {'key': key, 'name': profile_name}
+            self.state['testProfile'] = str(P.profiles / profile_name)
+            self.state['testProfileName'] = profile_name
+            self.save()
+            test_profile, reused = profile_cache.acquire(ROOT, P.profiles, key, profile_name,
+                                                        self.state['id'], atomic_json)
+            profile_cache.reset(test_profile, P.profiles / info['profile'], self.dir / 'previous-profile')
+            self.log('reusable-profile-prepared', profile=profile_name, reused=reused)
+        else:
+            profile_name = 'Autotest-' + self.state['id']
+            test_profile = P.profiles / profile_name
+            if test_profile.exists():
+                raise Blocked('Generated test profile already exists')
+            self.state['testProfile'] = str(test_profile)
+            self.state['testProfileName'] = profile_name
+            self.save()
+            test_profile.mkdir()
+            (test_profile / 'saves').mkdir()
+            for file in (P.profiles / info['profile']).iterdir():
+                if file.is_file():
+                    shutil.copy2(file, test_profile / file.name)
         settings_file = test_profile / 'settings.ini'
         settings_text = settings_file.read_text(encoding='utf-8-sig') if settings_file.exists() else '[General]\n'
         for key in ('LocalSaves', 'LocalSettings'):
@@ -568,6 +640,8 @@ class Session:
                 text = re.sub(r'(?im)^(\s*' + key + r'\s*=).*$', r'\g<1>0', text)
                 text = set_ini(text, 'Main', key, '0')
             prefs.write_text(text, encoding='utf-8')
+        if self.state.get('borrowedMO2') and self.state['scenario'].get('activationHandStartupFixture'):
+            raise Blocked('Activation-hand self-test fixture is not qualified with reusable profiles')
         fixture_files=prepare_activation_profile(test_profile,self.state['scenario'],
                                                  P.profiles/info['profile'],self.state['id'])
         if fixture_files:
@@ -577,9 +651,10 @@ class Session:
             self.log('activation-hand-copied-profile-fixture', files=fixture_files,
                      sourceProfileUnchanged=True, cleanup='ordinary restore/archive/removal')
         # MO2 stores its selected profile in memory, so only write while it is closed.
-        text = P.mo2_ini.read_bytes().decode('utf-8-sig')
-        text = re.sub(r'(?m)^selected_profile=.*$', lambda _: 'selected_profile=@ByteArray(' + profile_name + ')', text)
-        self.write(P.mo2_ini, text)
+        if not self.state.get('borrowedMO2'):
+            text = P.mo2_ini.read_bytes().decode('utf-8-sig')
+            text = re.sub(r'(?m)^selected_profile=.*$', lambda _: 'selected_profile=@ByteArray(' + profile_name + ')', text)
+            self.write(P.mo2_ini, text)
         # Disable autobuild's redirect case: registered SKSE is already game-root based.
         self.write(P.game / 'openvr_api.dll', Path(info['stockOpenVR']).read_bytes())
         with zipfile.ZipFile(dep) as archive:
@@ -625,7 +700,10 @@ class Session:
 
     def launch(self):
         self.phase('start-mo2', 90)
-        self.spawn([str(P.mo2_exe)], 'mo2', str(P.mo2))
+        if self.state.get('borrowedMO2'):
+            self.bridge_profile(self.state['testProfileName'])
+        else:
+            self.spawn([str(P.mo2_exe)], 'mo2', str(P.mo2))
         token_file = P.bridge_token
         end = time.monotonic() + 75
         ping = None
@@ -784,6 +862,15 @@ class Session:
                     self.state.get('launchIntents') == {} and not self.state.get('game') and
                     not self.state.get('testProfile') and not self.state.get('hardwareFrame') and
                     not self.state.get('reopenMO2'))
+        if self.state.get('borrowedMO2'):
+            borrowed = self.state['borrowedMO2']
+            if not native.alive(borrowed):
+                raise RuntimeError('Borrowed MO2 exited; recovery requires original Bridge instance')
+            busy = [p for p in busy if not (p['name'].lower() == 'modorganizer.exe'
+                    and p['pid'] == borrowed['pid'] and native.identity(p['pid']) == borrowed)]
+            if busy:
+                raise RuntimeError(f'Unexpected session before Bridge restoration: {busy}')
+            self.bridge_profile(self.state['preflight']['originalBridgeProfile'], restoring=True)
         if pristine and idle and native.alive(idle):
             preserved = [p for p in busy if p['name'].lower() == 'modorganizer.exe' and
                          p['pid'] == idle['pid'] and native.identity(p['pid']) == idle]
@@ -818,7 +905,14 @@ class Session:
         if errors:
             raise RuntimeError(f'Restoration incomplete: {errors}')
         profile = self.state.get('testProfile')
-        if profile and Path(profile).exists():
+        if self.state.get('reusableProfile'):
+            from . import profile_cache
+            value = self.state['reusableProfile']
+            profile_cache.release(ROOT, P.profiles, value['key'], value['name'],
+                                  self.state['id'], self.dir / 'test-profile', atomic_json)
+            self.state['profileArchive'] = str(self.dir / 'test-profile')
+            self.save()
+        elif profile and Path(profile).exists():
             source = Path(profile).resolve()
             destination = (self.dir / 'test-profile').resolve()
             if source.parent != P.profiles.resolve() or source.name != 'Autotest-' + self.state['id'] or not destination.is_relative_to(RUNS.resolve()):

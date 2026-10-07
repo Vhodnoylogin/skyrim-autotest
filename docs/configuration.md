@@ -22,6 +22,7 @@ file whose content is read immediately before an authenticated request.
 | staged_plugins | External source files staged into MO2 overwrite before launch, with source/destination/sha256 |
 | devbench_runtime_files | Optional discovery file override list; default LOCALAPPDATA/devbench/vr/runtime.json and overwrite/SKSE/Plugins/devbench/runtime.json |
 | controller_start_positions_metres | Optional platform-owned left/right tracking translations, three finite metre values each within [-2,2]; open-hand pose applied once after common gameplay readiness and before subject actions |
+| reuse_test_profile | Optional boolean, default false; candidate lifecycle requiring an already-open idle MO2 with session-bound native Bridge selection; reuse an owned archived profile across compatible runs/series |
 | allow_background_physical_vr | Optional boolean, default false; semantic platform physical actions observe owned focus without requesting it and may proceed in background only with the owned file driver; native gameplay assertions remain mandatory |
 
 Background permission applies only to semantic platform physical checkpoints.
@@ -61,3 +62,34 @@ is not live dependency readiness. `preflight` checks actual configured binaries,
 profile, busy processes, SteamVR input profile, Root Builder stock DLL and
 selected mod configurations. Each run stores its resolved config for recovery.
 Do not move runtime or installed code before recovery finishes.
+
+## Candidate reusable profile lifecycle
+
+`reuse_test_profile: true` keeps the exact preflight MO2 process open. It requires
+Bridge `/session` and native `/profiles/select`; process path/birth, boot, instance,
+profiles directory and selected profile are verified. No `selected_profile` disk
+write occurs while MO2 is alive. An explicit restart flag does not override this
+mode. The current source path is covered by non-game tests, not live qualification.
+Keep existing qualified platform configurations unchanged until Polygon qualifies
+this candidate outside any active attempt.
+
+The inactive working profile is keyed by source path and hashes of its top-level
+files. Saves are reset independently from the pinned fixture. Settings and lists
+are reset from the source before each attempt, with local saves/settings and
+no-autosave preparation retained. The original profile's saves are never copied
+into the working save directory. Changes in source composition/settings select a
+new compatibility key; old archived copies remain available as evidence.
+
+At run completion the executor switches back through Bridge, verifies idle MO2,
+restores per-run file snapshots, copies working-profile evidence into the run and
+moves the same working profile outside MO2 into `runtime/reusable-profiles`.
+The next compatible attempt moves that directory back, checks archive integrity
+and resets saves/settings without constructing another profile. An interrupted
+lease blocks reuse until the owning run is recovered. This applies across series;
+profile lifecycle itself grants or revokes no launch authority.
+
+If the borrowed MO2 exits or its Bridge boot changes, or the owner selects an
+unrelated profile, automatic recovery stops with retained backups instead of
+writing settings under an unknown instance. Recovery of that boundary is not yet
+automated. Activation-hand startup selftest fixtures are unsupported in this
+candidate. It is not a replacement for all existing recovery qualification.
