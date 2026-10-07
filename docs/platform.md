@@ -393,3 +393,10 @@ The world guard accepts this completed initial epoch while keeping stream gaps,
 later loads, process changes and incomplete transitions terminal. A subsequent
 owned-load attempt cannot fall back to the original bootstrap epoch. The epoch is
 an executor continuity guard, not an atomic engine generation contract.
+
+Body-scene node origins use their actual finite world translation. Head clearance
+and the observed arm chain do not rotate a local offset, so their unused node
+rotation is not treated as a prerequisite for those position observations.
+Slot centres and palm offsets still validate the full rotation/scale before
+applying local coordinates. Raw matrices remain unchanged and retained; this
+does not normalize skeletal animation data or weaken controller pose validation.

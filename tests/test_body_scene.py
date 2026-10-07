@@ -41,6 +41,26 @@ class BodySceneTests(unittest.TestCase):
             b=Backend();change(b)
             with self.assertRaises(ValueError):domain.centres(b,[14])
 
+    def test_unused_head_rotation_does_not_block_actual_slot_geometry(self):
+        b=Backend()
+        # Engine animation matrices need not be exactly rigid. The head's
+        # origin is observed directly; no rotated mouth offset is requested.
+        b.raw['nodes'][1]['world']['rotationRowMajor']=[.998,0,0,0,1,0,0,0,1]
+        points,nodes=domain.centres(b,[14])
+        self.assertEqual(points[14],[4,4,108])
+        self.assertEqual(nodes[(domain.HEAD,False)]['translation'],[10,0,100])
+
+    def test_rotated_slot_offsets_still_require_valid_rigid_geometry(self):
+        for rotation in ([.998,0,0,0,1,0,0,0,1],[-1,0,0,0,1,0,0,0,1],
+                         [1,1,0,0,1,0,0,0,1], [float('nan')]*9):
+            b=Backend();b.raw['nodes'][0]['world']['rotationRowMajor']=rotation
+            with self.subTest(rotation=rotation),self.assertRaises(ValueError):domain.centres(b,[14])
+
+    def test_head_origin_remains_unavailable_for_nonfinite_or_malformed_translation(self):
+        for translation in ([0,0,float('nan')],[float('inf'),0,0],[True,0,0],[0,0],None):
+            b=Backend();b.raw['nodes'][1]['world']['translation']=translation
+            with self.subTest(translation=translation),self.assertRaises(ValueError):domain.centres(b,[14])
+
     def test_clearance_checks_all_slots_and_head_in_measured_engine_units(self):
         b=Backend();points={i:[100,0,0] for i in range(1,15)};nodes={(domain.HEAD,False):{'translation':[0,100,0]}}
         with patch.object(domain,'centres',return_value=(points,nodes)):

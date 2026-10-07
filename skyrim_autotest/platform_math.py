@@ -49,6 +49,15 @@ def pose_frames(start, target):
         yield frame
 
 
+def world_translation(transform):
+    """Observed world origin; orientation and scale do not participate."""
+    value = transform.get('translation')
+    if (not isinstance(value, list) or len(value) != 3 or
+            any(type(v) not in (int, float) or not math.isfinite(v) for v in value)):
+        raise ValueError('Scene world translation unavailable')
+    return list(value)
+
+
 def world_bounds_center(bounds, transform):
     """Observed scene-root transform of native local model bounds, not collision COM."""
     def finite(values, count):
@@ -60,7 +69,7 @@ def world_bounds_center(bounds, transform):
         raise ValueError('Model bounds invalid or outside bounded grip domain')
     local=[(a+b)/2 for a,b in zip(lower,upper)]
     rotation=finite(transform.get('rotationRowMajor'),9)
-    translation=finite(transform.get('translation'),3)
+    translation=world_translation(transform)
     scale=transform.get('scale')
     if type(scale) not in (int,float) or not math.isfinite(scale) or not 0<scale<=100:
         raise ValueError('Scene transform scale unavailable')

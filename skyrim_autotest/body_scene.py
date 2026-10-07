@@ -1,7 +1,7 @@
 """Observed VRIK slot centres and bounded physical approaches; no subject routing."""
 import copy
 import math
-from .platform_math import world_bounds_center,fixture_offset,solve3,body_reach_envelope
+from .platform_math import world_bounds_center,world_translation,fixture_offset,solve3,body_reach_envelope
 
 # VRIK's public14-slot skeleton binding, also used by BodyPouches Game::Body.
 BONES=('NPC COM [COM ]','NPC Pelvis [Pelv]','NPC L Thigh [LThg]','NPC R Thigh [RThg]',
@@ -33,13 +33,17 @@ def transforms(b, nodes):
         if handle is not None and handle!=identity['runtimeHandle']:raise ValueError('Body nodes belong to different incarnations')
         handle=identity['runtimeHandle']
         transform=row.get('world',{})
-        world_bounds_center({'min':[0,0,0],'max':[0,0,0]},transform)
+        # Node world origins (head clearance / arm chain) need translation only.
+        # Consumers applying a local offset must separately validate the full
+        # rotation/scale via world_bounds_center; never normalize native data.
+        world_translation(transform)
         result[(name,first)]=transform
     key=(raw['sessionId'],raw['loadGeneration'],handle)
     if hasattr(b,'_body_scene_identity') and b._body_scene_identity!=key:
         raise ValueError('Body scene incarnation changed during action')
     b._body_scene_identity=key
-    b.guard_world();b.s.log('platform-body-scene',snapshot=raw,atomicWithSettings=False)
+    b.guard_world();b.s.log('platform-body-scene',snapshot=raw,atomicWithSettings=False,
+                          validationBasis='exact native incarnation/units and finite world origins; local-offset consumers separately require rigid rotation/scale')
     return result
 
 
