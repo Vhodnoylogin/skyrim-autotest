@@ -144,10 +144,19 @@ def start_new_game(session, cell):
         loading = [event for event in fresh if event.get('topic') == 'menu'
                    and event.get('data') == {'name': 'Loading Menu', 'opening': True}]
         loaded = [event for event in fresh if event.get('topic') == 'scene.cellLoaded'
-                  and event.get('data', {}).get('cell') == cell]
-        if closed and loading and loaded and closed[0]['seq'] <= loading[0]['seq'] < loaded[0]['seq']:
+                  and isinstance(event.get('data', {}).get('cell'), str)
+                  and event['data']['cell'] not in ('', 'VRPlayroom01')]
+        initial_scene = session.tool('inspect', {'kind':'scene'}) if closed and loading and loaded else {}
+        transition = new_game_transition(closed, loading, loaded, initial_scene)
+        if transition:
+            initial_menus = session.tool('menu', {'action':'list','includeFlags':True})
+            if {'Main Menu','Loading Menu'} & set(initial_menus.get('openMenus',[])):
+                time.sleep(.5)
+                continue
             session.state['newGameStarted'] = {'events': fresh, 'selection': matches[0],
                                               'evidenceBasis': 'Identified NEW confirmation and fresh menu/loading/cell transition',
+                                              'initialScene': initial_scene, 'initialMenus': initial_menus,
+                                              'requestedFixtureCell': cell,
                                               'lifecycleNewGameObserved': any(
                                                   e.get('topic') == 'lifecycle' and e.get('data', {}).get('event') == 'newGame'
                                                   for e in fresh),
@@ -163,6 +172,15 @@ def start_new_game(session, cell):
                 menus=session.tool('menu', {'action': 'list'}),
                 scene=session.tool('inspect', {'kind': 'scene'}))
     raise AssertionError('New Game request had no verified fresh world transition')
+
+
+def new_game_transition(closed, loading, loaded, scene):
+    """Alternate starts choose the initial cell; the fixture cell comes afterward."""
+    if not closed or not loading or scene.get('playerLoaded') is not True: return False
+    current = scene.get('cell', {}).get('editorId')
+    if not isinstance(current, str) or not current or current == 'VRPlayroom01': return False
+    return any(closed[0]['seq'] <= loading[0]['seq'] < event['seq']
+               and event.get('data', {}).get('cell') == current for event in loaded)
 
 
 def complete_character_creation(session):
@@ -400,6 +418,10 @@ def prepare_gameplay(session, scenario):
     prepare_startup_screen(session)
     if new_game:
         start_new_game(session, cell)
+        session.phase('gameplay-new-game-initial-world', 120)
+        loaded_scene, _ = wait_gameplay_ready(session, None, True)
+        session.log('gameplay-new-game-initial-world-ready', scene=loaded_scene,
+                    requestedFixtureCell=cell, subjectStarted=False)
     if fixture:
         from .runner import request
         session.phase('gameplay-load-pinned-fixture', 120)
@@ -425,13 +447,15 @@ def prepare_gameplay(session, scenario):
     session.phase('gameplay-world-ready', 120)
     vr_probe.guard_fixture_modal(session)
     if cell:
-        already_in_cell = (fixture and loaded_scene.get('playerLoaded') is True and
+        already_in_cell = ((fixture or new_game) and loaded_scene.get('playerLoaded') is True and
                            loaded_scene.get('cell', {}).get('editorId') == cell)
-        if not new_game and not already_in_cell:
+        if not already_in_cell:
             session.tool('console', {'action': 'exec', 'command': 'coc ' + cell})
+            session.log('gameplay-fixture-cell-requested', cell=cell,
+                        afterInitialNewGameWorld=bool(new_game), subjectStarted=False)
         elif already_in_cell:
             session.log('gameplay-cell-transition-skipped', cell=cell,
-                        reason='pinned fixture already loaded in declared cell')
+                        reason='initialized fixture/new game already loaded in declared cell')
         scene = vr_probe.wait_test_cell(session, cell)
     else:
         scene = session.tool('inspect', {'kind': 'scene'})
@@ -439,7 +463,7 @@ def prepare_gameplay(session, scenario):
         # New-game scripts may post their notification only after cell loading.
         # Re-read the world after answering a classified notification.
         scene = session.tool('inspect', {'kind': 'scene'})
-    scene, menus = wait_gameplay_ready(session, cell, new_game)
+    scene, menus = wait_gameplay_ready(session, cell, False)
     session.state['gameplayBootstrap'] = {'completed': True, 'cell': cell,
                                           'loadedFixture': bool(fixture), 'startMode': scenario.get('startMode'),
                                           'scene': scene, 'menus': menus}

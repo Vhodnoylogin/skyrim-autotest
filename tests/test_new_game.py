@@ -23,8 +23,9 @@ class Session:
     def log(self, *args, **kwargs): pass
     def tool(self, name, args, **kwargs):
         self.calls.append((name, args))
-        if name == 'menu': return {'openMenus': ['Main Menu']}
-        if name == 'inspect': return {'frame': 10}
+        if name == 'menu': return {'openMenus': ['RaceSex Menu'] if self.started else ['Main Menu']}
+        if name == 'inspect':
+            return {'playerLoaded':True,'cell':{'editorId':'RealmLorkhan'}} if args.get('kind')=='scene' else {'frame':10}
         if name != 'papyrus': raise AssertionError(name)
         if args['action'] == 'describe':
             return {'name': 'UI', 'globalFunctions': [
@@ -112,8 +113,10 @@ class NewGameTests(unittest.TestCase):
         with patch.object(runner, 'request', side_effect=[{'events': []}, events]), \
                 patch.object(bootstrap.time, 'monotonic', clock.monotonic), \
                 patch.object(bootstrap.time, 'sleep', clock.sleep):
-            bootstrap.start_new_game(session, 'RealmLorkhan')
+            bootstrap.start_new_game(session, 'QASmoke')
         self.assertTrue(session.state['newGameStarted']['events'])
+        self.assertEqual(session.state['newGameStarted']['initialScene']['cell']['editorId'],'RealmLorkhan')
+        self.assertEqual(session.state['newGameStarted']['requestedFixtureCell'],'QASmoke')
         self.assertFalse(session.state['newGameStarted']['saveLoaded'])
         self.assertFalse(session.state['newGameStarted']['lifecycleNewGameObserved'])
         self.assertFalse(any(name in ('game', 'console') for name, _ in session.calls))

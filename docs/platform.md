@@ -50,6 +50,14 @@ A new game with none of these skips only the unused challenge. Runtime native
 save-directory and nonce verification remain mandatory whenever a save action
 actually requests the MO2 alias; late undeclared use cannot waive those guards.
 
+New Game's initial cell is selected by the game and installed alternate start.
+The executor verifies fresh main-menu/loading/cell events against the actual
+native loaded player/cell, then completes known character creation and quiet
+initial-world readiness. Only afterward may it request the declared fixture
+cell once and verify fresh final gameplay readiness. Initial world, fixture
+transition and subject-test start remain separate technical facts. A save-load
+lifecycle during New Game is still rejected; unknown character UI is not guessed.
+
 Implemented provider translations are scene/menu readiness, player health,
 installed form lookup, exact reference/native loose stack quantity, inventory,
 VRIK slot state, HIGGS held reference, existing Observer physics snapshots,
