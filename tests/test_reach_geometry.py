@@ -2,6 +2,7 @@ import copy
 import math
 import time
 import unittest
+from unittest.mock import patch
 from skyrim_autotest.platform_math import world_bounds_center, body_reach_envelope, fixture_offset, solve3, palm_cast_target
 from skyrim_autotest.platform import Backend
 
@@ -103,6 +104,27 @@ class ObservedReachTests(unittest.TestCase):
         self.assertEqual(b._reach_body['hand'],[0,0,10])
         snapshot['refs'][0]['identity']['runtimeHandle']=45
         with self.assertRaisesRegex(ValueError,'incarnation'):b.reference_center('0xFF001234','right')
+
+    def test_missing_reference_extents_use_only_matching_actual_native_base_bounds(self):
+        from skyrim_autotest.config import P
+        snapshot=self.snapshot();b=self.backend(snapshot)
+        b.call=lambda tool,args:(snapshot if args['kind']=='world_observer' else
+            {'refs':[{'formId':'0xFF001234','base':{'formId':'0xFF002345'}}]})
+        base={'runtimeId':'0xFF002345','bounds':{'min':[-4,-4,0],'max':[4,4,16]}}
+        with patch.dict(P.value,{'native_runtime_fixtures':True}), \
+             patch('skyrim_autotest.runtime_items.identity',return_value=base) as identity:
+            self.assertEqual(b.reference_center('0xFF001234'),[10,20,38])
+        identity.assert_called_once_with(b,'0xFF001234',reference=True)
+        for bad in ({'runtimeId':'0xFF009999','bounds':base['bounds']},
+                    {'runtimeId':'0xFF002345'},
+                    {'runtimeId':'0xFF002345','bounds':{'min':[0,0,0],'max':[0,0,0]}},
+                    {'runtimeId':'0xFF002345','bounds':{'min':[0,0,0],'max':[float('nan'),0,0]}}):
+            b=self.backend(snapshot)
+            b.call=lambda tool,args:(snapshot if args['kind']=='world_observer' else
+                {'refs':[{'formId':'0xFF001234','base':{'formId':'0xFF002345'}}]})
+            with self.subTest(bad=bad),patch.dict(P.value,{'native_runtime_fixtures':True}), \
+                 patch('skyrim_autotest.runtime_items.identity',return_value=bad),self.assertRaises(ValueError):
+                b.reference_center('0xFF001234')
 
     def test_wrong_units_nodes_identity_or_generation_never_fall_back_to_origin(self):
         cases=[lambda s:s.update(units='havok'),

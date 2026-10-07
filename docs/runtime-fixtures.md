@@ -4,7 +4,7 @@ These capabilities are implemented and checked offline, but not activated or
 qualified in the installed game. Missing providers remain unavailable.
 
 The owner DevBench fork adds `runtime_fixture` at source commit
-`fa9c998868471aaa78c694f2e8759b4dc51c50be` in
+`d6630ddd672bef22bf2121944fb2c7b8ffec4f1c` in
 https://github.com/Vhodnoylogin/devbench. CommonLib remains pinned to
 `9106d402cfc7dcbc5bf7458be6748af19d7fc914`. Reacquire and build outside Git,
 using a short output path on Windows:
@@ -54,3 +54,10 @@ VRIK slot13/14 and rotated/scaled avatar geometry, genuine held-item/inventory
 reads, each settings variant through common restart, and full restoration.
 Source acceptance of all457 requests in retained order19 is only structural
 coverage. New subject diagnostics require the origin's new immutable build/order.
+
+Runtime ALCH duplication preserves the exact native template OBND by value and
+reports the actual registered base bounds in identity receipts. A missing or
+zero-volume template is rejected before allocation. If a reference does not
+expose GetBoundMin/Max, the opt-in native identity provider may supply actual
+TESBoundObject bounds only after its registered base identity matches the exact
+inspected reference. Missing/nonfinite bounds never become guessed extents.

@@ -271,9 +271,25 @@ class Backend:
         if ref not in self._grip_bounds:
             rows=self.call('inspect',{'kind':'refs','formId':ref}).get('refs',[])
             exact=[row for row in rows if int(row.get('formId','0'),16)==int(ref,16)]
-            if len(exact)!=1 or not isinstance(exact[0].get('bounds'),dict):
+            if len(exact)!=1:
                 raise ValueError('Exact native model bounds unavailable')
-            self._grip_bounds[ref]=exact[0]['bounds']
+            bounds=exact[0].get('bounds')
+            if not isinstance(bounds,dict):
+                from .config import P
+                if P.value.get('native_runtime_fixtures') is True:
+                    from .runtime_items import identity
+                    base=identity(self,ref,reference=True)
+                    reported=exact[0].get('base',{}).get('formId')
+                    if (not isinstance(reported,str) or int(reported,16)!=int(base['runtimeId'],16)):
+                        raise ValueError('Native bounds base differs from exact inspected reference')
+                    bounds=base.get('bounds')
+                    self.s.log('platform-reference-native-base-bounds',reference=ref,item=base,
+                               basis='actual registered reference base TESBoundObject OBND; ref GetBoundMin/Max unavailable; not inferred mesh or collision bounds')
+            if not isinstance(bounds,dict):
+                raise ValueError('Exact native model bounds unavailable')
+            if bounds.get('min')==bounds.get('max'):
+                raise ValueError('Native model bounds have no extent')
+            self._grip_bounds[ref]=bounds
         query={'kind':'world_observer','refs':[ref]}
         names = None
         if hand:

@@ -12,7 +12,7 @@ from build_devbench_compat import sha, XMAKE_URL, XMAKE_SHA
 SOURCE = 'https://github.com/Vhodnoylogin/devbench.git'
 COMMIT = '0d8caaec64ff4cfc904c1ff5914533c295003119'
 COMMONLIB = '9106d402cfc7dcbc5bf7458be6748af19d7fc914'
-RUNTIME_FIXTURES = 'fa9c998868471aaa78c694f2e8759b4dc51c50be'
+RUNTIME_FIXTURES = 'd6630ddd672bef22bf2121944fb2c7b8ffec4f1c'
 ROOT = Path(__file__).resolve().parents[1]
 
 

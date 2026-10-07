@@ -29,6 +29,11 @@ json Identity(const RE::TESForm* form) {
         {"sourceFilePolicy",files.empty()?"absent":dynamic?"inherited-template-file":"plugin-file"},
         {"plugin",files.empty()?json(nullptr):files.front()},
         {"localId",dynamic?json(nullptr):json(std::format("{:06X}",form->GetLocalFormID()))}};
+    if(auto* object=form->As<RE::TESBoundObject>()) {
+        const auto& min=object->boundData.boundMin;
+        const auto& max=object->boundData.boundMax;
+        out["bounds"]={{"min",{min.x,min.y,min.z}},{"max",{max.x,max.y,max.z}}};
+    }
     return out;
 }
 // Accessed only inside MainThread::RunAndWait. Entries precede mutations and are
@@ -70,19 +75,31 @@ json Handle(const json& args,const ToolContext&) {
         const auto policy=args.at("sourceFilePolicy").get<std::string>();
         if(policy!="absent"&&policy!="inherited-template-file")throw ToolError(400,"Unknown source file policy");
         if(policy=="inherited-template-file"&&!source->GetFile(0))throw ToolError(422,"Template has no native source file");
+        const auto templateBounds=source->boundData;
+        const auto& min=templateBounds.boundMin;
+        const auto& max=templateBounds.boundMax;
+        if(min.x>max.x||min.y>max.y||min.z>max.z||
+           (min.x==max.x&&min.y==max.y&&min.z==max.z))
+            throw ToolError(422,"Native template model bounds unavailable; no allocation");
         creations[key]={{"status","creating"},{"owner",owner},{"command",command},{"template",Identity(source)}};
         auto* duplicate=source->CreateDuplicateForm(false,nullptr);
         if(!duplicate||duplicate==source||duplicate->GetFormType()!=RE::FormType::AlchemyItem||
            (duplicate->GetFormID()>>24)!=0xff||RE::TESForm::LookupByID(duplicate->GetFormID())!=duplicate)
             throw ToolError(422,"Engine did not register a distinct runtime ALCH base; no fallback or replay");
+        // Engine duplication can omit OBND even when the model path/effects
+        // were copied. Preserve the exact native template extents by value;
+        // never substitute guessed mesh bounds or edit the source object.
+        auto* potion=duplicate->As<RE::AlchemyItem>();
+        if(!potion)throw ToolError(422,"Duplicated ALCH object unavailable; no replay");
+        potion->boundData=templateBounds;
         // Change only the duplicate's pointer field. Never edit/free the source
         // array, which may be shared by the engine's duplicate operation.
         if(policy=="absent")duplicate->sourceFiles.array=nullptr;
         else if(duplicate->GetFile(0)!=source->GetFile(0))duplicate->SetFile(source->GetFile(0));
         auto observed=Identity(duplicate);
-        if(observed["sourceFilePolicy"]!=policy ||
+        if(observed["bounds"]!=creations[key]["template"]["bounds"]||observed["sourceFilePolicy"]!=policy ||
             (policy=="inherited-template-file"&&duplicate->GetFile(0)!=source->GetFile(0)))
-            throw ToolError(422,"Actual runtime ALCH source policy mismatch; no replay");
+            throw ToolError(422,"Actual runtime ALCH bounds/source policy mismatch; no replay");
         creations[key].update({{"status","completed"},{"pid",GetCurrentProcessId()},
             {"frame",game::CurrentFrame()},{"item",observed}});
         return creations[key];

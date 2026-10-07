@@ -69,7 +69,7 @@
   },
   "runtimeFixtureCandidate": {
     "source": "https://github.com/Vhodnoylogin/devbench.git",
-    "commit": "fa9c998868471aaa78c694f2e8759b4dc51c50be",
+    "commit": "d6630ddd672bef22bf2121944fb2c7b8ffec4f1c",
     "commonlibCommit": "9106d402cfc7dcbc5bf7458be6748af19d7fc914",
     "rebuild": "python tools/build_devbench_fork.py --runtime-fixtures --build-dir D:/svb-fixture-build",
     "ownedIntegrationSource": "native/devbench; tools/apply_devbench_fixture_provider.py",
