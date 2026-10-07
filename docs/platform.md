@@ -27,6 +27,22 @@ NiOverride function completed and loaded actor data returned; it does not
 certify renderer synchronization, TRI deformation or final physics. This
 extension requires its own actual game qualification before activation.
 
+The speech candidate maps ordinary native SpeechBroker availability, interface,
+adapters, ASR source, registered namespaces, localized vocabulary and existing
+utterance data. Recognition counts use actual nonempty text and native vocabulary
+score strictly above the requested threshold; awards additionally require native
+IsWinner. Reads never inject utterances, register participants or bid. Returned
+utterance records retain the subject probe's fields and millisecond latency;
+they are sequential reads, not an atomic auction snapshot.
+
+One ordinary SelfTest request is recorded durably before dispatch. The current
+SpeechBroker.log must contain exactly one newly appended localized start token;
+only its matching native pong message establishes roundtrip completion. Log
+rotation/replacement, process change, overlapping starts or missing templates
+are unavailable. Pending evidence is not completion. Request timeouts never
+replay. This adapter requires live qualification with genuine audio/model output;
+offline checks or native request completion do not attest speech recognition.
+
 Implemented provider translations are scene/menu readiness, player health,
 installed form lookup, exact reference/native loose stack quantity, inventory,
 VRIK slot state, HIGGS held reference, existing Observer physics snapshots,

@@ -62,6 +62,8 @@ def validate(args):
         raise ValueError('Semantic request must be an object')
     from . import actor_domain
     if actor_domain.validate(operation, req): return
+    from . import speech_domain
+    if speech_domain.validate(operation, req): return
     if operation in ('state.read', 'player.read') and req:
         raise ValueError('State/player read takes no request')
     if operation == 'world.read' and req.get('observation') not in OBSERVATIONS:
@@ -426,6 +428,8 @@ class Backend:
                             'basis': 'native Potion and MagicEffect queries; sequential non-atomic snapshot'}}
 
     def observe(self, req):
+        from . import speech_domain
+        if req.get('observation') in speech_domain.OBSERVATIONS: return speech_domain.observe(self, req)
         if 'quantity' in req:
             from .actor_domain import observe
             return observe(self, req)
@@ -619,6 +623,8 @@ class Backend:
         action = req['action']
         from . import actor_domain
         if action in actor_domain.ACTIONS: return actor_domain.perform(self, req)
+        from . import speech_domain
+        if action == speech_domain.ACTION: return speech_domain.perform(self, req)
         if action == 'tag_held_reference':
             references=self.s.state.setdefault('platformReferences',{})
             tag=req['referenceTag']

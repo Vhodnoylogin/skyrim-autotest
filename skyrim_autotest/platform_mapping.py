@@ -18,7 +18,10 @@ def operations():
                        'reference.existsInLoadedWorld', 'reference.id', 'reference.quantity.items',
                        'reference.item.plugin', 'reference.item.localId', 'actor.reference', 'actor.base',
                        'actor.sex', 'actor.race', 'actor.loaded3D', 'actor.weight',
-                       'actorBase.sex', 'actorBase.race', 'morph.value'],
+                       'actorBase.sex', 'actorBase.race', 'morph.value', 'speech.broker.available',
+                       'speech.broker.interfaceVersion', 'speech.broker.adapters', 'speech.broker.asrSource',
+                       'speech.subscribers.namespaces', 'speech.vocabulary.phrase', 'speech.events.roundtripCompleted',
+                       'speech.recognition.doorTextCount', 'speech.auction.doorGreedyAwardCount', 'speech.utterances.records'],
         'controller.perform': [], 'object.perform': ['action.completed'], 'input.perform': [], 'menu.read': []
     }
     result = {}
