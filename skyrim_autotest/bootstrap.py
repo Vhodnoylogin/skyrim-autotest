@@ -6,7 +6,7 @@ from . import hardware, vr_probe
 
 
 def advance_calibration(session):
-    """One physical button only for the identified VR calibration screen."""
+    """Bounded physical candidates only while the exact calibration stays open."""
     menus = session.tool('menu', {'action': 'list'})
     if 'CalibrationOptionMenu' not in menus.get('openMenus', []):
         return False
@@ -19,39 +19,69 @@ def advance_calibration(session):
     if session.state.get('inputBackend') != 'driver' or session.state.get('driverBackend') != 'file':
         raise AssertionError('Known calibration screen requires qualified physical input backend')
     session.phase('gameplay-startup-calibration-button', 25)
-    end = time.monotonic() + 8
-    while 'Fader Menu' in menus.get('openMenus', []):
-        if time.monotonic() >= end:
-            raise AssertionError('Startup fade remained active; no calibration input sent')
-        time.sleep(.25)
-        menus = session.tool('menu', {'action': 'list'})
-        if menus.get('messageBoxOpen'):
-            vr_probe.guard_fixture_modal(session)
-            menus = session.tool('menu', {'action': 'list'})
-    if 'CalibrationOptionMenu' not in menus.get('openMenus', []):
-        return True
-    session.log('gameplay-startup-screen', menus=menus, scene=scene)
-    frame = hardware.neutral()
-    frame['right']['controller'].update(pressed=1 << 33, touched=1 << 33,
-                                        axes=[[0, 0], [1, 0], [0, 0], [0, 0], [0, 0]])
-    try:
-        session.tool('driver', {'action': 'publish', 'holdSeconds': 2, 'frame': frame})
-        time.sleep(.15)
-    finally:
-        session.tool('driver', {'action': 'release'})
-    end = time.monotonic() + 12
-    while time.monotonic() < end:
+    end = min(time.monotonic()+20, getattr(session, 'deadline', float('inf')))
+    from .readiness_reads import ReadinessSession
+    # Expiry must prevent another press, never the local neutral release.
+    release_session = session.session if isinstance(session, ReadinessSession) else session
+    session = ReadinessSession(session, end)
+
+    def current_screen():
         current = session.tool('menu', {'action': 'list'})
         if current.get('messageBoxOpen'):
-            # A late known startup notification can consume UI input. Collect
-            # its exact text; unknown choices remain terminal, never guessed.
             vr_probe.guard_fixture_modal(session)
             current = session.tool('menu', {'action': 'list'})
         if 'CalibrationOptionMenu' not in current.get('openMenus', []):
             session.log('gameplay-startup-screen-cleared', menus=current)
-            return True
-        time.sleep(.25)
-    raise AssertionError('Startup calibration remained open after one physical button')
+        return current
+
+    candidates = (('right','trigger'), ('left','trigger'),
+                  ('right','grip'), ('left','grip'))
+    for attempt, (hand, button) in enumerate(candidates, 1):
+        # Every candidate needs a new known-screen observation and owned scene
+        # read; a different world or unknown dialog never receives input.
+        while True:
+            current = current_screen()
+            while 'Fader Menu' in current.get('openMenus', []):
+                if time.monotonic() >= end:
+                    raise AssertionError('Startup fade remained active; no further calibration input sent')
+                time.sleep(.25)
+                current = current_screen()
+            if 'CalibrationOptionMenu' not in current.get('openMenus', []):
+                return True
+            scene = session.tool('inspect', {'kind':'scene'})
+            current = current_screen()
+            if 'CalibrationOptionMenu' not in current.get('openMenus', []):
+                return True
+            if 'Fader Menu' not in current.get('openMenus', []):
+                break
+        unexpected = set(current.get('openMenus', []))-{'CalibrationOptionMenu','HUD Menu'}
+        if (current.get('messageBoxOpen') or unexpected or
+                scene.get('cell',{}).get('editorId') != 'VRPlayroom01'):
+            raise AssertionError('Calibration screen identity changed; no further startup input sent')
+        if time.monotonic() >= end:
+            raise TimeoutError('Startup calibration input deadline exhausted')
+        session.log('gameplay-startup-screen', menus=current, scene=scene,
+                    attempt=attempt, hand=hand, button=button)
+        frame = hardware.neutral()
+        mask = 1 << (33 if button == 'trigger' else 2)
+        frame[hand]['controller'].update(pressed=mask, touched=mask,
+            axes=[[0,0], [1 if button == 'trigger' else 0,0], [0,0], [0,0], [0,0]])
+        try:
+            publication = session.tool('driver', {'action':'publish','holdSeconds':2,'frame':frame})
+            time.sleep(min(.35, max(0,end-time.monotonic())))
+            acknowledgement = session.tool('driver', {'action':'status'})
+            session.log('gameplay-startup-input-observed', attempt=attempt, hand=hand, button=button,
+                        publication=publication, driverStatus=acknowledgement,
+                        basis='Driver acknowledgement is separate from actual menu closure')
+        finally:
+            release_session.tool('driver', {'action':'release'})
+        observe_end = min(end,time.monotonic()+2)
+        while time.monotonic() < observe_end:
+            current = current_screen()
+            if 'CalibrationOptionMenu' not in current.get('openMenus', []):
+                return True
+            time.sleep(min(.25,max(0,observe_end-time.monotonic())))
+    raise AssertionError('Startup calibration remained open after bounded observed trigger/grip candidates')
 
 
 def start_new_game(session, cell):

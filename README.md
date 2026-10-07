@@ -148,6 +148,13 @@ and verified scene/menu readiness. Orders describe the initial world via `cell`
 and/or `fixture`; they do not script instrument-specific startup UI. Technical
 `gameplay-ready` is distinct from factual subject-test start and results.
 
+The recognized `CalibrationOptionMenu` in `VRPlayroom01` uses at most four
+observed physical candidates: right/left Trigger, then right/left Grip. Each
+candidate requires a fresh owned menu/scene check, releases in `finally`, and
+waits for actual menu closure. One shared 20-second deadline bounds the sequence;
+unknown dialogs, changed worlds and unrelated menus stop further input. Driver
+acknowledgement is logged separately and never substitutes for closure/readiness.
+
 The `vr-mobility-probe` diagnostic can run in a minimal Realm world without
 VRIK/HIGGS: it records player movement/jump and game-accessed tracked hands,
 separates physical-controller candidates from keyboard diagnostics, and attempts

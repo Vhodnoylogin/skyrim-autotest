@@ -218,13 +218,14 @@ class MobilityProbeTests(unittest.TestCase):
                 self.calls.append((name,args))
                 if name=='menu':
                     self.menus+=1
-                    return {'openMenus':['CalibrationOptionMenu'] if self.menus==1 else ['Main Menu']}
+                    published=any(name=='driver' and args['action']=='publish' for name,args in self.calls)
+                    return {'openMenus':['Main Menu'] if published else ['CalibrationOptionMenu']}
                 if name=='inspect':return {'cell':{'editorId':'VRPlayroom01'}}
         session=Session()
         with patch.object(bootstrap.time,'sleep'):
             self.assertTrue(bootstrap.advance_calibration(session))
         driver=[args for name,args in session.calls if name=='driver']
-        self.assertEqual([args['action'] for args in driver],['publish','release'])
+        self.assertEqual([args['action'] for args in driver],['publish','status','release'])
         self.assertEqual(driver[0]['frame']['right']['controller']['pressed'],1<<33)
 
     def test_calibration_sampling_exception_still_releases_button(self):

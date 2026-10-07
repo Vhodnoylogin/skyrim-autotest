@@ -153,15 +153,18 @@ class NewGameTests(unittest.TestCase):
             def tool(self, name, args, **kwargs):
                 if name == 'inspect': return {'cell': {'editorId': 'VRPlayroom01'}}
                 if name == 'driver': self.actions.append(args['action']); return {}
+                if not self.actions:
+                    return {'openMenus':['CalibrationOptionMenu'],'messageBoxOpen':False}
                 self.lists += 1
-                return {'openMenus': ['CalibrationOptionMenu'] if self.lists < 3 else ['Main Menu'],
-                        'messageBoxOpen': self.lists == 2}
+                return {'openMenus': ['CalibrationOptionMenu'] if self.lists < 2 else ['Main Menu'],
+                        'messageBoxOpen': self.lists == 1}
         session = CalibrationSession()
         with patch.object(bootstrap.time, 'sleep'), \
                 patch.object(bootstrap.vr_probe, 'guard_fixture_modal') as modal:
             self.assertTrue(bootstrap.advance_calibration(session))
-        modal.assert_called_once_with(session)
-        self.assertEqual(session.actions, ['publish', 'release'])
+        modal.assert_called_once()
+        self.assertIs(modal.call_args.args[0].session,session)
+        self.assertEqual(session.actions, ['publish', 'status', 'release'])
 
 
 if __name__ == '__main__': unittest.main()
