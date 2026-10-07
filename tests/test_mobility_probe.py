@@ -151,7 +151,10 @@ class MobilityProbeTests(unittest.TestCase):
                 self.calls.append((name,args))
                 if name=='inspect':return ({'cell':{'editorId':'VRPlayroom01'}} if len(self.calls)==1 else
                                           {'playerLoaded':True,'cell':{'editorId':'RealmLorkhan'}})
-                if name=='menu':return {'openMenus':['HUD Menu']}
+                if name=='menu':return {'openMenus':['HUD Menu'], 'messageBoxOpen':False,
+                                       'menuStates':[dict(name='HUD Menu',available=True,alwaysOpen=True,
+                                                          pausesGame=False,modal=False,usesCursor=False,
+                                                          usesMenuContext=False,freezeFramePause=False)]}
         session=Session();scene={'playerLoaded':True,'cell':{'editorId':'RealmLorkhan'}}
         with patch.object(bootstrap,'advance_calibration',return_value=True), \
                 patch.object(bootstrap.vr_probe,'guard_fixture_modal',return_value=False), \

@@ -292,11 +292,12 @@ def complete_character_creation(session):
 
 def wait_gameplay_ready(session, cell, new_game, deadline=None):
     """Require a quiet startup interval; late menus reset readiness."""
+    from .platform import menus_block_gameplay
     deadline = min(time.monotonic() + 90, deadline) if deadline is not None else time.monotonic() + 90
     stable_since = None
     character_seen = False
     while time.monotonic() < deadline:
-        menus = session.tool('menu', {'action': 'list'})
+        menus = session.tool('menu', {'action': 'list', 'includeFlags': True})
         if menus.get('messageBoxOpen'):
             vr_probe.guard_fixture_modal(session)
             stable_since = None
@@ -310,10 +311,12 @@ def wait_gameplay_ready(session, cell, new_game, deadline=None):
             stable_since = None
             continue
         scene = session.tool('inspect', {'kind': 'scene'})
-        # Every other visible menu is a readiness gate, not just known startup menus.
-        ready = (scene.get('playerLoaded') and scene.get('cell', {}).get('editorId') != 'VRPlayroom01'
-                 and (not cell or scene.get('cell', {}).get('editorId') == cell)
-                 and not opened.difference({'HUD Menu'}))
+        current_cell = scene.get('cell', {}).get('editorId')
+        ready = (scene.get('playerLoaded') is True
+                 and isinstance(current_cell, str) and bool(current_cell)
+                 and current_cell != 'VRPlayroom01'
+                 and (not cell or current_cell == cell)
+                 and not menus_block_gameplay(menus))
         session.log('gameplay-readiness-observation', scene=scene, menus=menus, ready=bool(ready))
         if ready:
             if stable_since is None:

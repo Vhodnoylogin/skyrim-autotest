@@ -85,7 +85,11 @@ class CharacterTests(unittest.TestCase):
         def tool(name,args):
             if name=='inspect': return {'playerLoaded':True,'cell':{'editorId':'RealmLorkhan'}}
             if name=='menu' and args['action']=='list':
-                return {'openMenus':['RaceSex Menu'] if 1<=clock.now<2 else ['HUD Menu']}
+                names=['RaceSex Menu'] if 1<=clock.now<2 else ['HUD Menu']
+                return {'openMenus':names, 'messageBoxOpen':False,
+                        'menuStates':[dict(name=n,available=True,alwaysOpen=True,pausesGame=False,
+                                           modal=False,usesCursor=False,usesMenuContext=False,
+                                           freezeFramePause=False) for n in names]}
             return original(name,args)
         session.tool=tool
         with patch.object(bootstrap.time,'monotonic',clock.monotonic), \
