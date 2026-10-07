@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import urllib.request
+import tempfile
 from . import runner
 
 COMMIT = 'dedb8ab33fc46b25ecee191f882951c064422505'
@@ -20,6 +21,17 @@ URL = 'https://github.com/DubiousDuo/VR-Emulator-Driver---SkyrimVR-Devkit.git'
 SDK_URL = 'https://raw.githubusercontent.com/ValveSoftware/openvr/v1.26.7/headers/openvr_driver.h'
 SDK_HASH = '2d0f91ea9bfe0ef1a60d0010f7a8fb8b4ce8bed759803c135ce4f185bdf4a9ab'
 HERE = Path(__file__).resolve().parent
+
+
+def compilation_sources(build, catalogue):
+    """Only declared flat translation units participate, never a directory glob."""
+    names = list(catalogue['files'])
+    if any(Path(name).name != name or '/' in name or '\\' in name for name in names):
+        raise ValueError('Driver catalogue must contain flat file names')
+    sources = [build/name for name in sorted(names) if name.endswith('.cpp')]
+    if not sources or any(not p.is_file() or p.is_symlink() for p in sources):
+        raise ValueError('Declared driver compilation source unavailable')
+    return sources
 
 
 def replace_function(text, signature, body):
@@ -42,8 +54,11 @@ def main():
         raise RuntimeError('Source catalogue commit mismatch')
     source = runner.ROOT / 'dependencies/driver-source-files'
     source.mkdir(parents=True, exist_ok=True)
-    build = runner.ROOT / 'dependencies/driver-build'
-    build.mkdir(exist_ok=True)
+    output = runner.ROOT / 'dependencies/driver-build'
+    output.mkdir(exist_ok=True)
+    # Never reuse transformed sources/includes/compiler intermediates. Existing
+    # caches and old build evidence remain intact outside Git.
+    build = Path(tempfile.mkdtemp(prefix='stage-', dir=output))
     from concurrent.futures import ThreadPoolExecutor
     def acquire(item):
         name, digest = item
@@ -104,18 +119,30 @@ if (m_unObjectId != vr::k_unTrackedDeviceIndexInvalid)
     vs = subprocess.check_output([str(vswhere), '-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], text=True).strip()
     if not vs:
         raise RuntimeError('Visual Studio MSVC desktop component is not installed')
-    files = sorted(build.glob('*.cpp'))
-    command = ['cl.exe', '/nologo', '/std:c++17', '/EHsc', '/O2', '/LD', '/DWIN32', '/D_WINDOWS', '/I' + str(build),
+    files = compilation_sources(build, pins)
+    command = ['cl.exe', '/nologo', '/Bv', '/std:c++17', '/EHsc', '/O2', '/LD', '/DWIN32', '/D_WINDOWS', '/I' + str(build),
                *[str(p) for p in files], '/link', '/OUT:' + str(build / 'driver_null.dll'), 'user32.lib']
     batch = build / 'build.cmd'
-    batch.write_text('@echo off\ncall "' + vs + '\\Common7\\Tools\\VsDevCmd.bat" -arch=amd64 -host_arch=amd64 >nul\nif errorlevel 1 exit /b 1\n' + subprocess.list2cmdline(command) + '\n', encoding='utf-8')
+    batch.write_text('@echo off\ncall "' + vs + '\\Common7\\Tools\\VsDevCmd.bat" -arch=amd64 -host_arch=amd64 >nul\nif errorlevel 1 exit /b 1\nwhere cl.exe > compiler-path.txt\nif errorlevel 1 exit /b 1\n' + subprocess.list2cmdline(command) + '\n', encoding='utf-8')
     with (build / 'build.log').open('w', encoding='utf-8') as output:
         subprocess.run(['cmd.exe', '/d', '/c', str(batch)], cwd=build, check=True, stdout=output, stderr=subprocess.STDOUT, timeout=300)
+    compiler = Path((build/'compiler-path.txt').read_text(encoding='utf-8-sig').splitlines()[0].strip())
+    if not compiler.is_file(): raise RuntimeError('Actual compiler identity unavailable')
     manifest = {'source': URL, 'commit': COMMIT, 'sdkHeader': SDK_URL, 'sdkHeaderSha256': runner.sha(header),
                 'sourceFileHashes': pins['files'], 'sourceCatalogueSha256': runner.sha(HERE / 'driver_sources.json'),
                 'ownProtocolSha256': runner.sha(HERE / 'autotest_protocol.h'), 'buildScriptSha256': runner.sha(Path(__file__)),
-                'dllSha256': runner.sha(build / 'driver_null.dll'), 'visualStudio': vs}
+                'dllSha256': runner.sha(build / 'driver_null.dll'), 'visualStudio': vs,
+                'buildDirectory':str(build), 'compilationSources':[p.name for p in files],
+                'transformedInputs':{p.name:runner.sha(p) for p in [*[build/name for name in pins['files']],header,build/'autotest_protocol.h']},
+                'compiler':{'path':str(compiler),'sha256':runner.sha(compiler)},
+                'command':command,'buildLogSha256':runner.sha(build/'build.log')}
     runner.atomic_json(build / 'manifest.json', manifest)
+    # Existing consumers resolve this stable output path; publish completed bytes
+    # and then their manifest. A concurrent mismatch fails preflight, never runs.
+    target=output/'driver_null.dll.next'
+    shutil.copy2(build/'driver_null.dll',target)
+    os.replace(target,output/'driver_null.dll')
+    runner.atomic_json(output/'manifest.json', manifest)
     print(json.dumps(manifest, indent=2))
 
 
