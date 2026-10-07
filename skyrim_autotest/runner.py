@@ -355,13 +355,36 @@ class Session:
         while not self.finished.wait(1):
             with self.lock:
                 self.state['heartbeat'] = time.time()
-                if self.state.get('hardwareFrame') and not self.state.get('restoringFiles'):
+                if self.state.get('hardwareFrame') and not self.state.get('restoringFiles') and not self.state.get('focusInputPaused'):
                     from . import hardware
                     if time.time() > self.state.get('hardwareHoldUntil', float('inf')):
                         hardware.release(self.state['hardwareFrame'])
                     hardware.publish(self.state['hardwareFrame'])
                 self.discover()
                 self.save()
+
+    def pause_focus_input(self):
+        from . import hardware
+        with self.lock:
+            frame = self.state.get('hardwareFrame')
+            active = bool(frame and any(
+                frame[hand]['controller'].get('pressed') or frame[hand]['controller'].get('touched') or
+                any(any(axis) for axis in frame[hand]['controller'].get('axes', []))
+                for hand in ('left', 'right')))
+            self.state['focusInputPaused'] = True
+            if frame:
+                hardware.release(frame)
+                hardware.publish(frame)
+                self.state['hardwareHoldUntil'] = time.time()
+            self.save()
+            self.log('focus-input-paused', activeInputReleased=active)
+            return active
+
+    def resume_focus_input(self):
+        with self.lock:
+            self.state['focusInputPaused'] = False
+            self.save()
+            self.log('focus-input-resumed', replayedInput=False)
 
     def driver_tool(self, args):
         if self.state.get('inputBackend') != 'driver' or self.state.get('driverBackend') != 'file':
@@ -379,6 +402,8 @@ class Session:
                 hardware.publish(self.state['hardwareFrame'])
                 result = {'published': True, 'released': True, 'acknowledgedByDriver': False}
             elif action == 'publish':
+                if self.state.get('focusInputPaused'):
+                    raise Blocked('Input publication paused while waiting for owned game focus')
                 frame = copy.deepcopy(args['frame'])
                 duration = args['holdSeconds']
                 hardware.publish(frame)

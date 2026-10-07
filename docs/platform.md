@@ -117,3 +117,12 @@ actual native quantity on the sampled held reference and exposes
 hand.quantity.items; HIGGS splitting a stack is visible, not hidden. This is a
 sequential observation, not uninterrupted holding proof. Both changes require
 new live qualification before the operator may deploy them.
+
+Focus recovery candidate: a transient denied owned-game foreground request
+releases active controls once, suppresses heartbeat/publication and waits up to
+30seconds inside the existing phase/action deadline. Owned process identity is
+rechecked by each native focus attempt. Successful recovery never restores old
+buttons; if active controls were released, the interrupted action fails rather
+than being replayed. Neutral startup can continue once focus is measured.
+Explicit background physical routing remains opt-in; this does not authorize
+background UI input. Timeout remains terminal with full logs and recovery.

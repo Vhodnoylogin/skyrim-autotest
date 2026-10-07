@@ -586,22 +586,50 @@ def execute(session, scenario):
         raise AssertionError('Grip/release finished, but third-person hand movement remains unproved')
 
 
-def ensure_owned_focus(session, scenario, checkpoint):
-    """Background VR is explicit and still requires unchanged physical assertions."""
+def ensure_owned_focus(session, scenario, checkpoint, deadline=None):
+    """Bounded focus recovery, never replays a released physical action."""
     from . import native
     platform_background = (checkpoint.startswith('platform-') and
                            session.state.get('configuration', {}).get('allow_background_physical_vr') is True)
     background = scenario.get('allowBackgroundVR', False) or platform_background
     if background and (session.state.get('inputBackend') != 'driver' or session.state.get('driverBackend') != 'file'):
         raise ValueError('Background VR requires the physical file-adapter backend')
-    result = (native.focus_owned(session.state['game'], activate=False) if platform_background
-              else native.focus_owned(session.state['game']))
+    end = time.monotonic() + 30
+    if deadline is not None:
+        end = min(end, deadline)
+    if 'deadline' in session.state:
+        end = min(end, time.monotonic() + max(0, session.state['deadline'] - time.time()))
+    # Observe first: active input must be neutralized before any activation wait.
+    result = (native.focus_owned(session.state['game'], timeout=max(.01, min(3, end-time.monotonic())))
+              if background and not platform_background else native.focus_owned(session.state['game'], activate=False))
     session.log(checkpoint, result=result)
-    if not result['focused']:
-        if not background:
-            raise AssertionError('Windows did not grant foreground to the owned game')
-        session.log('background-vr-attempt', checkpoint=checkpoint, foreground=result,
-                    physicalAssertionsRequired=True, acceptedAsInputProof=False)
+    if background:
+        if not result['focused']:
+            session.log('background-vr-attempt', checkpoint=checkpoint, foreground=result,
+                        physicalAssertionsRequired=True, acceptedAsInputProof=False)
+        return result
+    paused, interrupted_input = False, False
+    while not result['focused']:
+        if not paused:
+            interrupted_input = session.pause_focus_input()
+            paused = True
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            raise AssertionError('Windows did not grant foreground to the owned game within focus deadline')
+        session.log('focus-waiting', checkpoint=checkpoint, remainingSeconds=remaining,
+                    result=result, mutationsReplayed=False)
+        time.sleep(min(.25, remaining))
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            continue
+        result = native.focus_owned(session.state['game'], timeout=min(2, remaining))
+    if time.monotonic() > end:
+        raise AssertionError('Owned game focus arrived after focus deadline')
+    if paused:
+        session.resume_focus_input()
+        session.log('focus-recovered', checkpoint=checkpoint, mutationsReplayed=False)
+        if interrupted_input:
+            raise AssertionError('Focus recovered after active input was released; action not replayed')
     return result
 
 

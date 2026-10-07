@@ -326,7 +326,7 @@ class Backend:
             return observed
         from .vr_probe import ensure_owned_focus
         self.remaining()
-        ensure_owned_focus(self.s, {}, 'platform-controller-owned-focus')
+        ensure_owned_focus(self.s, {}, 'platform-controller-owned-focus', deadline=self.end)
         frame = self.frame()
         hand = req['hand']
         other = 'right' if hand == 'left' else 'left'
@@ -404,7 +404,7 @@ class Backend:
         if action == 'reach_and_grip_reference':
             # Pose delivery can work while game input is suspended. Recheck the
             # owned foreground and neutral interval before the single rising edge.
-            ensure_owned_focus(self.s, {}, 'platform-grip-owned-focus')
+            ensure_owned_focus(self.s, {}, 'platform-grip-owned-focus', deadline=self.end)
             self.publish(frame, .5)
             self.pause(.5)
             menus = self.call('menu', {'action': 'list', 'includeFlags': True})
