@@ -179,3 +179,11 @@ class FixtureModalTests(unittest.TestCase):
         self.assertTrue(session.open)
 
 if __name__=='__main__':unittest.main()
+
+
+class NativeModalRoutingTests(unittest.TestCase):
+    def test_known_native_notice_requires_no_os_focus_or_keyboard(self):
+        session=FakeSession('Speech Broker на связи',['OK'])
+        with patch('skyrim_autotest.vr_probe.ensure_owned_focus',side_effect=AssertionError('OS focus must not be requested')):
+            self.assertTrue(guard_fixture_modal(session))
+        self.assertEqual(len(session.accepts),1)

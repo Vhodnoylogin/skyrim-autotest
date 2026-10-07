@@ -170,10 +170,14 @@ def accept_known_vr_modal(session, modal, answered_ids):
         again = log_modal_queue(session, 'startup-modal-native-target-recheck')
         if fresh.get('bodyText') != modal['bodyText'] or fresh.get('buttons') != modal['buttons'] or again != before:
             raise AssertionError('Native notification target changed before answer; no input sent')
-    ensure_owned_focus(session, {}, 'startup-modal-owned-focus')
+    # This is a DevBench native queued answer, not OS keyboard/mouse input.
+    # Foreground is irrelevant to its exact notification target and closure.
+    # Keep all identity/replay guards and re-read immediately before mutation.
+    session.log('startup-modal-native-answer-routing', foregroundRequired=False,
+                route='owned DevBench native menu queue; no OS input')
     current = session.tool('menu', {'action': 'describe'})
     if current.get('bodyText') != modal['bodyText'] or current.get('buttons') != modal['buttons']:
-        raise AssertionError('Startup modal changed after focus; no answer sent')
+        raise AssertionError('Startup modal changed before native answer; no answer sent')
     response = session.tool('menu', {'action': 'accept', 'index': 0})
     session.log('startup-modal-button-request', action='deferred native menu answer', index=0,
                 body=modal['bodyText'], response=response, acceptedAsClosureProof=False)

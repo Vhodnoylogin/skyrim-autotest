@@ -126,3 +126,11 @@ buttons; if active controls were released, the interrupted action fails rather
 than being replayed. Neutral startup can continue once focus is measured.
 Explicit background physical routing remains opt-in; this does not authorize
 background UI input. Timeout remains terminal with full logs and recovery.
+
+Known startup notification answers use the owned DevBench native deferred menu
+queue, not OS keyboard/mouse. Their route therefore requires no Windows
+foreground. Exact current body/buttons, visible/native queue identity, replay
+guards and actual closure/native progress remain mandatory; unknown modals still
+block. This removes a redundant focus gate for that native operation only.
+Physical controls retain explicit background policy and OS UI input retains
+its separate ownership/focus requirements. New route requires live qualification.
