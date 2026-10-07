@@ -37,13 +37,15 @@ def configure(value, base=None):
     missing = sorted(k for k in REQUIRED if not value.get(k))
     if missing:
         raise ConfigurationError("Missing configuration fields: " + ", ".join(missing))
-    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile"}
+    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load"}
     if unknown:
         raise ConfigurationError("Unknown configuration fields: " + ", ".join(sorted(unknown)))
     base = Path(base or Path.cwd()).resolve()
     result = dict(value)
     if 'allow_background_physical_vr' in result and type(result['allow_background_physical_vr']) is not bool:
         raise ConfigurationError('allow_background_physical_vr must be boolean')
+    if 'allow_owned_save_load' in result and type(result['allow_owned_save_load']) is not bool:
+        raise ConfigurationError('allow_owned_save_load must be boolean')
     if 'reuse_test_profile' in result and type(result['reuse_test_profile']) is not bool:
         raise ConfigurationError('reuse_test_profile must be boolean')
     if 'controller_start_positions_metres' in result:

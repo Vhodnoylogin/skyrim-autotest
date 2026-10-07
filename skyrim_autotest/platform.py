@@ -10,13 +10,14 @@ import time
 
 READS = {'state.read', 'player.read', 'world.read', 'menu.read'}
 ACTIONS = {
+    'input.perform': {'save_game', 'load_game'},
     'controller.perform': {'pose_and_grip', 'reach_and_grip_reference', 'release_reference', 'release_all'},
     'object.perform': {'create_fixture_reference', 'place_fixture_reference_in_hand',
                        'set_fixture_inventory_quantity', 'set_fixture_health'},
 }
 OBSERVATIONS = {'form.identity', 'body_slot.settings', 'body_slot.display',
                 'hand.held_item', 'inventory.quantity', 'inventory.alchemy',
-                'reference.state', 'reference.physics', 'form.alchemy'}
+                'reference.state', 'reference.physics', 'form.alchemy', 'save.state', 'lifecycle.state'}
 
 
 def menus_block_gameplay(observation):
@@ -66,6 +67,10 @@ def validate(args):
     if operation in ACTIONS and req.get('action') not in ACTIONS[operation]:
         raise ValueError('Unsupported semantic action')
     selectors = {
+        'save.state': ({'observation', 'saveTag'}, set()),
+        'lifecycle.state': ({'observation', 'afterSaveTag'}, set()),
+        'save_game': ({'action', 'saveTag', 'scope'}, set()),
+        'load_game': ({'action', 'saveTag', 'scope'}, set()),
         'form.identity': ({'observation', 'form'}, set()),
         'form.alchemy': ({'observation', 'form'}, set()),
         'body_slot.settings': ({'observation', 'slot'}, set()),
@@ -90,6 +95,11 @@ def validate(args):
         required, optional = selectors[selector]
         if not required <= set(req) or set(req) - required - optional:
             raise ValueError('Semantic request contains unsupported/missing fields')
+    if operation == 'input.perform' and req.get('scope') != 'owned-disposable-profile':
+        raise ValueError('Save/load requires owned-disposable-profile scope')
+    for key in ('saveTag', 'afterSaveTag'):
+        if key in req and (not isinstance(req[key], str) or not re.fullmatch(r'[a-z][a-z0-9-]{0,31}', req[key])):
+            raise ValueError('Invalid owned save tag')
     if 'owner' in req and req['owner'] != 'player': raise ValueError('Only player inventory supported')
     if operation == 'menu.read' and req: raise ValueError('Only unfiltered menu read supported')
     if req.get('action') == 'create_fixture_reference' and req.get('placement') != 'settled reachable surface away from slot 13 and mouth':
@@ -281,6 +291,9 @@ class Backend:
 
     def observe(self, req):
         kind = req['observation']
+        if kind in ('save.state', 'lifecycle.state'):
+            from .owned_saves import observe
+            return observe(self, req)
         if kind == 'hand.held_item': return self.held(req)
         if kind == 'form.alchemy': return self.alchemy(req['form'])
         if kind == 'form.identity': return {'form': {'runtimeId': self.resolve(req['form'])}}
@@ -481,6 +494,8 @@ class Backend:
             self.pause(req.get('settleSeconds', 1.2))
             return self.held({'hand': req['hand'], 'referenceTag': req['referenceTag']})
         references = self.s.state.get('platformReferences', {})
+        if req['referenceTag'] in self.s.state.get('invalidatedReferenceTags', []):
+            raise ValueError('Old-world reference tag is invalidated; choose a new tag')
         if req['referenceTag'] in references:
             raise ValueError('Fixture reference tag already exists; mutation refused')
         if len(references) >= 16:
@@ -588,6 +603,9 @@ def execute(session, args, deadline):
     if op == 'player.read':
         raw = backend.call('inspect', {'kind': 'player'})
         return {'player': {'health': {'points': raw['actorValues']['health']['current']}}, 'providerObservation': raw}
+    if op == 'input.perform':
+        from .owned_saves import perform
+        return perform(backend, req)
     if op == 'world.read': return backend.observe(req)
     if op == 'menu.read': return backend.call('menu', {'action': 'list'})
     if op == 'controller.perform': return backend.controller(req)

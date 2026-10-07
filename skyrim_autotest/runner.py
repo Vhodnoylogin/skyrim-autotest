@@ -657,6 +657,16 @@ class Session:
         for key in ('LocalSaves', 'LocalSettings'):
             settings_text = set_ini(settings_text, 'General', key, 'true')
         settings_file.write_text(settings_text, encoding='utf-8')
+        if P.value.get('allow_owned_save_load') is True:
+            owned_saves = test_profile / 'saves'
+            from .profile_cache import regular_tree
+            regular_tree(test_profile)
+            ini = test_profile / 'Skyrim.ini'
+            text = ini.read_text(encoding='utf-8-sig') if ini.exists() else '[General]\n'
+            ini.write_text(set_ini(text, 'General', 'sLocalSavePath', str(owned_saves.resolve()) + '\\'), encoding='utf-8')
+            self.state['ownedSaveDirectory'] = str(owned_saves.resolve())
+            self.save()
+            self.log('owned-save-directory-prepared', directory=self.state['ownedSaveDirectory'])
         fixture = self.state['scenario'].get('fixture')
         if fixture:
             stem = fixture['saveStem']

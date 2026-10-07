@@ -290,9 +290,9 @@ def complete_character_creation(session):
     raise AssertionError('Character menu remained open after one verified name acceptance')
 
 
-def wait_gameplay_ready(session, cell, new_game):
+def wait_gameplay_ready(session, cell, new_game, deadline=None):
     """Require a quiet startup interval; late menus reset readiness."""
-    deadline = time.monotonic() + 90
+    deadline = min(time.monotonic() + 90, deadline) if deadline is not None else time.monotonic() + 90
     stable_since = None
     character_seen = False
     while time.monotonic() < deadline:

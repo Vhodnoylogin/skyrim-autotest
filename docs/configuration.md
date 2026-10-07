@@ -102,3 +102,10 @@ issued only once after an idle read. Setup continues to refuse a busy MO2 withou
 waiting. The first live reuse candidate exposed an immediate-busy cleanup failure;
 its independent guardian subsequently restored the original profile/files. That
 historical normal failure remains a failed qualification, not a retroactive pass.
+
+Candidate allow_owned_save_load (boolean, default off) enables only attempt-owned
+save/load actions. It sets absolute sLocalSavePath in the copied profile before
+launch and validates the loaded native setting before any save or load. Generated
+ESS/SKSE files stay in that disposable profile and its evidence archive. Require
+an exact live qualification of the opt-in configuration; it does not enable
+process restart or access to owner saves.
