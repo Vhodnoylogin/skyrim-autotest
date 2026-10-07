@@ -60,6 +60,8 @@ def validate(args):
     req = args.get('request', {})
     if not isinstance(req, dict):
         raise ValueError('Semantic request must be an object')
+    from . import actor_domain
+    if actor_domain.validate(operation, req): return
     if operation in ('state.read', 'player.read') and req:
         raise ValueError('State/player read takes no request')
     if operation == 'world.read' and req.get('observation') not in OBSERVATIONS:
@@ -424,6 +426,9 @@ class Backend:
                             'basis': 'native Potion and MagicEffect queries; sequential non-atomic snapshot'}}
 
     def observe(self, req):
+        if 'quantity' in req:
+            from .actor_domain import observe
+            return observe(self, req)
         kind = req['observation']
         if kind in ('save.state', 'lifecycle.state'):
             from .owned_saves import observe
@@ -612,6 +617,8 @@ class Backend:
 
     def mutate(self, req):
         action = req['action']
+        from . import actor_domain
+        if action in actor_domain.ACTIONS: return actor_domain.perform(self, req)
         if action == 'tag_held_reference':
             references=self.s.state.setdefault('platformReferences',{})
             tag=req['referenceTag']
@@ -770,7 +777,10 @@ def execute(session, args, deadline):
         return {'world': {'ready': ready}, 'scene': scene, 'menus': menus}
     if op == 'player.read':
         raw = backend.call('inspect', {'kind': 'player'})
-        return {'player': {'health': {'points': raw['actorValues']['health']['current']}}, 'providerObservation': raw}
+        from .actor_domain import observe_actor
+        result = observe_actor(backend, {'reference': '0x00000014', 'base': '0x00000007'})
+        result.update(player={'health': {'points': raw['actorValues']['health']['current']}}, playerObservation=raw)
+        return result
     if op == 'input.perform':
         from .owned_saves import perform
         return perform(backend, req)

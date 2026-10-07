@@ -12,6 +12,21 @@ calls retain owned-process/health checks and raw evidence; mutations are never
 retried. Only semantic read operations can poll. Unsupported actions, fields,
 identities and units fail closed rather than becoming successful observations.
 
+The actor/base/morph candidate additionally supports `quantity` selectors
+`actor-base-identity`, `actor-base-weight`, `body-morph-storage`, and actions
+`set-race`, `set-sex`, `set-weight`, `set-body-morph`, `update-body-model`.
+Actor requests require exact hexadecimal reference and base identities. Native
+Papyrus actor/base sex, race, weight and keyed NiOverride storage are observed;
+Observer session/generation/runtime handle bracket reads. Player reads include
+these actor fields alongside health. A different base or incarnation fails.
+Mutations run once and only readback may poll within the original deadline.
+Sex changes use one fenced `player.sexchange` only when actual sex differs;
+non-player sex mutation is unavailable. Weight uses explicit 0..100 units and
+morphs use dimensionless coefficients. Update completion means the native
+NiOverride function completed and loaded actor data returned; it does not
+certify renderer synchronization, TRI deformation or final physics. This
+extension requires its own actual game qualification before activation.
+
 Implemented provider translations are scene/menu readiness, player health,
 installed form lookup, exact reference/native loose stack quantity, inventory,
 VRIK slot state, HIGGS held reference, existing Observer physics snapshots,
