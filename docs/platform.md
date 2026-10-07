@@ -1,5 +1,20 @@
 # Semantic platform backend
 
+Candidate `controller.perform` action `grip_and_withdraw_from_body_slot` uses the
+same explicit hand/slot/offset/targetBasis/avoidMouth fields as
+`pose_hand_at_body_slot`, with `grip:closed`, `withdrawal:{units:metres,xyz:[...]}`
+and `motionSeconds`. It approaches with an open grip, measures the actual loaded
+centre and calibration, then closes and withdraws only that hand in increments
+at most .01m. HMD and the other hand remain unchanged. Displacement is .1.. .6m,
+motionSeconds .25..1.5s and requested speed at most2m/s; excessive actual
+publication time aborts without replay/extension. `durationSeconds` is settling
+after the stroke, not its motion budget. The sampled pre-edge arm/head geometry
+guards reach and a straight path's mouth clearance; it does not prove continuous
+collision clearance. Endpoint native geometry and later driver status are logged.
+Actual held identity/inventory/callback assertions remain mandatory. This candidate
+requires separate live qualification; existing centre-only evidence does not
+qualify withdrawal, native callback delivery or item acquisition.
+
 `platform` is an executor-local tool, not a new game HTTP endpoint. A Polygon
 platform manifest can map polygon-actions/1 to `platform_mapping.operations()`.
 The mapping is a candidate only; the operator must qualify exact source/binary,

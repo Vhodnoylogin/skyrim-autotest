@@ -99,6 +99,11 @@ def pose(b, req):
     ensure_owned_focus(b.s,{},'platform-body-slot-owned-focus',deadline=b.end)
     menus=b.call('menu',{'action':'list','includeFlags':True});b.recover_input_gate(menus)
     hand=req['hand'];frame=b.frame();baseline=b.hand_xyz(hand);columns=[]
+    if req['action']=='grip_and_withdraw_from_body_slot':
+        # Approach/calibrate with an empty open grip; the timed edge comes only
+        # after all potentially slow geometry/readiness requests have ended.
+        frame[hand]['controller'].update(pressed=0,touched=0,axes=[[0,0] for _ in range(5)])
+        b.publish(frame,10);b.pause(.1);baseline=b.hand_xyz(hand)
     # Small physical probes preserve the existing grip and measure the current
     # avatar/world scale rather than assuming70engine units per metre.
     for index in (3,7,11):
@@ -133,6 +138,23 @@ def pose(b, req):
     # pose/grip is preserved; moving one hand must not silently drop its item.
     ensure_owned_focus(b.s,{},'platform-body-slot-grip-owned-focus',deadline=b.end)
     menus=b.call('menu',{'action':'list','includeFlags':True});b.recover_input_gate(menus)
+    if req['action']=='grip_and_withdraw_from_body_slot':
+        from .body_stroke import withdraw
+        # Re-observe after the input gate; a recovered menu may have moved the
+        # avatar. Never start a closed-grip stroke using the earlier geometry.
+        points,nodes=centres(b,[req['slot']],[(name,True) for name in names])
+        shoulder,elbow,current=[nodes[(name,True)]['translation'] for name in names]
+        target=[points[req['slot']][i]+sum(columns[j][i]*req['offset']['xyz'][j] for j in range(3)) for i in range(3)]
+        if math.sqrt(sum(v*v for v in solve3(columns,[a-c for a,c in zip(target,current)])))>.025:
+            raise ValueError('Body-slot centre moved before withdrawal edge')
+        result=withdraw(b,req,frame,columns,shoulder,elbow,current,nodes[(HEAD,False)]['translation'])
+        # This is endpoint evidence only: no claim of an atomic path/contact or
+        # native holster callback. Subject checks must inspect the actual item.
+        points,after=centres(b,[req['slot']],[(name,True) for name in names])
+        b.s.log('platform-body-withdrawal-observed',slot=req['slot'],hand=hand,
+                handGameUnits=after[(names[-1],True)]['translation'],slotGameUnits=points[req['slot']],
+                publication=b.call('driver',{'action':'status'}),observedGameplaySuccess=None)
+        return result
     frame[hand]['controller'].update(pressed=4 if req['grip']=='closed' else 0,touched=0,axes=[[0,0] for _ in range(5)])
     publication=b.publish(frame,req['durationSeconds']);b.pause(req['durationSeconds'])
     b.s.log('platform-body-slot-pose-issued',slot=req['slot'],hand=hand,publication=publication,

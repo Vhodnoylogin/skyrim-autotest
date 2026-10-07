@@ -11,7 +11,7 @@ import time
 READS = {'state.read', 'player.read', 'world.read', 'menu.read'}
 ACTIONS = {
     'input.perform': {'save_game', 'load_game', 'restart_game'},
-    'controller.perform': {'pose_and_grip', 'reach_and_grip_reference', 'release_reference', 'release_all','pose_hand_at_body_slot'},
+    'controller.perform': {'pose_and_grip', 'reach_and_grip_reference', 'release_reference', 'release_all','pose_hand_at_body_slot','grip_and_withdraw_from_body_slot'},
     'object.perform': {'create_fixture_reference', 'place_fixture_reference_in_hand', 'tag_held_reference',
                        'set_fixture_inventory_quantity', 'set_fixture_health', 'save_game'},
 }
@@ -76,6 +76,7 @@ def validate(args):
         'pose_and_grip': ({'action', 'hand', 'grip', 'durationSeconds', 'trackingPosition',
                            'trackingOrientation', 'otherHandPosition', 'referenceHeadPosition'}, set()),
         'pose_hand_at_body_slot': ({'action','hand','slot','grip','offset','durationSeconds','targetBasis','avoidMouth'},set()),
+        'grip_and_withdraw_from_body_slot': ({'action','hand','slot','grip','offset','durationSeconds','targetBasis','avoidMouth','withdrawal','motionSeconds'},set()),
         'reach_and_grip_reference': ({'action', 'hand', 'grip', 'holdSeconds', 'maximumReachMetres', 'referenceTag'}, set()),
         'release_reference': ({'action', 'hand', 'referenceTag', 'settleSeconds', 'zone'}, set()),
         'release_all': ({'action'}, {'settleSeconds'}),
@@ -124,11 +125,17 @@ def validate(args):
     for key in ('durationSeconds', 'holdSeconds', 'settleSeconds', 'continuityWindowSeconds'):
         if key in req: number(req[key], 0, 10)
     if 'maximumReachMetres' in req: number(req['maximumReachMetres'], .01, 1)
-    if req.get('action')=='pose_hand_at_body_slot':
+    if req.get('action') in ('pose_hand_at_body_slot','grip_and_withdraw_from_body_slot'):
         from .body_scene import TARGET_BASIS
         if not 1<=req['slot']<=14 or req['avoidMouth'] is not True or req['targetBasis']!=TARGET_BASIS:
             raise ValueError('Actual VRIK slot centre and explicit mouth avoidance required')
         vector(req['offset'])
+        if req['action']=='grip_and_withdraw_from_body_slot':
+            displacement=vector(req['withdrawal'])
+            duration=number(req['motionSeconds'],.25,1.5)
+            distance=math.sqrt(sum(v*v for v in displacement))
+            if req['grip']!='closed' or not .1<=distance<=.6 or distance/duration>2:
+                raise ValueError('Withdrawal requires closed grip and bounded displacement/speed')
     if req.get('action') == 'pose_and_grip':
         for key in ('trackingPosition', 'otherHandPosition', 'referenceHeadPosition'): vector(req[key])
         q = req.get('trackingOrientation', {}).get('quaternionXYZW')
@@ -521,7 +528,7 @@ class Backend:
 
     def controller(self, req):
         action = req['action']
-        if action=='pose_hand_at_body_slot':
+        if action in ('pose_hand_at_body_slot','grip_and_withdraw_from_body_slot'):
             from .body_scene import pose
             return pose(self,req)
         if action == 'release_all':
