@@ -68,6 +68,7 @@ def start(backend):
     from . import native
     from .runner import request, read_json, GAME_NAMES
     b,s,state=backend,backend.s,backend.s.state
+    from .restart_budget import next_slot, update
     if state.get('configuration',{}).get('allow_owned_save_load') is not True:
         raise ValueError('Owned restart is not enabled')
     before=copy.deepcopy(state.get('game'))
@@ -76,8 +77,7 @@ def start(backend):
         raise ValueError('Restart requires the exact live owned game identity')
     if state.get('gameRestartTransition',{}).get('completed') is False:
         raise ValueError('Incomplete restart cannot be replayed')
-    if state.get('ownedGameRestartCount',0)>=2:
-        raise ValueError('Owned game restart limit2 reached')
+    ordinal, slot = next_slot(state)
     for process in native.processes():
         if process['name'].lower() in GAME_NAMES:
             current=native.identity(process['pid'])
@@ -94,8 +94,10 @@ def start(backend):
     bridge_ready()
     duration=min(179.,b.remaining())
     state['gameRestartTransition']={'completed':False,'stage':'stopping','beforeGame':before,
-                                    'startedAt':time.time(),'expiresAt':time.time()+duration}
-    state['ownedGameRestartCount']=state.get('ownedGameRestartCount',0)+1
+                                    'startedAt':time.time(),'expiresAt':time.time()+duration,
+                                    'ordinal':ordinal,'plannedStep':slot}
+    state.setdefault('gameRestartHistory', []).append(copy.deepcopy(state['gameRestartTransition']))
+    state['ownedGameRestartCount']=ordinal
     s.save()
     if s.collect(segment='before-restart-'+str(state['ownedGameRestartCount'])) is False:
         raise ValueError('Evidence collection incomplete before restart; no exit or relaunch')
@@ -112,7 +114,7 @@ def start(backend):
     if native.alive(before):raise ValueError('Exact owned game did not stop; no relaunch')
     settle_owned_loaders(b)
     bridge_ready()
-    state['gameRestartTransition']['stage']='launching'
+    update(state, stage='launching')
     state.pop('port',None);state.pop('game',None)
     state['launchIntents']['game']={'at':time.time(),'directory':state['configuration']['game']}
     s.save()
@@ -140,7 +142,7 @@ def start(backend):
             marker=(game['pid'],game['birth'],health.get('frame'))
             if first is not None and marker[:2]==first[:2] and marker[2]!=first[2]:
                 state.update(game=game,port=game_port)
-                state['gameRestartTransition'].update(stage='loading',afterGame=game)
+                update(state, stage='loading',afterGame=game)
                 s.save()
                 from .readiness_reads import ReadinessSession
                 ReadinessSession(s,min(b.end,time.monotonic()+35)).tool('inspect',{'kind':'state'})

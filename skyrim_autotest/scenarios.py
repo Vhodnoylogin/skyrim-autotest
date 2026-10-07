@@ -151,6 +151,9 @@ def execute(session, scenario):
         return
     for index, step in enumerate(scenario['steps']):
         name = step['name']
+        from .restart_budget import step_identity
+        section = 'postSteps' if session.state.get('postStepsActive') else 'steps'
+        session.state['activeScenarioStep'] = step_identity(section, index, step)
         timeout = float(step.get('timeout', 20))
         session.phase('scenario: ' + name, timeout + 15)
         end = time.monotonic() + timeout

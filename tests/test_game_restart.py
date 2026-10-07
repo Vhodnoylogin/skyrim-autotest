@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from skyrim_autotest import game_restart, native, runner
+from skyrim_autotest import restart_budget
 
 
 class RestartTests(unittest.TestCase):
@@ -30,6 +31,11 @@ class RestartTests(unittest.TestCase):
     def backend(self, directory):
         state=self.state();state.pop('gameRestartTransition')
         state.update(testProfileName='Autotest-unit',launchIntents={})
+        step={'name':'restart','tool':'platform','args':{'operation':'input.perform',
+              'request':{'action':'restart_game','saveTag':'fixture','scope':'owned-disposable-profile'}}}
+        state['scenario']={'schemaVersion':1,'steps':[step]}
+        state['ownedGameRestartBudget']=restart_budget.plan(state['scenario'])
+        state['activeScenarioStep']=restart_budget.step_identity('steps',0,step)
         token=directory/'private-token';token.write_text('unit-only')
         runtime=directory/'runtime.json';runtime.write_text('{"port":999}')
         state['configuration'].update(bridge_token=str(token),bridge_port=8930,

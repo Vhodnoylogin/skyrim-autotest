@@ -1104,6 +1104,8 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
     scenario = read_json(scenario_file)
     from .scenarios import validate
     validate(scenario)
+    from .restart_budget import plan as restart_plan
+    restart_budget = restart_plan(scenario)
     fixture = scenario.get('fixture')
     if fixture:
         folder = P.fixture_dir or P.profiles / profile / 'saves'
@@ -1127,6 +1129,7 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
                  'preflight': info, 'checks': [], 'done': False, 'restored': False,
                  'configuration': P.snapshot(), 'scenario': scenario, 'scenarioHash': sha(scenario_file)}
         state['fault'] = fault
+        state['ownedGameRestartBudget'] = restart_budget
         source = directory / 'executor-source'
         source.mkdir()
         state['executorHashes'] = {}

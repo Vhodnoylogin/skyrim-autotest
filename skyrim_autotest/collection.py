@@ -6,10 +6,13 @@ import shutil
 def collect(session, segment=None):
     from .runner import P, atomic_json, read_json, sha
     import re
-    if segment is not None and not re.fullmatch(r'before-restart-[12]', segment):
-        raise ValueError('Invalid restart evidence segment')
+    from .restart_budget import segment_number
+    if segment is not None:
+        segment_number(session.state, segment)
     dest = session.dir / 'evidence'
     if segment is not None: dest /= segment
+    if segment is not None and dest.exists():
+        raise ValueError('Restart evidence segment already exists; no overwrite')
     dest.mkdir(parents=True, exist_ok=True)
     manifest, errors, names = [], [], set()
 
@@ -68,8 +71,22 @@ def collect(session, segment=None):
     if segment is None:
         # The old consumer deliberately accepts only flat, safe artifact names.
         # Project declared restart artifacts into this manifest without weakening it.
-        for folder in sorted(dest.glob('before-restart-[12]')):
+        if 'ownedGameRestartBudget' in session.state:
+            from .restart_budget import verify
+            maximum = verify(session.state)['maximum']
+            used = session.state.get('ownedGameRestartCount', 0)
+            if type(used) is not int or not 0 <= used <= maximum:
+                raise ValueError('Invalid reserved restart count during collection')
+            folders = [dest/f'before-restart-{i}' for i in range(1, used+1)]
+            unexpected = set(dest.glob('before-restart-*')) - set(folders)
+            for folder in unexpected: error(folder, 'Unreserved restart evidence segment')
+        else:
+            folders = sorted(dest.glob('before-restart-*'))
+        for folder in folders:
             try:
+                segment_number(session.state, folder.name)
+                if folder.is_symlink() or getattr(folder.lstat(), 'st_file_attributes', 0) & 0x400:
+                    raise ValueError('Restart evidence directory is a link')
                 entries = read_json(folder/'manifest.json')
                 if not isinstance(entries, list): raise ValueError('Invalid restart collection manifest')
                 for entry in entries:

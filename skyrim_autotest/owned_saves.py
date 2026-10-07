@@ -293,7 +293,8 @@ def perform(backend, req):
     transition.update(completed=True, afterGame=copy.deepcopy(state['game']), cursor=events.cursor,
                       events=completed_events, worldGeneration=state['ownedWorldGeneration'], scene=scene)
     if restarting:
-        state['gameRestartTransition'].update(completed=True,stage='completed',afterGame=copy.deepcopy(state['game']))
+        from .restart_budget import update
+        update(state,completed=True,stage='completed',afterGame=copy.deepcopy(state['game']))
     b.s.save()
     return observe(b, {'observation':'lifecycle.state','afterSaveTag':tag})
 
@@ -315,9 +316,9 @@ def observe(backend, req):
     transition['cursor'] = events.cursor
     scene = b.call('inspect', {'kind':'scene'})
     menus = b.call('menu', {'action':'list','includeFlags':True})
-    from .platform import menus_block_gameplay
-    ready = (scene.get('playerLoaded') is True and scene.get('cell', {}).get('editorId') not in (None,'VRPlayroom01')
-             and not menus_block_gameplay(menus) and state.get('gameplayBootstrap',{}).get('completed') is True)
+    from .readiness_state import gameplay_ready
+    ready = (gameplay_ready(scene, menus, state.get('scenario', {}).get('cell'))
+             and state.get('gameplayBootstrap',{}).get('completed') is True)
     invalidated = (transition.get('probeInvalidatedAtLoad') is True and
                    all(tag not in state.get('platformReferences', {}) and
                        tag in state.get('invalidatedReferenceTags', []) for tag in transition['oldReferenceTags']))

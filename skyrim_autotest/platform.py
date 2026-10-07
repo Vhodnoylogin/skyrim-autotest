@@ -20,23 +20,7 @@ OBSERVATIONS = {'form.identity', 'body_slot.settings', 'body_slot.display',
                 'reference.state', 'reference.physics', 'form.alchemy', 'save.state', 'lifecycle.state'}
 
 
-def menus_block_gameplay(observation):
-    """Require actual native flags; never infer blocking from a mod menu name."""
-    if observation.get('messageBoxOpen') is not False:
-        return True
-    names, states = observation.get('openMenus'), observation.get('menuStates')
-    if not isinstance(names, list) or not isinstance(states, list):
-        return True
-    if len(states) != len(names) or {row.get('name') for row in states} != set(names):
-        return True
-    for row in states:
-        fields = ('alwaysOpen', 'pausesGame', 'modal', 'usesCursor', 'usesMenuContext', 'freezeFramePause')
-        if row.get('available') is not True or any(type(row.get(key)) is not bool for key in fields):
-            return True
-        if (row.get('name') == 'Console' or row['pausesGame'] or row['modal'] or row['freezeFramePause']
-                or (not row['alwaysOpen'] and (row['usesCursor'] or row['usesMenuContext']))):
-            return True
-    return False
+from .readiness_state import menus_block_gameplay, world_loaded, gameplay_ready
 
 
 def number(value, low, high):
@@ -480,7 +464,7 @@ class Backend:
         from .owned_saves import BoundSession
         scene = self.call('inspect', {'kind':'scene'})
         cell = scene.get('cell', {}).get('editorId')
-        if scene.get('playerLoaded') is not True or not isinstance(cell,str) or not cell or cell == 'VRPlayroom01':
+        if not world_loaded(scene):
             raise AssertionError('Physical action requires the already loaded subject world')
         self.s.log('platform-input-readiness-recovery', menus=menus, scene=scene,
                    subjectActionReplayed=False)
@@ -778,10 +762,7 @@ def execute(session, args, deadline):
     if op == 'state.read':
         scene = backend.call('inspect', {'kind': 'scene'})
         menus = backend.call('menu', {'action': 'list', 'includeFlags': True})
-        cell = scene.get('cell', {}).get('editorId')
-        ready = (scene.get('playerLoaded') is True and isinstance(cell, str)
-                 and bool(re.fullmatch(r'[A-Za-z0-9_]+', cell)) and cell != 'VRPlayroom01'
-                 and not menus_block_gameplay(menus))
+        ready = gameplay_ready(scene, menus)
         return {'world': {'ready': ready}, 'scene': scene, 'menus': menus}
     if op == 'player.read':
         raw = backend.call('inspect', {'kind': 'player'})

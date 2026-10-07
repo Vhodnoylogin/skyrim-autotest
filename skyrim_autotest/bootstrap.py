@@ -330,7 +330,7 @@ def dismiss_navigation_gate(session, menus, attempted, deadline):
         name = row.get('name')
         if name not in safe or row.get('available') is not True: continue
         if any(type(row.get(key)) is not bool for key in fields): continue
-        from .platform import menus_block_gameplay
+        from .readiness_state import menus_block_gameplay, world_loaded, gameplay_ready
         if not menus_block_gameplay(dict(messageBoxOpen=False,openMenus=[name],menuStates=[row])):
             continue
         if name in attempted: raise AssertionError('Navigation menu persisted or reopened after one close: '+name)
@@ -357,7 +357,7 @@ def dismiss_navigation_gate(session, menus, attempted, deadline):
 
 def wait_gameplay_ready(session, cell, new_game, deadline=None):
     """Require a quiet startup interval; late menus reset readiness."""
-    from .platform import menus_block_gameplay
+    from .readiness_state import menus_block_gameplay, world_loaded, gameplay_ready
     deadline = min(time.monotonic() + 90, deadline) if deadline is not None else time.monotonic() + 90
     from .readiness_reads import ReadinessSession
     session = ReadinessSession(session, deadline)
@@ -380,15 +380,12 @@ def wait_gameplay_ready(session, cell, new_game, deadline=None):
             continue
         scene = session.tool('inspect', {'kind': 'scene'})
         current_cell = scene.get('cell', {}).get('editorId')
-        world_loaded = (scene.get('playerLoaded') is True
-                 and isinstance(current_cell, str) and bool(current_cell)
-                 and current_cell != 'VRPlayroom01'
-                 and (not cell or current_cell == cell))
+        loaded = world_loaded(scene, cell)
         blocked = menus_block_gameplay(menus)
-        if world_loaded and blocked and dismiss_navigation_gate(session, menus, navigation_attempts, deadline):
+        if loaded and blocked and dismiss_navigation_gate(session, menus, navigation_attempts, deadline):
             stable_since = None
             continue
-        ready = world_loaded and not blocked
+        ready = gameplay_ready(scene, menus, cell)
         session.log('gameplay-readiness-observation', scene=scene, menus=menus, ready=bool(ready))
         if ready:
             if stable_since is None:

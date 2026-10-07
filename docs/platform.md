@@ -293,7 +293,15 @@ native save mapping, ordered load events and common quiet gameplay readiness
 must all complete before another subject action. The original action deadline
 is retained; the guardian's durable expected-exit window is <=180seconds and
 never disables runner/deadline recovery. Incomplete transitions cannot replay;
-limit2 explicit restarts per attempt. Restart, saved inventory recovery, process
+the restart budget is derived from the exact frozen scenario before setup. Each
+declared restart step owns one durable slot, including future settings-variant
+steps only when their own implementation is supported. The next exact step and
+unchanged scenario must match; replay, skipped slots, incomplete transitions and
+an eighth restart in a seven-restart scenario fail before exit/relaunch. No budget
+grants launch authority or extends a deadline. Every reserved segment is retained
+and required by final collection; a missing segment fails collection independently
+of safe restoration. Historical two-segment recovery remains supported. Restart,
+saved inventory recovery, process
 identity change, log segmentation and final restoration require live qualification.
 
 Common readiness reads actual native menu flags, never a HUD-only menu-name
