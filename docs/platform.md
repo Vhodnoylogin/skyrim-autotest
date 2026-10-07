@@ -1,5 +1,13 @@
 # Semantic platform backend
 
+Body-slot approaches anchor each controller increment to the observed hand and
+its measured calibration origin. A constrained hand does not cause repeated
+unobserved movement to accumulate. Each update remains at most .01m; five seconds
+without at least .005m reduction of target distance stops with a logged feedback
+stall. Sideways motion alone cannot renew progress. A physical obstruction is
+reported rather than overridden; subject fixtures may declare an explicit
+clearance offset within their actual interaction zone and verify native behavior.
+
 Candidate `controller.perform` action `grip_and_withdraw_from_body_slot` uses the
 same explicit hand/slot/offset/targetBasis/avoidMouth fields as
 `pose_hand_at_body_slot`, with `grip:closed`, `withdrawal:{units:metres,xyz:[...]}`

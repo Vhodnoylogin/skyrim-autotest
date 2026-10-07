@@ -20,6 +20,26 @@ def solve3(columns, value):
     return [row[3] for row in rows]
 
 
+def feedback_increment(columns, origin, baseline, commanded, observed, target):
+    """Do not integrate position error while the observed hand is constrained.
+
+    Baseline and columns are measured at the same tracking origin. Cap each
+    requested change to .01m and place the next command at most .01m ahead of
+    the observed hand, rather than ahead of the previous command.
+    """
+    actual=solve3(columns,[a-b for a,b in zip(observed,baseline)])
+    error=solve3(columns,[a-b for a,b in zip(target,observed)])
+    distance=math.sqrt(sum(v*v for v in error))
+    fraction=min(1.,.01/distance) if distance else 0.
+    desired=[a+b+v*fraction for a,b,v in zip(origin,actual,error)]
+    change=[a-b for a,b in zip(desired,commanded)]
+    length=math.sqrt(sum(v*v for v in change))
+    if length>.01:change=[v*.01/length for v in change]
+    lead=[a-b-c for a,b,c in zip(commanded,origin,actual)]
+    return change,{'targetDistanceMetres':distance,'trackingLeadMetres':lead,
+                   'basis':'observed hand relative to measured calibration origin; no accumulated unobserved movement'}
+
+
 def pose_frames(start, target):
     """Interpolate valid rigid poses, preserving grip until the endpoint."""
     import copy

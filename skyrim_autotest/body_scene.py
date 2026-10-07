@@ -113,7 +113,8 @@ def pose(b, req):
         b.publish(frame,10);b.pause(.1)
     side='L' if hand=='left' else 'R'
     names=[f'NPC {side} UpperArm [{side}Uar]',f'NPC {side} Forearm [{side}Lar]',f'NPC {side} Hand [{side}Hnd]']
-    progress_at=None;previous=None
+    origin=[frame[hand]['matrix'][i] for i in (3,7,11)]
+    progress_at=None;best_distance=None
     import time
     for _ in range(256):
         points,nodes=centres(b,[req['slot']],[(name,True) for name in names])
@@ -126,12 +127,21 @@ def pose(b, req):
         delta=solve3(columns,[a-c for a,c in zip(target,current)]);distance=math.sqrt(sum(v*v for v in delta))
         if distance<=.025:break
         now=time.monotonic()
-        if previous is None or math.dist(previous,current)>=.25:previous=list(current);progress_at=now
-        elif now-progress_at>5:raise ValueError('Body-slot approach made no observed progress for five seconds')
-        fraction=min(1.,.01/distance)
-        for index,change in zip((3,7,11),delta):frame[hand]['matrix'][index]+=fraction*change
+        # Lateral wobble at a physics constraint must not renew forward
+        # progress or accumulate a controller pose beyond the observed hand.
+        if best_distance is None or distance<best_distance-.005:
+            best_distance=distance;progress_at=now
+        elif now-progress_at>5:
+            b.s.log('platform-body-slot-feedback-stall',slot=req['slot'],hand=hand,
+                    bestDistanceMetres=best_distance,currentDistanceMetres=distance,
+                    handGameUnits=current,targetGameUnits=target,actionReplayed=False)
+            raise ValueError('Body-slot approach made no observed target progress for five seconds')
+        from .platform_math import feedback_increment
+        increment,feedback=feedback_increment(columns,origin,baseline,
+            [frame[hand]['matrix'][i] for i in (3,7,11)],current,target)
+        for index,change in zip((3,7,11),increment):frame[hand]['matrix'][index]+=change
         b.s.log('platform-body-slot-approach',slot=req['slot'],hand=hand,bodyEnvelope=envelope,
-                targetGameUnits=target,handGameUnits=current,incrementMetres=[v*fraction for v in delta])
+                targetGameUnits=target,handGameUnits=current,incrementMetres=increment,feedback=feedback)
         b.publish(frame,10);b.pause(.1)
     else:raise ValueError('Body-slot approach exhausted bounded increments')
     # Common physical input gate before the requested edge. The other hand's
