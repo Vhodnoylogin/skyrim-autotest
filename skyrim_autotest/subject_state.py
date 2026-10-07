@@ -126,14 +126,17 @@ def bytes_for(b,target):
     if target.exists():
         if not target.is_file() or target.stat().st_size>4*1024*1024:raise ValueError('Fixture setting file outside bound')
         data=target.read_bytes()
-        if hashlib.sha256(data).hexdigest()!=expected:raise ValueError('Fixture setting changed outside this owner')
+        if hashlib.sha256(data).hexdigest()!=expected:raise ValueError('Fixture setting differs from last verified bytes')
         return data
     if expected is not None:raise ValueError('Fixture setting disappeared')
     return None
 
 
-def atomic_write(b,target,data,profile=False):
+def atomic_write(b,target,data,profile=False,program_subject=None):
     from .runner import sha
+    written_json=None
+    if program_subject is not None:
+        written_json=json.loads(data);settings(written_json)
     b.remaining();temp=target.with_name(target.name+'.autotest-fixture.tmp')
     if not profile:
         if snapshot(b,temp)['exists'] or temp.exists():raise ValueError('Fixture temporary file is not exclusively available')
@@ -141,8 +144,63 @@ def atomic_write(b,target,data,profile=False):
     target.parent.mkdir(parents=True,exist_ok=True)
     temp.write_bytes(data);os.replace(temp,target)
     if sha(target)!=hashlib.sha256(data).hexdigest():raise ValueError('Fixture setting write verification failed')
-    b.s.state.setdefault('fixtureSettingsWrites',{})[str(target)]={'path':str(target),'sha256':sha(target),'bytes':len(data),'profileLocal':profile}
+    record={'path':str(target),'sha256':sha(target),'bytes':len(data),'profileLocal':profile}
+    if program_subject is not None:
+        record.update(programSubject=program_subject,writtenSha256=record['sha256'],
+                      writtenBytesHex=data.hex(),writtenJson=written_json)
+    b.s.state.setdefault('fixtureSettingsWrites',{})[str(target)]=record
+    b.s.state.setdefault('fixtureSettingsWriteHistory',[]).append(copy.deepcopy(record))
     b.s.save()
+
+
+def reconcile_native_settings_output(b,target,subject,observed):
+    """Accept byte changes only when explicit settings and native state corroborate them.
+
+    This establishes content continuity, not which process wrote the file.
+    Original snapshot/backup and exact executor write bytes remain unchanged.
+    """
+    record=b.s.state.get('fixtureSettingsWrites',{}).get(str(target))
+    if not record or record.get('programSubject')!=subject:
+        raise ValueError('No matching owned settings write to reconcile')
+    transition=b.s.state.get('ownedLoadTransition',{})
+    if transition.get('completed') is not True or transition.get('afterGame')!=b.s.state.get('game'):
+        raise ValueError('Settings output requires the completed exact owned load')
+    snapshot(b,target)
+    stat=target.lstat()
+    if (not target.is_file() or target.is_symlink() or getattr(stat,'st_file_attributes',0)&0x400
+            or stat.st_size>4*1024*1024):
+        raise ValueError('Native settings output is not a bounded regular file')
+    data=target.read_bytes();digest=hashlib.sha256(data).hexdigest()
+    if digest==record['sha256']:return
+    def pairs(values):
+        result={}
+        for key,value in values:
+            if key in result:raise ValueError('Duplicate settings output key')
+            result[key]=value
+        return result
+    def constant(value):raise ValueError('Nonfinite settings JSON')
+    actual=json.loads(data.decode('utf-8-sig'),object_pairs_hook=pairs,parse_constant=constant)
+    settings(actual)
+    native=copy.deepcopy(observed['subject']['settings']);native.pop('inputHandedness')
+    written=record['writtenJson']
+    if actual!=native or any(key not in actual or actual[key]!=value for key,value in written.items()):
+        raise ValueError('Settings output does not preserve explicit values and actual native settings')
+    raw=observed['providerObservation']
+    if raw['process']['pid']!=b.s.state['game']['pid'] or raw['process']['createdFileTime100ns']!=b.s.state['game']['birth']:
+        raise ValueError('Settings output native process identity changed')
+    cursor=b.s.state.get('subjectStateReadCursors',{}).get(subject,{})
+    if (cursor.get('game')!=b.s.state['game'] or cursor.get('sequence')!=raw['sample']['sequence']
+            or cursor.get('epoch')!=raw['sample']['lifecycleEpoch']):
+        raise ValueError('Settings output lacks the current corroborating native sample')
+    if target.read_bytes()!=data:raise ValueError('Settings output changed during reconciliation')
+    evidence={'path':str(target),'sha256':digest,'bytes':len(data),'previousVerifiedSha256':record['sha256'],
+              'writtenSha256':record['writtenSha256'],'actualBytesHex':data.hex(),'actualJson':actual,
+              'nativeObservation':copy.deepcopy(raw),'game':copy.deepcopy(b.s.state['game']),
+              'addedKeys':sorted(set(actual)-set(written)),
+              'basis':'explicit values preserved; complete output corroborated by actual native state after exact owned load; writer identity not inferred'}
+    record.update(sha256=digest,bytes=len(data),nativeOutput=evidence)
+    b.s.state.setdefault('fixtureSettingsOutputHistory',[]).append(copy.deepcopy(evidence))
+    b.s.save();b.s.log('platform-fixture-settings-output-reconciled',evidence=evidence)
 
 
 def slot_ini(data,slots):
@@ -184,12 +242,14 @@ def perform(b,req):
         if any(p['name'].lower() in GAME_NAMES for p in native.processes()):raise ValueError('Fixture changes require fully stopped game/loaders')
         b.remaining();b.s.state.setdefault('fixtureSettingsHistory',[]).append(writes);b.s.save()
         b.s.log('platform-fixture-settings-intent',write=writes,sourceProfileEdited=False)
-        atomic_write(b,configuration,(json.dumps(req['settings'],indent=2)+'\n').encode('utf-8'))
+        atomic_write(b,configuration,(json.dumps(req['settings'],indent=2)+'\n').encode('utf-8'),program_subject=req['subject'])
         atomic_write(b,slots_target,slot_bytes)
         text=ini.read_text(encoding='utf-8-sig')
         atomic_write(b,ini,set_ini(text,'VRInput','bLeftHandedMode',str(int(req['inputHandedness']=='left'))).encode('utf-8'),profile=True)
         writes['completed']=True;b.s.save();b.s.log('platform-fixture-settings-written',write=writes)
     from .owned_saves import perform as owned_perform
     result=owned_perform(b,req,restart_prepare=between_launch)
-    observed=observe(b,req['subject']);writes['nativeAfterRestart']=copy.deepcopy(observed);b.s.save()
+    observed=observe(b,req['subject'])
+    reconcile_native_settings_output(b,configuration,req['subject'],observed)
+    writes['nativeAfterRestart']=copy.deepcopy(observed);b.s.save()
     return {**result,**observed}

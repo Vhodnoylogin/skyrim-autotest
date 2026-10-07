@@ -1,5 +1,6 @@
 import copy
 import hashlib
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -56,7 +57,7 @@ class SubjectStateTests(unittest.TestCase):
         domain.atomic_write(b,target,b'first');domain.atomic_write(b,target,b'second')
         self.assertEqual(target.read_bytes(),b'second');self.assertFalse(temp.exists())
         target.write_bytes(b'foreign')
-        with self.assertRaisesRegex(ValueError,'outside this owner'):domain.atomic_write(b,target,b'third')
+        with self.assertRaisesRegex(ValueError,'last verified bytes'):domain.atomic_write(b,target,b'third')
         self.assertEqual(target.read_bytes(),b'foreign')
         b.s.state['snapshots']=[]
         with self.assertRaisesRegex(ValueError,'snapshotted'):domain.atomic_write(b,target,b'third')
@@ -69,6 +70,61 @@ class SubjectStateTests(unittest.TestCase):
         self.assertIn(b'allowSmallSlot13 = 1',actual);self.assertIn(b'; comment',actual)
         with self.assertRaises(ValueError):domain.slot_ini(data+b'visibleSlot14=0\n',fixture)
         self.assertEqual(domain.slot_ini(data,[]),data)
+
+    def prepared_program_settings(self):
+        b=Backend(self.root);target=self.root/'settings.json'
+        temp=target.with_name(target.name+'.autotest-fixture.tmp')
+        b.s.state['snapshots']=[{'path':str(target),'exists':False},{'path':str(temp),'exists':False}]
+        b.s.state['ownedLoadTransition']={'completed':True,'afterGame':copy.deepcopy(b.s.state['game'])}
+        requested={'language':'english','logLevel':'info','mayEnableSlots':False}
+        data=(json.dumps(requested,indent=2)+'\n').encode()
+        domain.atomic_write(b,target,data,program_subject='Any Subject')
+        return b,target,requested,data
+
+    def test_native_corroborated_default_completion_allows_next_variant_and_preserves_exact_writes(self):
+        b,target,requested,written=self.prepared_program_settings()
+        b.raw['subject']['settings']['pouches']=[{'slot':13,'mode':'exclusive'}]
+        actual=dict(requested,pouches=[{'mode':'exclusive','slot':13}])
+        data=(json.dumps(actual,sort_keys=True,indent=2)+'\n').encode();target.write_bytes(data)
+        observed=domain.observe(b,'Any Subject')
+        domain.reconcile_native_settings_output(b,target,'Any Subject',observed)
+        record=b.s.state['fixtureSettingsWrites'][str(target)]
+        self.assertEqual(record['writtenBytesHex'],written.hex())
+        self.assertEqual(record['writtenSha256'],hashlib.sha256(written).hexdigest())
+        self.assertEqual(record['sha256'],hashlib.sha256(data).hexdigest())
+        self.assertEqual(record['nativeOutput']['addedKeys'],['pouches'])
+        self.assertFalse(b.s.state['snapshots'][0]['exists'])
+        self.assertEqual(b.s.state['fixtureSettingsWriteHistory'][0]['sha256'],hashlib.sha256(written).hexdigest())
+        domain.atomic_write(b,target,(json.dumps(dict(requested,pouches=[]))+'\n').encode(),program_subject='Any Subject')
+        self.assertEqual(len(b.s.state['fixtureSettingsOutputHistory']),1)
+
+    def test_program_output_never_adopts_unmatched_values_unknown_keys_or_stale_native_state(self):
+        mutations=[lambda b,a:a.update(logLevel='debug'),
+                   lambda b,a:a.update(unknown=True),
+                   lambda b,a:a.update(pouches=[{'slot':13,'mode':'exclusive'}]),
+                   lambda b,a:b.s.state['game'].update(birth=999),
+                   lambda b,a:b.s.state['ownedLoadTransition'].update(completed=False),
+                   lambda b,a:b.s.state['subjectStateReadCursors']['Any Subject'].update(sequence=999)]
+        for mutate in mutations:
+            # Restore the external test directory to the exact declared absence.
+            target=self.root/'settings.json'
+            if target.exists():target.unlink()
+            b,target,requested,written=self.prepared_program_settings()
+            observed=domain.observe(b,'Any Subject');actual=dict(requested,pouches=[])
+            mutate(b,actual);target.write_bytes(json.dumps(actual).encode())
+            with self.subTest(mutate=mutate),self.assertRaises(ValueError):
+                domain.reconcile_native_settings_output(b,target,'Any Subject',observed)
+            self.assertEqual(b.s.state['fixtureSettingsWrites'][str(target)]['sha256'],hashlib.sha256(written).hexdigest())
+            self.assertNotIn('fixtureSettingsOutputHistory',b.s.state)
+
+    def test_program_output_duplicate_keys_and_nonfinite_json_never_become_verified(self):
+        for data in (b'{"language":"english","language":"english","logLevel":"info","mayEnableSlots":false,"pouches":[]}',
+                     b'{"language":"english","logLevel":"info","mayEnableSlots":NaN,"pouches":[]}'):
+            target=self.root/'settings.json'
+            if target.exists():target.unlink()
+            b,target,_,_=self.prepared_program_settings();target.write_bytes(data)
+            with self.assertRaises(ValueError):
+                domain.reconcile_native_settings_output(b,target,'Any Subject',domain.observe(b,'Any Subject'))
 
     def test_replayed_native_sample_is_not_fresh_readiness_or_state(self):
         b=Backend(self.root);frozen=copy.deepcopy(b.raw);b.call=lambda *a:frozen
@@ -102,7 +158,7 @@ class SubjectStateTests(unittest.TestCase):
             'settings':{'language':'russian','logLevel':'debug','mayEnableSlots':True,'pouches':[]},'inputHandedness':'left',
             'bodySlotFixtures':[{'slot':14,'allowSmall':True,'visible':True}],'restoration':domain.RESTORATION}
         def restart(backend,request,restart_prepare):
-            restart_prepare();return {'lifecycle':{'worldReady':True}}
+            restart_prepare();backend.s.state['ownedLoadTransition']={'completed':True,'afterGame':copy.deepcopy(backend.s.state['game'])};return {'lifecycle':{'worldReady':True}}
         with patch('skyrim_autotest.owned_saves.perform',side_effect=restart),patch('skyrim_autotest.native.processes',return_value=[]):
             first=domain.perform(b,req)
             self.assertEqual(first['subject']['settings']['language'],'english')

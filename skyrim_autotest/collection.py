@@ -44,6 +44,7 @@ def collect(session, segment=None):
                              'sha256': digest, 'bytes': target.stat().st_size,
                              'mtime': stat.st_mtime})
             if kind == 'skse-log': manifest[-1]['fresh'] = True
+            return manifest[-1]
         except (OSError, ValueError) as exception:
             error(path, exception)
 
@@ -74,8 +75,17 @@ def collect(session, segment=None):
                  else {str((Path(session.state['testProfile'])/binding['handednessProfileIni']).resolve()).casefold()
                        for binding in P.value.get('subject_state_bindings',{}).values() if 'handednessProfileIni' in binding})
         if str(path.resolve()).casefold() not in allowed:error(path,'Fixture setting output not explicitly configured')
-        elif not path.is_file() or sha(path)!=record['sha256']:error(path,'Fixture setting output changed after owned write')
-        else:copy(path,f'fixture-settings-{index:03d}-{path.name}','fixture-settings',required=True)
+        else:
+            entry=copy(path,f'fixture-settings-{index:03d}-{path.name}','fixture-settings',required=True)
+            if entry is not None:
+                entry.update(writtenSha256=record.get('writtenSha256',record['sha256']),
+                             expectedCurrentSha256=record['sha256'],
+                             matchesLastVerifiedBytes=entry['sha256']==record['sha256'],
+                             nativeOutputCorroborated=entry['sha256']==record.get('nativeOutput',{}).get('sha256'))
+                if not entry['matchesLastVerifiedBytes']:
+                    session.log('fixture-setting-output-mismatch',path=str(path),
+                                expected=record['sha256'],actual=entry['sha256'],
+                                collected=True,writerIdentity='unknown')
     if segment is None:
         # The old consumer deliberately accepts only flat, safe artifact names.
         # Project declared restart artifacts into this manifest without weakening it.

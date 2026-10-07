@@ -79,13 +79,25 @@ class CollectionRecoveryTests(unittest.TestCase):
         for row in entries:self.assertEqual(runner.sha(self.directory/'evidence'/row['name']),row['sha256'])
         self.assertTrue(self.session.state['restored']);self.assertTrue(self.session.state['collectionComplete'])
 
-    def test_unowned_or_changed_fixture_settings_cannot_be_successful_evidence(self):
-        for allowed,digest in (([],runner.sha(self.file)),([str(self.file)],'0'*64)):
-            self.config.value['extra_files']=allowed
-            self.session.state['fixtureSettingsWrites']={str(self.file):{'path':str(self.file),'sha256':digest,'profileLocal':False}}
-            self.assertFalse(self.session.collect())
+    def test_unselected_fixture_settings_cannot_be_exposed_as_evidence(self):
+        self.config.value['extra_files']=[]
+        self.session.state['fixtureSettingsWrites']={str(self.file):{'path':str(self.file),'sha256':runner.sha(self.file),'profileLocal':False}}
+        self.assertFalse(self.session.collect())
         self.session.cleanup()
         self.assertTrue(self.session.state['restored']);self.assertFalse(self.session.state['collectionComplete'])
+
+    def test_changed_selected_output_is_collected_with_conflict_without_relabelling_failed_test(self):
+        self.config.value['extra_files']=[str(self.file)]
+        self.session.state.update(result='failed',reason='Settings conflict before next variant',
+            fixtureSettingsWrites={str(self.file):{'path':str(self.file),'sha256':'0'*64,'profileLocal':False}})
+        self.session.cleanup()
+        row=next(r for r in runner.read_json(self.directory/'evidence/manifest.json') if r['kind']=='fixture-settings')
+        self.assertFalse(row['matchesLastVerifiedBytes']);self.assertFalse(row['nativeOutputCorroborated'])
+        self.assertEqual(row['expectedCurrentSha256'],'0'*64)
+        self.assertEqual((self.directory/'evidence'/row['name']).read_bytes(),b'modified')
+        self.assertTrue(self.session.state['collectionComplete']);self.assertTrue(self.session.state['restored'])
+        self.assertEqual(self.session.state['result'],'failed')
+        self.assertEqual(self.file.read_bytes(),b'original')
 
     def test_bridge_steam_and_restart_artifacts_are_all_manifest_pinned(self):
         (self.steam/'vrserver.txt').write_bytes(b'before restart')

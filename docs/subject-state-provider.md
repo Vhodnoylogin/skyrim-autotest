@@ -54,3 +54,23 @@ Qualification must verify real native values (including empty pouches/zero
 assignments/all-slot suspension), fresh identity after restart, effective
 handedness and physical-hand routing, and exact settings/profile/save restoration.
 Configuration is operator-owned and frozen separately from the subject order.
+
+## Configuration output continuity
+
+The executor retains its exact settings write bytes/hash separately from the
+program's later output. A program may serialize a missing default into its owned
+JSON fixture. After an exact completed owned load, the executor may reconcile
+that output only when every explicitly written value remains unchanged and the
+complete parsed output matches the current identity-checked native settings
+sample. Duplicate keys, nonfinite/unknown fields, a different process/sample,
+missing fields or changed explicit values do not qualify. This proves content
+continuity; it does not identify the process that wrote the file. Native values
+remain observations and are never replaced with requested values.
+
+Original restoration snapshots/backups remain unchanged. Written bytes, accepted
+output bytes and native samples have separate histories. A later unexplained
+hash change blocks further fixture writes. Collection still saves a stable copy
+of each explicitly allowed output, recording expected/actual hashes and mismatch
+metadata. A changed file is evidence, not a collection failure by itself; missing,
+unreadable, unselected or changing-during-copy files remain collection errors.
+Collecting a failed test's output never changes its testing outcome to passed.
