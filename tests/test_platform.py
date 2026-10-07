@@ -14,7 +14,7 @@ class Session:
         self.calls = []
         self.deadlines = []
         self.validations = 0
-        self.responses = {}
+        self.responses = {'menu':dict(messageBoxOpen=False,openMenus=[],menuStates=[])}
     def validate_probe_reference(self, timeout=3):
         self.validations += 1
         if not self.state['probeObjectLive']: raise ValueError('generation changed')

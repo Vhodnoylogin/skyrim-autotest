@@ -437,6 +437,19 @@ class Backend:
                               'quantity': {'items': entry['quantityItems']}, 'item': self.item(ref)},
                 'providerObservation': raw}
 
+    def recover_input_gate(self, menus):
+        if not menus_block_gameplay(menus): return
+        from .bootstrap import wait_gameplay_ready
+        from .owned_saves import BoundSession
+        scene = self.call('inspect', {'kind':'scene'})
+        cell = scene.get('cell', {}).get('editorId')
+        if scene.get('playerLoaded') is not True or not isinstance(cell,str) or not cell or cell == 'VRPlayroom01':
+            raise AssertionError('Physical action requires the already loaded subject world')
+        self.s.log('platform-input-readiness-recovery', menus=menus, scene=scene,
+                   subjectActionReplayed=False)
+        wait_gameplay_ready(BoundSession(self), cell, False, deadline=self.end)
+        self.s.validate_probe_reference(timeout=min(3,self.remaining()))
+
     def controller(self, req):
         action = req['action']
         if action == 'release_all':
@@ -446,6 +459,9 @@ class Backend:
         from .vr_probe import ensure_owned_focus
         self.remaining()
         ensure_owned_focus(self.s, {}, 'platform-controller-owned-focus', deadline=self.end)
+        if action != 'release_reference':
+            menus = self.call('menu', {'action':'list','includeFlags':True})
+            self.recover_input_gate(menus)
         frame = self.frame()
         hand = req['hand']
         other = 'right' if hand == 'left' else 'left'
@@ -519,6 +535,9 @@ class Backend:
             self.publish(frame, .5)
             self.pause(.5)
             menus = self.call('menu', {'action': 'list', 'includeFlags': True})
+            if menus_block_gameplay(menus):
+                self.recover_input_gate(menus)
+                menus = self.call('menu', {'action':'list','includeFlags':True})
             can_grab = self.pap('HiggsVR', 'CanGrabObject', [hand == 'left'])
             current_target = self.reach_target(ref, hand, columns)
             reference_position = list(self._reach_center)

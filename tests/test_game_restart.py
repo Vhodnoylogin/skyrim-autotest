@@ -93,5 +93,47 @@ class RestartTests(unittest.TestCase):
             self.assertNotIn('game',b.s.state)
             self.assertFalse(b.s.state['gameRestartTransition']['completed'])
 
+    def loader_backend(self):
+        ident = dict(pid=18, birth=2, path='sksevr_loader.exe')
+        self.clock = 0
+        def pause(seconds): self.clock += seconds
+        session = SimpleNamespace(state={'owned':[dict(role='loader',identity=ident)]},
+                                  log=lambda *args,**kwargs:None)
+        return SimpleNamespace(s=session,end=30,pause=pause),ident
+
+    def test_owned_loader_natural_exit_is_waited_without_termination(self):
+        b,ident=self.loader_backend()
+        def processes(): return [dict(pid=18,name='sksevr_loader.exe')] if self.clock<.4 else []
+        with patch.object(native,'processes',side_effect=processes), \
+             patch.object(native,'identity',return_value=ident), \
+             patch.object(game_restart.time,'monotonic',side_effect=lambda:self.clock), \
+             patch.object(native,'close') as close, patch.object(native,'terminate') as terminate:
+            game_restart.settle_owned_loaders(b)
+        self.assertGreaterEqual(self.clock,.4)
+        close.assert_not_called();terminate.assert_not_called()
+
+    def test_stuck_exact_owned_loader_has_one_close_then_one_termination(self):
+        b,ident=self.loader_backend(); self.loader_live=True
+        def processes(): return [dict(pid=18,name='sksevr_loader.exe')] if self.loader_live else []
+        def terminate(value): self.assertEqual(value,ident);self.loader_live=False
+        with patch.object(native,'processes',side_effect=processes), \
+             patch.object(native,'identity',return_value=ident), \
+             patch.object(game_restart.time,'monotonic',side_effect=lambda:self.clock), \
+             patch.object(native,'close') as close, patch.object(native,'terminate',side_effect=terminate) as stop:
+            game_restart.settle_owned_loaders(b)
+        close.assert_called_once_with(ident);stop.assert_called_once_with(ident)
+        self.assertLess(self.clock,16)
+
+    def test_foreign_or_reused_loader_never_closed_or_terminated(self):
+        for actual in (None,dict(pid=18,birth=99,path='sksevr_loader.exe')):
+            b,ident=self.loader_backend()
+            with self.subTest(actual=actual), \
+                 patch.object(native,'processes',return_value=[dict(pid=18,name='sksevr_loader.exe')]), \
+                 patch.object(native,'identity',return_value=actual), \
+                 patch.object(native,'close') as close, patch.object(native,'terminate') as stop:
+                with self.assertRaisesRegex(ValueError,'Foreign, unidentified'):
+                    game_restart.settle_owned_loaders(b)
+            close.assert_not_called();stop.assert_not_called()
+
 
 if __name__=='__main__':unittest.main()

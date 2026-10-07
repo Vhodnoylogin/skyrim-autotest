@@ -290,12 +290,48 @@ def complete_character_creation(session):
     raise AssertionError('Character menu remained open after one verified name acceptance')
 
 
+def dismiss_navigation_gate(session, menus, attempted, deadline):
+    """One native hide per known navigation menu; never answer arbitrary choices."""
+    safe = {'Console', 'TweenMenu', 'Journal Menu', 'InventoryMenu', 'MagicMenu',
+            'MapMenu', 'StatsMenu', 'FavoritesMenu'}
+    if menus.get('messageBoxOpen') is not False: return False
+    fields = ('alwaysOpen', 'pausesGame', 'modal', 'usesCursor', 'usesMenuContext', 'freezeFramePause')
+    for row in menus.get('menuStates', []):
+        name = row.get('name')
+        if name not in safe or row.get('available') is not True: continue
+        if any(type(row.get(key)) is not bool for key in fields): continue
+        from .platform import menus_block_gameplay
+        if not menus_block_gameplay(dict(messageBoxOpen=False,openMenus=[name],menuStates=[row])):
+            continue
+        if name in attempted: raise AssertionError('Navigation menu persisted or reopened after one close: '+name)
+        fresh = session.tool('menu', {'action':'list','includeFlags':True})
+        if any(fresh.get(key) != menus.get(key) for key in ('openMenus','menuStates','messageBoxOpen')):
+            return False
+        if time.monotonic() >= deadline: return False
+        attempted.add(name)  # Durable log records intent before one mutation, never replay.
+        session.log('gameplay-navigation-recovery-request', menu=name, observed=fresh,
+                    policy='native hide known navigation only; verify closure and quiet world before input')
+        response = session.tool('menu', {'action':'close','name':name})
+        session.log('gameplay-navigation-recovery-receipt', menu=name, response=response,
+                    acceptedAsReadinessProof=False)
+        end = min(time.monotonic()+3, deadline)
+        while time.monotonic() < end:
+            current = session.tool('menu', {'action':'list','includeFlags':True})
+            if name not in current.get('openMenus', []):
+                session.log('gameplay-navigation-recovery-closed', menu=name, menus=current)
+                return True
+            time.sleep(.1)
+        raise AssertionError('Navigation menu did not close after one native request: '+name)
+    return False
+
+
 def wait_gameplay_ready(session, cell, new_game, deadline=None):
     """Require a quiet startup interval; late menus reset readiness."""
     from .platform import menus_block_gameplay
     deadline = min(time.monotonic() + 90, deadline) if deadline is not None else time.monotonic() + 90
     stable_since = None
     character_seen = False
+    navigation_attempts = set()
     while time.monotonic() < deadline:
         menus = session.tool('menu', {'action': 'list', 'includeFlags': True})
         if menus.get('messageBoxOpen'):
@@ -312,11 +348,15 @@ def wait_gameplay_ready(session, cell, new_game, deadline=None):
             continue
         scene = session.tool('inspect', {'kind': 'scene'})
         current_cell = scene.get('cell', {}).get('editorId')
-        ready = (scene.get('playerLoaded') is True
+        world_loaded = (scene.get('playerLoaded') is True
                  and isinstance(current_cell, str) and bool(current_cell)
                  and current_cell != 'VRPlayroom01'
-                 and (not cell or current_cell == cell)
-                 and not menus_block_gameplay(menus))
+                 and (not cell or current_cell == cell))
+        blocked = menus_block_gameplay(menus)
+        if world_loaded and blocked and dismiss_navigation_gate(session, menus, navigation_attempts, deadline):
+            stable_since = None
+            continue
+        ready = world_loaded and not blocked
         session.log('gameplay-readiness-observation', scene=scene, menus=menus, ready=bool(ready))
         if ready:
             if stable_since is None:

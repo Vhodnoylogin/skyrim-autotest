@@ -18,6 +18,47 @@ def expected_restart(state, now):
             any(p.get('role')=='game' and p.get('identity')==before for p in state.get('owned',[])))
 
 
+def settle_owned_loaders(backend):
+    """Wait for the old launch chain, closing only already owned SKSE identities."""
+    from . import native
+    from .runner import GAME_NAMES
+    b, s = backend, backend.s
+    allowed = [p['identity'] for p in s.state['owned'] if p['role'] in ('game', 'loader')]
+    def residuals():
+        rows = []
+        for process in native.processes():
+            if process['name'].lower() not in GAME_NAMES: continue
+            ident = native.identity(process['pid'])
+            rows.append(dict(process, identity=ident, owned=ident is not None and ident in allowed))
+        s.log('owned-game-restart-residuals', processes=rows)
+        if any(not row['owned'] or row['name'].lower() != 'sksevr_loader.exe' or
+               Path(row['identity']['path']).name.lower() != 'sksevr_loader.exe' for row in rows):
+            raise ValueError('Foreign, unidentified or unexpected game/loader blocks restart launch')
+        return rows
+    rows = residuals()
+    # A launcher often survives its child for a short interval. An enum entry
+    # alone must not be mistaken for a new foreign launch or a restart failure.
+    finish = min(time.monotonic()+8, b.end)
+    while rows and time.monotonic() < finish:
+        b.pause(.2)
+        rows = residuals()
+    for row in rows:
+        result = native.close(row['identity'])
+        s.log('owned-game-restart-loader-close', identity=row['identity'], result=result)
+    finish = min(time.monotonic()+3, b.end)
+    while rows and time.monotonic() < finish:
+        b.pause(.2)
+        rows = residuals()
+    for row in rows:
+        s.log('owned-game-restart-loader-forced-stop', identity=row['identity'])
+        native.terminate(row['identity'])  # native rechecks creation time on its handle
+    finish = min(time.monotonic()+4, b.end)
+    while rows and time.monotonic() < finish:
+        b.pause(.1)
+        rows = residuals()
+    if rows: raise ValueError('Exact owned loader did not stop; refusing restart launch')
+
+
 def start(backend):
     from . import native
     from .runner import request, read_json, GAME_NAMES
@@ -63,9 +104,7 @@ def start(backend):
     finish=min(time.monotonic()+4,b.end)
     while native.alive(before) and time.monotonic()<finish:b.pause(.1)
     if native.alive(before):raise ValueError('Exact owned game did not stop; no relaunch')
-    # A later foreign launch is never adopted or terminated.
-    if any(p['name'].lower() in GAME_NAMES for p in native.processes()):
-        raise ValueError('Game/loader still active; refusing restart launch')
+    settle_owned_loaders(b)
     bridge_ready()
     state['gameRestartTransition']['stage']='launching'
     state.pop('port',None);state.pop('game',None)

@@ -249,3 +249,25 @@ is retained; the guardian's durable expected-exit window is <=180seconds and
 never disables runner/deadline recovery. Incomplete transitions cannot replay;
 limit2 explicit restarts per attempt. Restart, saved inventory recovery, process
 identity change, log segmentation and final restoration require live qualification.
+
+Common readiness reads actual native menu flags, never a HUD-only menu-name
+allowlist or image classification. Nonblocking overlays may remain open. It
+requires an actual loaded player, nonempty matching world cell and eight quiet
+seconds. Known startup notifications use their existing identity-checked native
+answer path. In an already loaded world, known navigation gates (Console,
+TweenMenu, Journal Menu, InventoryMenu, MagicMenu, MapMenu, StatsMenu,
+FavoritesMenu) get at most one native hide request per readiness transition.
+Verify closure, then restart the quiet interval. Unknown choices, unavailable
+flags, main menu, loading and character creation are never generically hidden.
+Physical actions check this common recovery before motion and again before Grip;
+the original deadline and reference-generation checks remain. Reads never trigger
+recovery and subject actions are never replayed. Game qualification must include
+an intentionally opened navigation menu and actual successful physical action.
+
+Before a game-only restart relaunch, enumerate and log exact residual processes.
+Wait up to eight seconds for an already owned SKSE loader to exit naturally,
+request one graceful close, wait three seconds, then permit termination of that
+exact owned identity with creation-time recheck and four-second confirmation.
+Foreign/unidentified/reused identities or unexpected games block relaunch.
+All waits use the original action deadline. No other launch-chain process is
+adopted or stopped. This repair requires live restart qualification.

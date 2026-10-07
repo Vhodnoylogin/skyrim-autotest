@@ -64,3 +64,37 @@ class ReadinessTests(unittest.TestCase):
         session.tool = tool
         self.run_ready(session, clock, deadline=15)
         self.assertEqual(clock.now, 12)
+
+    def navigation(self, name='InventoryMenu'):
+        session = Session()
+        session.menus['openMenus'] = [name]
+        session.menus['menuStates'][0].update(name=name,pausesGame=True)
+        return session
+
+    def test_known_navigation_is_closed_once_then_world_stable_verified(self):
+        session, clock = self.navigation(), Clock()
+        original=session.tool
+        def tool(name,args):
+            result=original(name,args)
+            if name=='menu' and args['action']=='close':
+                session.menus.update(openMenus=[],menuStates=[])
+                return dict(queued=True)
+            return result
+        session.tool=tool
+        self.run_ready(session,clock)
+        self.assertEqual(sum(a.get('action')=='close' for t,a in session.calls),1)
+        self.assertEqual(clock.now,8)
+
+    def test_menu_close_ack_without_closure_never_replayed_or_ready(self):
+        session=self.navigation()
+        with self.assertRaisesRegex(AssertionError,'did not close'):
+            self.run_ready(session,Clock())
+        self.assertEqual(sum(a.get('action')=='close' for t,a in session.calls),1)
+
+    def test_unknown_choice_is_not_hidden_and_loading_world_has_no_navigation_mutation(self):
+        for name, scene in (('UnknownChoice',dict(playerLoaded=True,cell=dict(editorId='QASmoke'))),
+                            ('InventoryMenu',dict(playerLoaded=False,cell=dict(editorId='QASmoke')))):
+            session=self.navigation(name);session.scene=scene
+            with self.subTest(name=name),self.assertRaisesRegex(AssertionError,'not ready'):
+                self.run_ready(session,Clock())
+            self.assertFalse(any(a.get('action')=='close' for t,a in session.calls))
