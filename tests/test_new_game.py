@@ -13,14 +13,14 @@ class Clock:
 
 class Session:
     def __init__(self, selected=1):
-        self.state = {'port': 1}
-        self.calls = []
+        self.state = {'port': 1, 'id': 'owned-test-run'}
+        self.calls = []; self.logs = []
         self.mode = 'Main'
         self.selected = selected
         self.started = False
     def phase(self, *args): pass
     def save(self): pass
-    def log(self, *args, **kwargs): pass
+    def log(self, kind, **details): self.logs.append({'kind': kind, **details})
     def tool(self, name, args, **kwargs):
         self.calls.append((name, args))
         if name == 'menu': return {'openMenus': ['RaceSex Menu'] if self.started else ['Main Menu']}
@@ -115,6 +115,13 @@ class NewGameTests(unittest.TestCase):
                 patch.object(bootstrap.time, 'sleep', clock.sleep):
             bootstrap.start_new_game(session, 'QASmoke')
         self.assertTrue(session.state['newGameStarted']['events'])
+        check = session.state['checks'][0]
+        self.assertEqual(check['provenance'], {'schemaVersion': 1, 'component': 'skyrim-autotest',
+            'stage': 'bootstrap', 'role': 'tooling', 'runId': 'owned-test-run',
+            'checkId': 'new-game-world-transition'})
+        evidence = [e for e in session.logs if e['kind'] == 'executor-check']
+        self.assertEqual(evidence, [{'kind': 'executor-check', **{k: check[k]
+                                    for k in ('name', 'result', 'provenance')}}])
         self.assertEqual(session.state['newGameStarted']['initialScene']['cell']['editorId'],'RealmLorkhan')
         self.assertEqual(session.state['newGameStarted']['requestedFixtureCell'],'QASmoke')
         self.assertFalse(session.state['newGameStarted']['saveLoaded'])

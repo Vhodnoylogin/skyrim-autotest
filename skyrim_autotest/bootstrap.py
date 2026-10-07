@@ -161,10 +161,18 @@ def start_new_game(session, cell):
                                                   e.get('topic') == 'lifecycle' and e.get('data', {}).get('event') == 'newGame'
                                                   for e in fresh),
                                               'saveLoaded': False, 'consoleBootstrap': False}
-            session.state.setdefault('checks', []).append({
-                'name': 'new game world transition observed', 'result': 'passed',
-                'observation': session.state['newGameStarted']})
+            check = {'name': 'new game world transition observed', 'result': 'passed',
+                     'observation': session.state['newGameStarted'],
+                     'provenance': {'schemaVersion': 1, 'component': 'skyrim-autotest',
+                                    'stage': 'bootstrap', 'role': 'tooling',
+                                    'runId': session.state['id'],
+                                    'checkId': 'new-game-world-transition'}}
+            session.state.setdefault('checks', []).append(check)
             session.save()
+            # A report consumer must corroborate this same-run identity in both
+            # retained state and the durable event log, never trust its name alone.
+            session.log('executor-check', name=check['name'], result=check['result'],
+                        provenance=check['provenance'])
             session.log('gameplay-new-game-started', events=loaded)
             return
         time.sleep(.5)

@@ -343,3 +343,14 @@ an observed invalidation is retained so it cannot be adopted by another read.
 HIGGS hand reads and held tagging remain bracketed by lifecycle checks. Once a
 fresh fixture binds a new probe, its existing creation-time lifecycle guard is
 used. This is sampled sequential evidence, not an atomic world snapshot.
+
+
+Common bootstrap checks are executor evidence, separate from subject checkpoints.
+A newly recorded bootstrap check carries provenance with schemaVersion1,
+component="skyrim-autotest", stage="bootstrap", role="tooling", the exact native
+runId and a unique per-run checkId. It appears in state/result checks and a matching
+executor-check event (name/result/provenance) in steps.jsonl. Consumers verify the
+pinned same-run state, result and event before classifying auxiliary technical
+coverage. The name or provenance flag alone is not proof. A technical check never
+establishes subject start or subject coverage. Legacy artifacts stay unchanged;
+missing corroboration remains unknown rather than silently becoming a tool pass.
