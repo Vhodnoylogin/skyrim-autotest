@@ -220,7 +220,11 @@ def complete_character_creation(session):
         settings[key] = session.tool('papyrus', {'action': 'call', 'script': 'Game',
                                    'function': 'GetGameSettingString', 'args': [key]})['returned']
     session.log('character-creation-settings', values=settings)
-    vr_probe.ensure_owned_focus(session, {}, 'character-creation-owned-focus')
+    # These calls execute inside the owned game's UI/Papyrus transport; no
+    # desktop keyboard or mouse is sent. Foreground policy must not prevent
+    # an otherwise verified native character-creation transition.
+    session.log('character-creation-native-routing', transport='papyrus-ui-and-native-menu',
+                foregroundRequired=False, acceptedAsReadinessProof=False)
     if menu not in session.tool('menu', {'action': 'list'}).get('openMenus', []):
         raise AssertionError('Character menu changed before completion request')
     ui('InvokeInt', root + '.onDoneClicked', 0)

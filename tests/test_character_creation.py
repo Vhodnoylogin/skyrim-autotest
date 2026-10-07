@@ -52,7 +52,7 @@ class CharacterTests(unittest.TestCase):
     def invoke(self, session):
         clock=Clock()
         with patch('skyrim_autotest.api_contract.validate_description'), \
-             patch.object(bootstrap.vr_probe,'ensure_owned_focus'), \
+             patch.object(bootstrap.vr_probe,'ensure_owned_focus', side_effect=AssertionError('Native UI must not require foreground')), \
              patch.object(bootstrap.time,'monotonic',clock.monotonic), \
              patch.object(bootstrap.time,'sleep',clock.sleep):
             bootstrap.complete_character_creation(session)

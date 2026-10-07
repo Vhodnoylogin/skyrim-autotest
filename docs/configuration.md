@@ -26,9 +26,12 @@ file whose content is read immediately before an authenticated request.
 | allow_background_physical_vr | Optional boolean, default false; semantic platform physical actions observe owned focus without requesting it and may proceed in background only with the owned file driver; native gameplay assertions remain mandatory |
 
 Background permission applies only to semantic platform physical checkpoints.
-Common startup UI still requires its normal owned foreground checks. This allows
-an operator to read another app after world loading without repeated activation
-requests. It does not prove the game consumes background input; qualify exact
+Startup operations that send desktop keyboard/mouse input retain owned foreground
+checks. Identified character creation uses native Papyrus/UI and menu calls without
+requiring desktop foreground, and still verifies confirmation, name readback, actual
+menu closure and gameplay readiness. This allows an operator to read another app
+without making native character completion depend on Windows activation requests.
+It does not prove the game consumes background input; qualify exact
 hand acquisition, hold and release in the actual session. No background keyboard
 or UI automation is authorized by this option.
 

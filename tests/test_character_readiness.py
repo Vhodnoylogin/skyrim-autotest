@@ -56,7 +56,7 @@ class CharacterReadinessTests(unittest.TestCase):
         clock=Clock()
         with patch.object(bootstrap.time,'monotonic',clock.monotonic), \
              patch.object(bootstrap.time,'sleep',clock.sleep), \
-             patch.object(bootstrap.vr_probe,'ensure_owned_focus'):
+             patch.object(bootstrap.vr_probe,'ensure_owned_focus', side_effect=AssertionError('Native UI must not require foreground')):
             bootstrap.complete_character_creation(session)
     def test_native_name_ack_without_closure_never_means_ready(self):
         session=CharacterSession()
