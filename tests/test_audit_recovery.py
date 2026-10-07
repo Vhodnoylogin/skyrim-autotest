@@ -199,6 +199,31 @@ class CollectionRecoveryTests(unittest.TestCase):
         self.assertTrue(self.session.state['restored'])
         self.assertEqual(runner.sha(self.directory/'evidence/manifest.json'),digest)
 
+    def test_late_owned_driver_lock_gets_one_guarded_retry_and_retains_original_error(self):
+        runtime=self.root/'vr';driver=runtime/'drivers/null/bin/win64/driver_null.dll'
+        driver.parent.mkdir(parents=True);driver.write_bytes(b'original-driver')
+        self.session.write(driver,b'staged-driver')
+        self.session.state.update(driverBackend='file',driverManifest={'dllSha256':runner.sha(driver)})
+        self.session.state['preflight'].update(runtime=str(runtime),steamClientRestart={'identity':{'pid':1}})
+        real=runner.shutil.copy2;attempts=[];preparations=[]
+        def copy(source,target,*args,**kwargs):
+            if Path(target)==driver:
+                attempts.append(str(target))
+                if len(attempts)==1:
+                    error=PermissionError('driver loaded after initial observation');error.winerror=32;raise error
+            return real(source,target,*args,**kwargs)
+        def prepare(session):
+            preparations.append(True)
+            if len(preparations)==2:session.state['steamClientRestore']={'shutdownObserved':True}
+        with patch.object(runner.shutil,'copy2',side_effect=copy), \
+             patch('skyrim_autotest.steam_restore.prepare',side_effect=prepare), \
+             patch('skyrim_autotest.steam_restore.reopen'):
+            self.session.cleanup()
+        self.assertEqual(len(attempts),2);self.assertEqual(len(preparations),2)
+        self.assertEqual(driver.read_bytes(),b'original-driver')
+        self.assertTrue(self.session.state['restored']);self.assertTrue(self.session.state['steamDriverCopyRetryIssued'])
+        self.assertIn('driver loaded after initial observation',(self.directory/'steps.jsonl').read_text())
+
 
 class AcquisitionRecoveryTests(unittest.TestCase):
     def setUp(self):

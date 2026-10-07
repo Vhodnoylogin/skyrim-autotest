@@ -34,6 +34,7 @@ class SteamRestoreTests(unittest.TestCase):
         self.stack.enter_context(patch.object(steam, 'clients', side_effect=lambda _: list(self.current)))
         self.stack.enter_context(patch.object(native, 'alive', side_effect=lambda ident: ident in self.current))
         self.stack.enter_context(patch.object(native, 'modules', return_value=[str(self.driver)]))
+        self.stack.enter_context(patch.object(steam, 'observe_module', return_value={'observed':True,'modulePath':str(self.driver),'elapsedSeconds':0}))
         self.stack.enter_context(patch.object(steam, 'idle_inventory', return_value={'helpers':[], 'runningAppHints':[]}))
         self.stack.enter_context(patch.object(steam, 'launch', self.launcher))
         self.stack.enter_context(patch.object(steam.time, 'sleep'))
@@ -65,11 +66,11 @@ class SteamRestoreTests(unittest.TestCase):
         steam.prepare(self.session); self.launcher.assert_not_called()
 
     def test_client_without_observed_owned_module_is_left_alone(self):
-        with patch.object(native,'modules',return_value=[]):steam.prepare(self.session)
+        with patch.object(steam,'observe_module',return_value={'observed':False}):steam.prepare(self.session)
         self.launcher.assert_not_called()
 
     def test_unavailable_module_inventory_never_closes_client(self):
-        with patch.object(native,'modules',side_effect=OSError('access denied')):
+        with patch.object(steam,'observe_module',side_effect=OSError('access denied')):
             with self.assertRaises(OSError):steam.prepare(self.session)
         self.launcher.assert_not_called()
 
@@ -112,6 +113,20 @@ class SteamRestoreTests(unittest.TestCase):
         self.assertEqual(len(self.commands),1)
         self.assertTrue(self.session.state['steamClientRestore']['reopened'])
 
+    def test_late_driver_sharing_violation_retries_only_after_observed_shutdown_once(self):
+        error=PermissionError('mapped driver');error.winerror=32
+        self.assertTrue(steam.retry_locked_driver(self.session,self.driver,error))
+        self.assertTrue(self.session.state['steamClientRestore']['shutdownObserved'])
+        self.assertFalse(steam.retry_locked_driver(self.session,self.driver,error))
+        self.assertEqual(len(self.commands),1)
+
+    def test_unrelated_file_error_or_unobserved_module_cannot_trigger_retry(self):
+        error=PermissionError('mapped file');error.winerror=32
+        self.assertFalse(steam.retry_locked_driver(self.session,self.backup,error))
+        with patch.object(steam,'observe_module',return_value={'observed':False}):
+            self.assertFalse(steam.retry_locked_driver(self.session,self.driver,error))
+        self.launcher.assert_not_called()
+
     def test_interrupted_reopen_intent_with_no_client_never_replays(self):
         steam.prepare(self.session)
         self.session.state['steamClientRestore']['reopenRequested']=True
@@ -152,6 +167,19 @@ class IdleClientTests(unittest.TestCase):
         for option in [{'allow_steam_client_restart':1},{'allow_steam_client_restart':True},
                        {'allow_steam_client_restart':True,'steam_exe':'some-other.exe'}]:
             with self.subTest(option=option),self.assertRaises(config.ConfigurationError):config.configure(dict(base,**option))
+
+    def test_delayed_watchdog_module_is_observed_within_one_bounded_window(self):
+        target=Path('C:/Steam/driver_null.dll')
+        with patch.object(native,'modules',side_effect=[[],[str(target)]]), \
+             patch.object(steam.time,'monotonic',side_effect=[0,.1,.25]),patch.object(steam.time,'sleep'):
+            value=steam.observe_module(self.parent,target)
+        self.assertTrue(value['observed']);self.assertEqual(value['elapsedSeconds'],.25)
+
+    def test_absent_watchdog_module_observation_stops_without_shutdown(self):
+        with patch.object(native,'modules',return_value=[]), \
+             patch.object(steam.time,'monotonic',side_effect=[0,9,9]),patch.object(steam.time,'sleep') as sleep:
+            value=steam.observe_module(self.parent,Path('C:/Steam/driver_null.dll'))
+        self.assertFalse(value['observed']);sleep.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()

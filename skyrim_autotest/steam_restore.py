@@ -105,6 +105,19 @@ def launch(command):
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def observe_module(ident, target):
+    """Allow Steam's delayed watchdog transition before deciding no lock exists."""
+    started = time.monotonic()
+    wanted = Path(target).resolve()
+    observed = wanted in {Path(p).resolve() for p in native.modules(ident)}
+    while not observed and time.monotonic() - started < 8:
+        time.sleep(.25)
+        observed = wanted in {Path(p).resolve() for p in native.modules(ident)}
+    return {'identity': ident, 'modulePath': str(wanted), 'observed': observed,
+            'elapsedSeconds': time.monotonic()-started, 'maximumWaitSeconds': 8,
+            'basis': 'Identity-bracketed module snapshots during delayed Steam watchdog startup; later loads remain possible'}
+
+
 def prepare(session):
     grant = session.state.get('preflight', {}).get('steamClientRestart')
     if not grant:
@@ -133,13 +146,15 @@ def prepare(session):
         return # Owner already closed it; no restart was requested by us.
     if found != [ident] or not native.alive(ident) or digest(ident['path']) != grant['executableSha256']:
         raise RuntimeError('Preflight Steam identity/executable changed; shutdown refused')
-    if target.resolve() not in {Path(p).resolve() for p in native.modules(ident)}:
+    module = observe_module(ident, target)
+    session.log('steam-driver-module-observation', **module)
+    if not module['observed']:
         return # No observed owned-driver module: do not gratuitously restart Steam.
     inventory = idle_inventory(ident)
-    if clients(ident['path']) != [ident] or not native.alive(ident):
+    if clients(ident['path']) != [ident] or not native.alive(ident) or digest(target) != session.state['driverManifest']['dllSha256']:
         raise RuntimeError('Steam identity changed before graceful shutdown')
     lifecycle = {'before': ident, 'target': str(target), 'driverSha256': digest(target),
-                 'inventory': inventory, 'shutdownRequested': True, 'shutdownObserved': False,
+                 'inventory': inventory, 'moduleObservation': module, 'shutdownRequested': True, 'shutdownObserved': False,
                  'shutdownCommand': [ident['path'], '-shutdown'], 'forced': False}
     session.state['steamClientRestore'] = lifecycle
     session.save() # Record intent before mutation; interruption cannot replay it.
@@ -155,6 +170,23 @@ def prepare(session):
     lifecycle['shutdownObserved'] = True
     session.save()
     session.log('steam-driver-graceful-shutdown-observed', identity=ident, forced=False)
+
+
+def retry_locked_driver(session, path, error):
+    """One guarded restoration retry for a driver loaded after initial inspection."""
+    if getattr(error, 'winerror', None) != 32 or not session.state.get('preflight', {}).get('steamClientRestart'):
+        return False
+    target = Path(session.state['preflight']['runtime'])/'drivers/null/bin/win64/driver_null.dll'
+    if Path(path).resolve() != target.resolve() or session.state.get('steamDriverCopyRetryIssued'):
+        return False
+    session.log('steam-driver-restore-sharing-violation', path=str(target), error=str(error), winerror=32)
+    prepare(session)
+    if not session.state.get('steamClientRestore', {}).get('shutdownObserved'):
+        return False
+    session.state['steamDriverCopyRetryIssued'] = True
+    session.save()
+    session.log('steam-driver-restore-retry-issued', path=str(target), originalError=str(error), maximumRetries=1)
+    return True
 
 
 def reopen(session):

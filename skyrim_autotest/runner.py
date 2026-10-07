@@ -872,6 +872,20 @@ class Session:
         from .collection import collect
         return collect(self, segment)
 
+    def restore_file(self, snapshot):
+        path = Path(snapshot['path'])
+        if snapshot['exists']:
+            backup = Path(snapshot['backup'])
+            if sha(backup) != snapshot['sha256']:
+                raise RuntimeError('Backup hash mismatch')
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if not path.is_file() or sha(path) != snapshot['sha256']:
+                shutil.copy2(backup, path)
+            if sha(path) != snapshot['sha256']:
+                raise RuntimeError('Restored file hash mismatch')
+        elif path.exists():
+            path.unlink() # Individually registered file only.
+
     def cleanup(self):
         self.phase('stop-and-restore', 150)
         if self.state.get('hardwareFrame'):
@@ -971,19 +985,14 @@ class Session:
         for snapshot in reversed(self.state['snapshots']):
             path = Path(snapshot['path'])
             try:
-                if snapshot['exists']:
-                    backup = Path(snapshot['backup'])
-                    if sha(backup) != snapshot['sha256']:
-                        raise RuntimeError('Backup hash mismatch')
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    # Already restored mapped files need verification, not another
-                    # write that can fail solely because the client reopened.
-                    if not path.is_file() or sha(path) != snapshot['sha256']:
-                        shutil.copy2(backup, path)
-                    if sha(path) != snapshot['sha256']:
-                        raise RuntimeError('Restored file hash mismatch')
-                elif path.exists():
-                    path.unlink()  # Only an individually registered file, never recursive deletion.
+                self.restore_file(snapshot)
+            except OSError as e:
+                try:
+                    if not steam_restore.retry_locked_driver(self, path, e):
+                        raise
+                    self.restore_file(snapshot)
+                except Exception as recovery_error:
+                    errors.append({'path':str(path),'error':str(recovery_error),'originalError':str(e)})
             except Exception as e:
                 errors.append({'path': str(path), 'error': str(e)})
         self.state['restoreErrors'] = errors

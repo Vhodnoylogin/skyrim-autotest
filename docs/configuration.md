@@ -14,6 +14,13 @@ process/registry inventory is sampled, not an atomic exclusion of later manual
 launches. Disabled by default; the exact opt-in configuration requires live
 qualification. Missing Steam registry observations fail conservatively.
 
+The opt-in path observes the exact client's modules for up to eight seconds,
+allowing its delayed post-VR watchdog startup before deciding a restart is
+unnecessary. A later Win32 sharing violation on this exact staged driver permits
+one file-restoration retry only after the same guarded graceful shutdown is
+observed. The original sharing error remains logged; unrelated file failures,
+unobserved modules and repeated retries remain blockers.
+
 Configuration is a JSON object supplied using `--config`. Relative paths resolve
 against the config file's directory, never the working directory. Unknown fields
 are rejected. No path value includes credentials; only `bridge_token` names a
