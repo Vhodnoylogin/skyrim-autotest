@@ -680,8 +680,8 @@ class Session:
             self.state['fixture'] = fixture
             self.save()
         if P.value.get('allow_owned_save_load') is True:
-            from .owned_saves import prepare_mapping_probe
-            prepare_mapping_probe(self,test_profile/'saves')
+            from .owned_saves import prepare_required_mapping_probe
+            prepare_required_mapping_probe(self,test_profile/'saves')
         modlist = test_profile / 'modlist.txt'
         text = modlist.read_text(encoding='utf-8-sig')
         text = '\n'.join('-' + line[1:] if line.startswith('+') and line[1:] in OCU else line for line in text.splitlines()) + '\n'

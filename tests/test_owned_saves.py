@@ -47,6 +47,33 @@ class OwnedSaveTests(unittest.TestCase):
         self.b=Backend(Path(self.tmp.name))
     def request(self, action='save_game'):
         return {'action':action,'saveTag':'stocked-a','scope':'owned-disposable-profile'}
+    def test_newgame_without_save_actions_skips_only_prelaunch_challenge(self):
+        self.b.s.state['scenario']={'startMode':'new-game','steps':[{'tool':'platform','args':{'operation':'state.read'}}]}
+        with patch.object(owned_saves,'prepare_mapping_probe') as prepare:
+            owned_saves.prepare_required_mapping_probe(self.b.s,Path(self.b.s.state['ownedSaveDirectory']))
+            prepare.assert_not_called()
+        self.assertFalse(self.b.s.state['ownedSaveMappingRequired'])
+        # A later unexpected save still cannot waive the native MO2 alias proof.
+        (Path(self.b.s.state['testProfile'])/'settings.ini').write_text('[General]\nLocalSaves=true\nLocalSettings=true\n',encoding='utf-8')
+        self.b.pap=lambda *a,**k:'__MO_Saves\\'
+        with self.assertRaisesRegex(ValueError,'probe unavailable'):
+            owned_saves.directory(self.b)
+
+    def test_each_declared_save_action_and_poststep_requires_actual_probe(self):
+        self.b.s.state.pop('game')
+        for action in ('save_game','load_game','restart_game'):
+            for key in ('steps','postSteps'):
+                self.b.s.state['scenario']={'startMode':'new-game',key:[{'tool':'platform','args':{'operation':'input.perform','request':self.request(action)}}]}
+                with self.assertRaisesRegex(ValueError,'Pinned owned fixture needed'):
+                    owned_saves.prepare_required_mapping_probe(self.b.s,Path(self.b.s.state['ownedSaveDirectory']))
+                self.assertTrue(self.b.s.state['ownedSaveMappingRequired'])
+
+    def test_pinned_fixture_keeps_existing_mapping_challenge(self):
+        self.b.s.state['scenario']={'fixture':{'saveStem':'existing'},'steps':[]}
+        with patch.object(owned_saves,'prepare_mapping_probe') as prepare:
+            owned_saves.prepare_required_mapping_probe(self.b.s,Path(self.b.s.state['ownedSaveDirectory']))
+            prepare.assert_called_once()
+        self.assertTrue(self.b.s.state['ownedSaveMappingRequired'])
     def complete(self):
         replies=[{'headSeq':1,'events':[event(1,'saveGame')]},{'headSeq':1,'events':[]}]
         with patch('skyrim_autotest.runner.request',side_effect=replies),patch.object(owned_saves.time,'monotonic',side_effect=[0,0,2]):

@@ -43,6 +43,13 @@ are unavailable. Pending evidence is not completion. Request timeouts never
 replay. This adapter requires live qualification with genuine audio/model output;
 offline checks or native request completion do not attest speech recognition.
 
+Enabling owned saves is a capability setting, not a requirement that every test
+load a fixture. Prelaunch mapping challenges remain mandatory for pinned-save
+scenarios and any declared owned save/load/restart action, including postSteps.
+A new game with none of these skips only the unused challenge. Runtime native
+save-directory and nonce verification remain mandatory whenever a save action
+actually requests the MO2 alias; late undeclared use cannot waive those guards.
+
 Implemented provider translations are scene/menu readiness, player health,
 installed form lookup, exact reference/native loose stack quantity, inventory,
 VRIK slot state, HIGGS held reference, existing Observer physics snapshots,

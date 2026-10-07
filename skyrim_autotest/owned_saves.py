@@ -6,6 +6,24 @@ from pathlib import Path
 import time
 
 
+def prepare_required_mapping_probe(session, target):
+    """Capability opt-in alone must not require a save in a no-save new game."""
+    scenario = session.state['scenario']
+    save_actions = {'save_game', 'load_game', 'restart_game'}
+    steps = [*scenario.get('steps', []), *scenario.get('postSteps', [])]
+    required = bool(scenario.get('fixture')) or any(
+        step.get('tool') == 'platform' and step.get('args', {}).get('operation') == 'input.perform'
+        and step['args'].get('request', {}).get('action') in save_actions for step in steps)
+    session.state['ownedSaveMappingRequired'] = required
+    session.save()
+    if required:
+        prepare_mapping_probe(session, target)
+    else:
+        session.log('owned-save-mapping-probe-not-needed',
+                    reason='No pinned fixture or declared owned save/load/restart operations; opt-in capability alone is not a fixture requirement',
+                    runtimeSaveProtectionUnchanged=True)
+
+
 def prepare_mapping_probe(session, target):
     """Stage a unique valid ESS before MO2 constructs the process's USVFS map."""
     import uuid
