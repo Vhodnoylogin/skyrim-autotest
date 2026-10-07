@@ -839,42 +839,8 @@ class Session:
         raise Blocked('Fresh matching DevBench with advancing game frames not found')
 
     def collect(self, segment=None):
-        dest = self.dir / 'evidence'
-        if segment is not None:
-            if not re.fullmatch(r'before-restart-[12]',segment):
-                raise ValueError('Invalid restart evidence segment')
-            dest = dest / segment
-        dest.mkdir(parents=True,exist_ok=True)
-        log_dir = P.skse_logs
-        manifest = []
-        launched_at = self.state.get('launchIntents', {}).get('game', {}).get('at')
-        for path in log_dir.glob('*.log'):
-            fresh = bool(launched_at and path.stat().st_mtime >= launched_at - 1)
-            if not fresh:
-                continue
-            try:
-                shutil.copy2(path, dest / path.name)
-                manifest.append({'name': path.name, 'sha256': sha(dest / path.name), 'mtime': path.stat().st_mtime, 'fresh': True})
-            except OSError as e:
-                self.log('collect-error', path=str(path), error=str(e))
-        steamlog = Path(read_json(self.state['preflight']['vrpaths'])['log'][0])
-        for name in ('vrserver.txt', 'vrcompositor.txt', 'vrmonitor.txt'):
-            file = steamlog / name
-            if file.exists():
-                shutil.copy2(file, dest / name)
-        bridge_log = P.mo2 / 'plugins/mo2aibridge/mo2aibridge.log'
-        if bridge_log.exists():
-            shutil.copy2(bridge_log, dest / 'mo2aibridge.log')
-        # Captures written through MO2's virtual Data directory end up in overwrite.
-        # Copy only artifacts named for this run and constrained to our capture tree.
-        capture_root = P.overwrite / 'SKSE/Plugins/devbench/captures'
-        if capture_root.exists():
-            for path in capture_root.rglob(self.state['id'] + '-*.png'):
-                if path.is_file() and path.resolve().is_relative_to(capture_root.resolve()):
-                    shutil.copy2(path, dest / path.name)
-                    manifest.append({'name': path.name, 'sha256': sha(dest / path.name), 'source': str(path), 'kind': 'capture'})
-        atomic_json(dest / 'manifest.json', manifest)
-        self.log('evidence-collected', files=[p.name for p in dest.iterdir()])
+        from .collection import collect
+        return collect(self, segment)
 
     def cleanup(self):
         self.phase('stop-and-restore', 150)
@@ -908,7 +874,18 @@ class Session:
                 time.sleep(.2)
             if any(native.alive(i) for i in owned):
                 raise RuntimeError(f'Owned {role} process did not exit; refusing file restoration')
-        self.collect()
+        try:
+            self.collect()
+        except Exception as error:
+            # Even an unexpected collector failure cannot prevent safe restoration.
+            self.state.setdefault('collectionErrors', []).append(
+                {'path': 'collector', 'error': str(error), 'segment': None})
+            self.state['collectionComplete'] = False
+            self.log('collect-error', error=str(error), restorationStillRequired=True)
+        if self.state.get('collectionComplete') is False:
+            self.state['result'] = 'failed'
+            self.state['reason'] = (self.state.get('reason', '') + '; evidence collection incomplete').lstrip('; ')
+            self.save()
         # New unrelated sessions block restore: never change settings under another game.
         busy = [p for p in native.processes() if p['name'].lower() in VR_NAMES | GAME_NAMES | {'modorganizer.exe'}]
         # A refused graceful restart precedes every live setup mutation. Recovery
@@ -992,7 +969,7 @@ class Session:
         for item in self.state.get('checks', []):
             lines.append(f'- {item["name"]}: {item["result"]}')
         (self.dir / 'report.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
-        atomic_json(self.dir / 'result.json', {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight')})
+        atomic_json(self.dir / 'result.json', {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors')})
 
     def reopen_mo2(self):
         if self.state.get('reopenMO2') and self.state.get('restored'):

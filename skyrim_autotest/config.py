@@ -37,7 +37,7 @@ def configure(value, base=None):
     missing = sorted(k for k in REQUIRED if not value.get(k))
     if missing:
         raise ConfigurationError("Missing configuration fields: " + ", ".join(missing))
-    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry"}
+    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry"}
     if unknown:
         raise ConfigurationError("Unknown configuration fields: " + ", ".join(sorted(unknown)))
     base = Path(base or Path.cwd()).resolve()
@@ -82,11 +82,15 @@ def configure(value, base=None):
     mods = result.setdefault("required_mods", ["DevBench", "VRIK Player Avatar", "HIGGS - Enhanced VR Interaction"])
     if not isinstance(mods, list) or not mods or any(not isinstance(m, str) or not m or m in (".", "..") or "/" in m or "\\" in m for m in mods):
         raise ConfigurationError("required_mods must contain safe mod directory names")
-    for key in ("extra_files", "devbench_runtime_files"):
+    for key in ("extra_files", "devbench_runtime_files", "collected_files"):
         files = result.setdefault(key, [])
         if not isinstance(files, list) or any(not isinstance(f, str) or not f for f in files):
             raise ConfigurationError(key + " must be a list of file paths")
         result[key] = [str((base / Path(f).expanduser()).resolve()) for f in files]
+    if not {p.casefold() for p in result['collected_files']} <= {p.casefold() for p in result['extra_files']}:
+        raise ConfigurationError('collected_files must be explicit snapshotted extra_files')
+    if len(result['collected_files']) != len({p.casefold() for p in result['collected_files']}):
+        raise ConfigurationError('Duplicate collected_files')
     plugins = result.setdefault("staged_plugins", [])
     if not isinstance(plugins, list):
         raise ConfigurationError("staged_plugins must be a list")

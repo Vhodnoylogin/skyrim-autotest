@@ -97,7 +97,8 @@ def start(backend):
                                     'startedAt':time.time(),'expiresAt':time.time()+duration}
     state['ownedGameRestartCount']=state.get('ownedGameRestartCount',0)+1
     s.save()
-    s.collect(segment='before-restart-'+str(state['ownedGameRestartCount']))
+    if s.collect(segment='before-restart-'+str(state['ownedGameRestartCount'])) is False:
+        raise ValueError('Evidence collection incomplete before restart; no exit or relaunch')
     s.log('owned-game-restart-stop',identity=before,mutationPolicy='one qqq request; exact-owned fallback termination only')
     try:b.call('console',{'action':'exec','command':'qqq'})
     except (OSError,RuntimeError) as error:s.log('owned-game-exit-response',error=str(error))

@@ -19,6 +19,7 @@ file whose content is read immediately before an authenticated request.
 | fixture_dir | Optional external authorized save-pair directory; if absent/null use selected source profile's saves |
 | required_mods | Nonempty exact MO2 directory names; default DevBench, VRIK Player Avatar and HIGGS - Enhanced VR Interaction |
 | extra_files | Explicit paths to regular files that may change; existence/content snapshotted before launch |
+| collected_files | Optional explicit subset of extra_files to capture before restoration; each file is required, at most64MiB, and hash-pinned in evidence; defaults to empty |
 | staged_plugins | External source files staged into MO2 overwrite before launch, with source/destination/sha256 |
 | devbench_runtime_files | Optional discovery file override list; default LOCALAPPDATA/devbench/vr/runtime.json and overwrite/SKSE/Plugins/devbench/runtime.json |
 | controller_start_positions_metres | Optional platform-owned left/right tracking translations, three finite metre values each within [-2,2]; open-hand pose applied once after common gameplay readiness and before subject actions |
@@ -48,6 +49,15 @@ Destination must be relative and remain under overwrite; existing files are
 backed up/restored, new files removed. Source hashes are verified before setup
 and again at staging. Include the mod's configuration/output files in extra_files
 when they are not already captured under enabled mod directories.
+
+`extra_files` protects restoration; it does not publish file contents. Select
+non-private runtime outputs explicitly through `collected_files` when the report
+needs their full bytes. Missing, linked, changing or oversized selected files make
+collection incomplete. Collection faults do not skip safe restoration: result/state
+retain `collectionComplete:false` and `collectionErrors` separately from `restored`
+and `restoreErrors`. Such a run is failed technical collection, never successful
+subject evidence. SteamVR/Bridge logs and pre-restart artifact copies are also
+declared in the flat hash manifest consumed by Polygon. Old packets remain unchanged.
 
 For unattended crash collection, stage a pinned copy of the actual winning
 `SKSE/Plugins/CrashLogger.ini` with `[Debug] Auto Open Crash Log = false`.

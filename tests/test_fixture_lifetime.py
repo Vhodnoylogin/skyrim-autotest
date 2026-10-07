@@ -16,7 +16,7 @@ class FixtureLifetimeTests(unittest.TestCase):
         def phase(self,*args):pass
         def validate_probe_reference(self,timeout=3):
             if self.state.get("probeObjectLive") is not True:raise runner.Blocked("Invalid reference")
-        def tool(self,name,args,timeout=12):
+        def tool(self,name,args,timeout=12,deadline=None):
             self.tools.append(args)
             return {'live':self.state.get('probeObjectLive') is True}
     def test_post_step_observes_retained_live_exact_fixture(self):

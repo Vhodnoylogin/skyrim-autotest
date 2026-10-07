@@ -38,6 +38,14 @@ class PortabilityTests(unittest.TestCase):
             value = dict(self.value, staged_plugins=[{'source':'observer.dll','destination':destination,'sha256':'0'*64}])
             with self.subTest(destination=destination), self.assertRaises(config.ConfigurationError):
                 config.configure(value)
+    def test_collection_exposes_only_explicit_unique_restore_targets(self):
+        path=str(self.root/'output.json')
+        with self.assertRaisesRegex(config.ConfigurationError,'snapshotted'):
+            config.configure(dict(self.value,collected_files=[path]))
+        with self.assertRaisesRegex(config.ConfigurationError,'Duplicate'):
+            config.configure(dict(self.value,extra_files=[path],collected_files=[path,path]))
+        selected=config.configure(dict(self.value,extra_files=[path],collected_files=[path]))
+        self.assertEqual(selected['collected_files'],[path])
     def test_runtime_must_be_outside_live_directories_and_git(self):
         with self.assertRaises(config.ConfigurationError):
             config.configure(dict(self.value, runtime=str(Path(self.value['mods']) / 'runs')))
@@ -184,7 +192,7 @@ class DeadlineTests(unittest.TestCase):
             pass
         def save(self):
             pass
-        def tool(self, name, args, timeout):
+        def tool(self, name, args, timeout, deadline=None):
             self.calls.append(timeout)
             return {'ok':True}
     def test_late_passing_response_fails_and_records_observation(self):

@@ -92,7 +92,7 @@ def field(value, path):
 def check(value, rule):
     actual = field(value, rule.get('path', ''))
     if 'equals' in rule:
-        return actual == rule['equals']
+        return json_equal(actual, rule['equals'])
     if 'contains' in rule:
         return rule['contains'] in actual
     if 'min' in rule:
@@ -102,6 +102,21 @@ def check(value, rule):
     if 'exists' in rule:
         return (actual is not None) == rule['exists']
     raise ValueError('Assertion needs equals, contains, min or exists')
+
+
+def json_equal(actual, expected):
+    """JSON booleans are distinct from numbers, also inside containers."""
+    if type(actual) is bool or type(expected) is bool:
+        return type(actual) is type(expected) and actual == expected
+    if isinstance(actual, dict) or isinstance(expected, dict):
+        return (isinstance(actual, dict) and isinstance(expected, dict)
+                and actual.keys() == expected.keys()
+                and all(json_equal(actual[key], expected[key]) for key in actual))
+    if isinstance(actual, list) or isinstance(expected, list):
+        return (isinstance(actual, list) and isinstance(expected, list)
+                and len(actual) == len(expected)
+                and all(json_equal(a, e) for a, e in zip(actual, expected)))
+    return actual == expected
 
 
 def retryable_observer_read(step, error):
@@ -158,7 +173,8 @@ def execute(session, scenario):
                     result = session.tool(step['tool'], resolve_args(step.get('args', {}), session.state),
                                           timeout=min(remaining, 12), deadline=end)
                 else:
-                    result = session.tool(step['tool'], resolve_args(step.get('args', {}), session.state), timeout=min(remaining, 12))
+                    result = session.tool(step['tool'], resolve_args(step.get('args', {}), session.state),
+                                          timeout=min(remaining, 12), deadline=end)
             except Exception as error:
                 from .runner import ToolError
                 if isinstance(error, ToolError):

@@ -16,7 +16,7 @@ class ObserverRetryTests(unittest.TestCase):
         def phase(self, *args): pass
         def save(self): pass
         def log(self, *args, **kwargs): self.logs.append((args, kwargs))
-        def tool(self, name, args, timeout):
+        def tool(self, name, args, timeout, deadline=None):
             self.calls.append((name, args, timeout))
             reply = next(self.replies)
             if isinstance(reply, Exception): raise reply

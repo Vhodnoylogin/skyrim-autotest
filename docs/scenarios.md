@@ -61,6 +61,12 @@ Each assertion has a dotted JSON `path` (numeric list indexes allowed) and exact
 one of `equals`, `contains`, `min`, `max`, or `exists`. Bounds require finite
 numbers, not booleans. A missing path fails; `exists` checks a present field's
 non-nullness. Engine tolerances must be explicit in the test's chosen bounds.
+Equality compares JSON booleans separately from numbers, including nested arrays
+and objects; numeric1 and1.0 remain equal. `exists:false` retains the established
+present-but-null contract; it does not assert that a missing provider/path means
+an absent world object. Every tool request, including health and legacy tools,
+shares the enclosing step's absolute deadline; an exhausted health check cannot
+be followed by a mutation.
 
 ```json
 {

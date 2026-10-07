@@ -778,7 +778,9 @@ def execute(session, args, deadline):
     if op == 'state.read':
         scene = backend.call('inspect', {'kind': 'scene'})
         menus = backend.call('menu', {'action': 'list', 'includeFlags': True})
-        ready = (scene.get('playerLoaded') is True and scene.get('cell', {}).get('editorId') not in (None, 'VRPlayroom01')
+        cell = scene.get('cell', {}).get('editorId')
+        ready = (scene.get('playerLoaded') is True and isinstance(cell, str)
+                 and bool(re.fullmatch(r'[A-Za-z0-9_]+', cell)) and cell != 'VRPlayroom01'
                  and not menus_block_gameplay(menus))
         return {'world': {'ready': ready}, 'scene': scene, 'menus': menus}
     if op == 'player.read':

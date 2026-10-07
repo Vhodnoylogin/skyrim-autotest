@@ -62,13 +62,16 @@ def acquire(runtime, profiles, key, name, owner, atomic_json):
     if previous and not cached.exists():
         raise RuntimeError('Reusable profile archive is missing')
     home.mkdir(parents=True, exist_ok=True)
-    atomic_json(record, {'state': 'leased', 'run': owner, 'key': key, 'name': name})
+    lease = {'schemaVersion': 2, 'state': 'preparing', 'run': owner, 'key': key,
+             'name': name, 'archiveBefore': previous['files'] if cached.exists() else None}
+    atomic_json(record, lease)
     if cached.exists():
         shutil.move(str(cached), str(target))
         reused = True
     else:
         target.mkdir()
         reused = False
+    atomic_json(record, {**lease, 'state': 'leased'})
     return target, reused
 
 
@@ -104,6 +107,28 @@ def release(runtime, profiles, key, name, owner, evidence, atomic_json):
         if not cached.is_dir() or digest(cached) != value.get('files'):
             raise RuntimeError('Reusable profile archive integrity mismatch')
         return
+    if value.get('state') == 'preparing' and value.get('schemaVersion') == 2:
+        before = value.get('archiveBefore')
+        if cached.exists():
+            if target.exists() or before is None or digest(cached) != before:
+                raise RuntimeError('Interrupted profile acquisition archive identity mismatch')
+            if not Path(evidence).exists():
+                shutil.copytree(cached, evidence)
+            if digest(evidence) != before:
+                raise RuntimeError('Interrupted profile acquisition evidence mismatch')
+            atomic_json(record, {**value, 'state': 'archived', 'files': before,
+                                 'acquisitionNeverMounted': True})
+            return
+        if not target.exists():
+            if before is not None:
+                raise RuntimeError('Previous reusable profile archive is missing')
+            # Durable v2 intent proves this first acquisition never mounted.
+            # Create only its exact inactive directory, then archive it normally.
+            target.mkdir()
+        if digest(target) != (before if before is not None else {}):
+            raise RuntimeError('Interrupted profile acquisition target identity mismatch')
+        value = {**value, 'state': 'leased'}
+        atomic_json(record, value)
     if value.get('state') != 'leased':
         raise RuntimeError('Invalid reusable profile lease state')
     if target.exists():
