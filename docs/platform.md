@@ -304,6 +304,14 @@ of safe restoration. Historical two-segment recovery remains supported. Restart,
 saved inventory recovery, process
 identity change, log segmentation and final restoration require live qualification.
 
+Every owned lifecycle poll retains its raw response envelope with exact process,
+requested cursor, load ordinal and restart ordinal before validation. Completed
+loads preserve their ordered native event pairs and world epoch in append-only
+attempt history and a completion journal record; later loads do not overwrite
+earlier proof. Restart history also retains its matching load transition. A queued
+or incomplete operation cannot be replayed. The SKSE loader has its own process
+role and never counts as an actual Skyrim VR process.
+
 Common readiness reads actual native menu flags, never a HUD-only menu-name
 allowlist or image classification. Nonblocking overlays may remain open. It
 requires an actual loaded player, nonempty matching world cell and eight quiet

@@ -164,6 +164,11 @@ class Events:
         b, collected = self.backend, []
         for attempt in range(3):
             envelope = request(b.s.state['port'], 'api/events?since=' + str(self.cursor), timeout=min(3, b.remaining()))
+            b.s.log('owned-save-lifecycle-envelope',runId=b.s.state.get('id'),
+                    game=copy.deepcopy(b.s.state.get('game')),cursorRequested=self.cursor,
+                    loadOrdinal=b.s.state.get('ownedLoadTransition',{}).get('ordinal'),
+                    restartOrdinal=b.s.state.get('gameRestartTransition',{}).get('ordinal'),
+                    envelope=envelope)
             events, head = envelope.get('events'), envelope.get('headSeq')
             if not isinstance(events, list) or type(head) is not int or head < self.cursor:
                 raise ValueError('Owned save/load lifecycle stream reset or malformed')
@@ -239,6 +244,8 @@ def perform(backend, req):
             last = current
             b.pause(.2)
     record = saved(b, tag)
+    if state.get('ownedLoadTransition',{}).get('completed') is False:
+        raise ValueError('Previous owned load is incomplete; no replay')
     cursor = b.s.capture_probe_cursor()
     previous_game = copy.deepcopy(state['game'])
     old_tags = sorted(state.get('platformReferences', {}))
@@ -246,9 +253,11 @@ def perform(backend, req):
     state['platformReferences'] = {}
     b.s.invalidate_probe_reference('owned save load requested')
     state['gameplayBootstrap']['completed'] = False
-    transition = {'saveTag':tag, 'completed':False, 'beforeGame':previous_game,
+    history=state.setdefault('ownedLoadHistory',[])
+    transition = {'saveTag':tag, 'completed':False, 'beforeGame':previous_game,'ordinal':len(history)+1,
                   'oldReferenceTags':old_tags, 'cursorBefore':cursor, 'probeInvalidatedAtLoad':state.get('probeObjectLive') is False}
     state['ownedLoadTransition'] = transition
+    history.append(copy.deepcopy(transition))
     b.s.save()
     if state.get('hardwareFrame'): b.call('driver', {'action':'release'})
     restarting=req['action']=='restart_game'
@@ -292,9 +301,12 @@ def perform(backend, req):
     state['ownedWorldGeneration'] = state.get('ownedWorldGeneration', 0)+1
     transition.update(completed=True, afterGame=copy.deepcopy(state['game']), cursor=events.cursor,
                       events=completed_events, worldGeneration=state['ownedWorldGeneration'], scene=scene)
+    history[-1]=copy.deepcopy(transition)
+    b.s.log('owned-load-completed',runId=state.get('id'),transition=copy.deepcopy(transition))
     if restarting:
         from .restart_budget import update
-        update(state,completed=True,stage='completed',afterGame=copy.deepcopy(state['game']))
+        update(state,completed=True,stage='completed',afterGame=copy.deepcopy(state['game']),
+               loadTransition=copy.deepcopy(transition))
     b.s.save()
     return observe(b, {'observation':'lifecycle.state','afterSaveTag':tag})
 
