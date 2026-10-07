@@ -12,7 +12,7 @@ READS = {'state.read', 'player.read', 'world.read', 'menu.read'}
 ACTIONS = {
     'input.perform': {'save_game', 'load_game'},
     'controller.perform': {'pose_and_grip', 'reach_and_grip_reference', 'release_reference', 'release_all'},
-    'object.perform': {'create_fixture_reference', 'place_fixture_reference_in_hand',
+    'object.perform': {'create_fixture_reference', 'place_fixture_reference_in_hand', 'tag_held_reference',
                        'set_fixture_inventory_quantity', 'set_fixture_health'},
 }
 OBSERVATIONS = {'form.identity', 'body_slot.settings', 'body_slot.display',
@@ -87,6 +87,7 @@ def validate(args):
         'release_all': ({'action'}, {'settleSeconds'}),
         'create_fixture_reference': ({'action', 'item', 'quantityItems', 'referenceTag', 'placement'}, set()),
         'place_fixture_reference_in_hand': ({'action', 'hand', 'referenceTag', 'keepGripClosed', 'settleSeconds'}, set()),
+        'tag_held_reference': ({'action', 'hand', 'referenceTag'}, set()),
         'set_fixture_inventory_quantity': ({'action', 'item', 'owner', 'quantityItems'}, set()),
         'set_fixture_health': ({'action', 'actor', 'baseHealthPoints', 'damageHealthPoints', 'restoreBeforeDamage'}, set()),
     }
@@ -189,7 +190,28 @@ class Backend:
         entry = self.s.state.get('platformReferences', {}).get(req['referenceTag'])
         if not entry or not entry.get('id'):
             raise ValueError('Reference tag is unavailable in this world generation')
+        if 'incarnation' in entry and self.reference_incarnation(entry['id']) != entry['incarnation']:
+            raise ValueError('Tagged held reference incarnation/session/generation changed')
         return entry['id']
+
+    def reference_incarnation(self, ref):
+        snapshot=self.call('inspect', {'kind':'world_observer','refs':[ref]})
+        rows=snapshot.get('refs',[])
+        if snapshot.get('ok') is not True or len(rows)!=1:
+            raise ValueError('Exact held reference observer identity unavailable')
+        row=rows[0];identity=row.get('identity',{})
+        if (row.get('status')!='available' or row.get('loaded3D') is not True or
+                row.get('deleted') is not False or row.get('disabled') is not False or
+                int(identity.get('form','0'),16)!=int(ref,16) or
+                type(identity.get('runtimeHandle')) is not int or identity['runtimeHandle']<=0 or
+                type(snapshot.get('loadGeneration')) is not int or identity.get('loadGeneration')!=snapshot['loadGeneration'] or
+                not isinstance(snapshot.get('sessionId'),str) or not snapshot['sessionId']):
+            raise ValueError('Held reference incarnation unavailable')
+        result={'sessionId':snapshot['sessionId'],'loadGeneration':snapshot['loadGeneration'],
+                'runtimeHandle':identity['runtimeHandle']}
+        self.s.log('platform-held-reference-incarnation',reference=ref,incarnation=result,
+                   sampleId=snapshot.get('sampleId'),basis='observed runtime handle/session/generation; sequential sampled identity')
+        return result
 
     def frame(self):
         from .hardware import neutral
@@ -542,6 +564,23 @@ class Backend:
 
     def mutate(self, req):
         action = req['action']
+        if action == 'tag_held_reference':
+            references=self.s.state.setdefault('platformReferences',{})
+            tag=req['referenceTag']
+            if tag in references or tag in self.s.state.get('invalidatedReferenceTags',[]) or len(references)>=16:
+                raise ValueError('Held reference tag already used/invalidated or limit16 reached')
+            self.s.validate_probe_reference(timeout=min(3,self.remaining()))
+            before=self.pap('HiggsVR','GetGrabbedObject',[req['hand']=='left'])
+            if not isinstance(before,dict) or not before.get('formId'):
+                raise ValueError('No actual held reference to tag')
+            ref=before['formId'];incarnation=self.reference_incarnation(ref)
+            after=self.pap('HiggsVR','GetGrabbedObject',[req['hand']=='left'])
+            if not isinstance(after,dict) or after.get('formId')!=ref:
+                raise ValueError('Held reference changed while tagging')
+            references[tag]={'id':ref,'incarnation':incarnation}
+            self.s.save()
+            return {'reference':{'id':ref,'incarnation':incarnation},
+                    'identityBasis':'HIGGS held reads bracket Observer runtime handle; unobserved intervals remain'}
         if action == 'set_fixture_inventory_quantity':
             base = self.resolve(req['item'])
             before = self.pap('ObjectReference', 'GetItemCount', [{'form': base}], '0x14')

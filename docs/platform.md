@@ -215,3 +215,22 @@ dispatch controller callbacks and change the very state being tested. A mismatch
 logs actual GetGrabbedObject identity and existing published/raw Observer data
 without another controller read. This prevents diagnostics from erasing a
 wrong-reference acquisition before the test observes it.
+
+MO2 virtual-save successor: MO2 can override the prepared absolute setting with
+`__MO_Saves\\`. This exact alias is accepted only after a live challenge: with
+owned LocalSaves/LocalSettings enabled, a fresh nonce copy of the pinned valid
+fixture ESS appears in the game's default save enumeration and disappears after
+its exact owned file is removed. The expected logical directory comes from the
+configured game log directory. Generic relative directories still fail. The
+challenge never requests a game save/load and cannot weaken the original/global
+save baseline checks. It attests observed USVFS mapping, not atomic filesystem
+ownership; actual save pairs must still appear only in the owned profile and
+pass event/hash/completion checks. This successor requires game qualification.
+
+`object.perform` tag_held_reference captures an already held actual reference,
+bracketing an Observer runtime handle/session/load-generation read with native
+HIGGS held-reference reads. It never spawns/grabs or assumes the drawn item is
+the old seed. New tags cannot reuse existing/invalidated names. Later use checks
+the captured incarnation, rejecting the same recycled formID with another handle
+or changed session/generation. These sequential samples cannot prove continuity
+between reads. Actual drawn-item qualification is required before deployment.

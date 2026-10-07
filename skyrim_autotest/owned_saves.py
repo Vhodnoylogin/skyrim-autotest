@@ -6,6 +6,63 @@ from pathlib import Path
 import time
 
 
+def verify_mo2_save_mapping(backend, target, observed):
+    """Challenge the live game's virtual directory before any game save request."""
+    import configparser
+    import uuid
+    state=backend.s.state
+    settings=configparser.ConfigParser(interpolation=None)
+    settings.read(target.parent/'settings.ini',encoding='utf-8-sig')
+    if not all(settings.getboolean('General',key,fallback=False) for key in ('LocalSaves','LocalSettings')):
+        raise ValueError('MO2 save mapping requires owned local saves/settings')
+    # MO2 substitutes this exact alias at launch; an arbitrary relative path is
+    # never accepted. Check in-process visibility, not a guessed external resolve.
+    expected=Path(state['configuration']['skse_logs']).parent / observed
+    marker='Autotest_Map_'+uuid.uuid4().hex
+    query={'action':'list','filter':marker,'limit':2}
+    def listed():
+        value=backend.call('game',query)
+        if (Path(value.get('dir','')).resolve()!=expected.resolve() or value.get('truncated') is not False or
+                type(value.get('count')) is not int or not isinstance(value.get('saves'),list)):
+            raise ValueError('Native MO2 save directory enumeration unavailable')
+        return value
+    before=listed()
+    if before['count']!=0 or before['saves']:
+        raise ValueError('Fresh save mapping challenge unexpectedly exists')
+    fixture=state.get('fixture',{})
+    stem=fixture.get('saveStem','')
+    if not stem or Path(stem).name!=stem or '/' in stem or '\\' in stem:
+        raise ValueError('Pinned owned fixture needed for save mapping challenge')
+    source=target/(stem+'.ess')
+    if (not source.is_file() or source.is_symlink() or getattr(source.lstat(),'st_file_attributes',0)&0x400 or
+            source.stat().st_size>256*1024*1024):
+        raise ValueError('Owned mapping fixture unavailable')
+    contents=source.read_bytes()
+    digest=hashlib.sha256(contents).hexdigest()
+    if digest!=fixture.get('essSha256') or not contents.startswith(b'TESV_SAVEGAME'):
+        raise ValueError('Owned mapping fixture hash/header mismatch')
+    challenge=target/(marker+'.ess')
+    created=False
+    try:
+        with challenge.open('xb') as stream:
+            created=True;stream.write(contents)
+        during=listed()
+        if during['count']!=1 or [p.get('name') for p in during['saves']]!=[marker]:
+            raise ValueError('Native MO2 save alias does not expose exact owned challenge')
+    finally:
+        if created:
+            if challenge.is_symlink() or hashlib.sha256(challenge.read_bytes()).hexdigest()!=digest:
+                raise ValueError('Owned save challenge changed; refusing deletion')
+            challenge.unlink()
+    after=listed()
+    if after['count']!=0 or after['saves']:
+        raise ValueError('Native MO2 save alias retained stale challenge')
+    backend.s.log('owned-save-virtual-mapping-verified',ownedDirectory=str(target),nativeSetting=observed,
+                  logicalDirectory=str(expected),challengeStem=marker,fixtureSha256=digest,
+                  before=before,during=during,after=after,
+                  basis='fresh nonce appears/disappears in game-process default save enumeration; observed USVFS mapping, not atomic filesystem contract')
+
+
 def directory(backend):
     from .profile_cache import regular_tree
     state = backend.s.state
@@ -21,7 +78,9 @@ def directory(backend):
     if Path(state['ownedSaveDirectory']).resolve() != target.resolve() or not target.is_dir():
         raise ValueError('Owned save directory mismatch')
     observed = backend.pap('Utility', 'GetINIString', ['sLocalSavePath:General'])
-    if not isinstance(observed, str) or Path(observed).resolve() != target.resolve():
+    if isinstance(observed,str) and observed.casefold().replace('/','\\')=='__mo_saves\\':
+        verify_mo2_save_mapping(backend,target,observed)
+    elif not isinstance(observed, str) or Path(observed).resolve() != target.resolve():
         raise ValueError('Native save path does not match owned disposable directory')
     return target
 

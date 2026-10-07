@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+import hashlib
 from unittest.mock import patch
 from skyrim_autotest import owned_saves, platform
 from skyrim_autotest.platform_mapping import operations
@@ -104,6 +105,44 @@ class OwnedSaveTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'flat'):owned_saves.pair(directory,'../foreign')
         (directory/'bad.ess').write_bytes(b'not-a-save');(directory/'bad.skse').write_bytes(b'SKSEtest')
         with self.assertRaisesRegex(ValueError,'header'):owned_saves.pair(directory,'bad')
+
+    def virtual_mapping(self, exposed=True):
+        target=Path(self.b.s.state['ownedSaveDirectory'])
+        contents=b'TESV_SAVEGAMEpinnedfixture'
+        (target/'fixture.ess').write_bytes(contents)
+        self.b.s.state['fixture']={'saveStem':'fixture','essSha256':hashlib.sha256(contents).hexdigest()}
+        self.b.s.state['configuration']['skse_logs']=str(Path(self.tmp.name)/'MyGames/SKSE')
+        (target.parent/'settings.ini').write_text('[General]\nLocalSaves=true\nLocalSettings=true\n')
+        self.b.pap=lambda *a,**k:'__MO_Saves\\'
+        def listing(tool,args):
+            self.assertEqual(tool,'game');self.assertEqual(args['action'],'list')
+            self.b.calls.append((tool,args))
+            saves=[{'name':p.stem} for p in target.glob(args['filter']+'*.ess')] if exposed else []
+            return {'dir':str(Path(self.tmp.name)/'MyGames/__MO_Saves'),'truncated':False,'count':len(saves),'saves':saves}
+        self.b.call=listing
+        return target
+
+    def test_mo2_alias_requires_live_unique_challenge_appearance_and_removal(self):
+        target=self.virtual_mapping()
+        self.assertEqual(owned_saves.directory(self.b),target)
+        self.assertEqual(len(self.b.calls),3)
+        self.assertEqual([p.name for p in target.iterdir()],['fixture.ess'])
+        # No save/load request was used to establish the directory mapping.
+        self.assertTrue(all(args['action']=='list' for tool,args in self.b.calls))
+
+    def test_mo2_alias_without_actual_mapping_or_local_flags_stops_before_save(self):
+        target=self.virtual_mapping(exposed=False)
+        with self.assertRaisesRegex(ValueError,'does not expose'):owned_saves.directory(self.b)
+        self.assertFalse(list(target.glob('Autotest_Map_*')))
+        (target.parent/'settings.ini').write_text('[General]\nLocalSaves=false\nLocalSettings=true\n')
+        self.b.calls=[]
+        with self.assertRaisesRegex(ValueError,'local saves/settings'):owned_saves.directory(self.b)
+        self.assertEqual(self.b.calls,[])
+
+    def test_mo2_mapping_never_accepts_generic_relative_save_directory(self):
+        self.virtual_mapping();self.b.pap=lambda *a,**k:'Saves\\'
+        with self.assertRaisesRegex(ValueError,'Native save path'):owned_saves.directory(self.b)
+        self.assertEqual(self.b.calls,[])
     def test_schema_maps_exact_save_and_lifecycle_requests(self):
         platform.validate({'operation':'input.perform','request':self.request()})
         self.assertIn('input.perform',operations())
