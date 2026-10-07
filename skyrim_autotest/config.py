@@ -27,7 +27,7 @@ class Paths:
     def snapshot(self):
         return dict(self.value)
 
-PATH_KEYS = {"runtime", "mo2", "mo2_exe", "mo2_ini", "game", "mods", "profiles", "overwrite", "bridge_token", "openvr_paths", "skse_logs", "fixture_dir"}
+PATH_KEYS = {"runtime", "mo2", "mo2_exe", "mo2_ini", "game", "mods", "profiles", "overwrite", "bridge_token", "openvr_paths", "skse_logs", "fixture_dir", "steam_exe"}
 REQUIRED = {"runtime", "mo2", "game", "mods", "profiles", "overwrite", "bridge_token", "openvr_paths", "skse_logs"}
 P = Paths()
 
@@ -37,11 +37,15 @@ def configure(value, base=None):
     missing = sorted(k for k in REQUIRED if not value.get(k))
     if missing:
         raise ConfigurationError("Missing configuration fields: " + ", ".join(missing))
-    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings"}
+    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings", "allow_steam_client_restart"}
     if unknown:
         raise ConfigurationError("Unknown configuration fields: " + ", ".join(sorted(unknown)))
     base = Path(base or Path.cwd()).resolve()
     result = dict(value)
+    if 'allow_steam_client_restart' in result and type(result['allow_steam_client_restart']) is not bool:
+        raise ConfigurationError('allow_steam_client_restart must be boolean')
+    if result.get('allow_steam_client_restart') and (not isinstance(result.get('steam_exe'), str) or not result['steam_exe'] or Path(result['steam_exe']).name.lower() != 'steam.exe'):
+        raise ConfigurationError('Graceful Steam restart requires explicit steam_exe path')
     if 'native_runtime_fixtures' in result and type(result['native_runtime_fixtures']) is not bool:
         raise ConfigurationError('native_runtime_fixtures must be boolean')
     if 'physical_grip_geometry' in result:

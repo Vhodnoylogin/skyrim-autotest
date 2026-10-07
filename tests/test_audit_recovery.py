@@ -172,6 +172,33 @@ class CollectionRecoveryTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'Unexpected session'):self.session.cleanup()
         self.assertEqual(self.file.read_bytes(),b'modified')
 
+    def test_already_restored_mapped_file_is_verified_without_a_second_write(self):
+        self.file.write_bytes(b'original')
+        with patch.object(runner.shutil,'copy2',side_effect=PermissionError('mapped original is read-only')):
+            self.session.cleanup()
+        self.assertTrue(self.session.state['restored'])
+        self.assertEqual(self.file.read_bytes(),b'original')
+
+    def test_client_restart_surrounds_file_restoration_after_collection_checkpoint(self):
+        def prepare(session):
+            self.assertEqual(session.state['finalCollectionCheckpoint']['manifestSha256'],
+                             runner.sha(self.directory/'evidence/manifest.json'))
+            self.assertEqual(self.file.read_bytes(),b'modified')
+        def reopen(session):self.assertEqual(self.file.read_bytes(),b'original')
+        with patch('skyrim_autotest.steam_restore.prepare',side_effect=prepare), \
+             patch('skyrim_autotest.steam_restore.reopen',side_effect=reopen):self.session.cleanup()
+        self.assertTrue(self.session.state['restored'])
+
+    def test_interrupted_client_reopen_preserves_collection_and_restores_without_rewriting(self):
+        with patch('skyrim_autotest.steam_restore.reopen',side_effect=RuntimeError('reopen not yet observed')):
+            with self.assertRaisesRegex(RuntimeError,'reopen not yet'):self.session.cleanup()
+        digest=runner.sha(self.directory/'evidence/manifest.json')
+        with patch.object(self.session,'collect',side_effect=AssertionError('cannot recollect')), \
+             patch.object(runner.shutil,'copy2',side_effect=PermissionError('mapped original')):
+            self.session.cleanup()
+        self.assertTrue(self.session.state['restored'])
+        self.assertEqual(runner.sha(self.directory/'evidence/manifest.json'),digest)
+
 
 class AcquisitionRecoveryTests(unittest.TestCase):
     def setUp(self):

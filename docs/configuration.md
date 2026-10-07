@@ -1,5 +1,19 @@
 # Configuration contract (schemaVersion 1)
 
+Optional `allow_steam_client_restart: true` requires an explicit `steam_exe` path.
+It authorizes one graceful `steam.exe -shutdown` only if the exact preflight
+client is still alive, holds our staged null-driver module, its executable and
+driver/backup hashes match, and current process ancestry plus Steam running-app
+registry hints show no game/VR or non-helper descendant. The client is never
+added to owned processes or force-terminated. Unknown identities, unavailable
+inspection or a shutdown timeout block restoration. Durable shutdown/reopen
+intents are not replayed after an interruption. After verified file restoration,
+the executor reopens the matching client with `-silent` and records its new
+identity; this proves presence, not application readiness or ownership. The
+process/registry inventory is sampled, not an atomic exclusion of later manual
+launches. Disabled by default; the exact opt-in configuration requires live
+qualification. Missing Steam registry observations fail conservatively.
+
 Configuration is a JSON object supplied using `--config`. Relative paths resolve
 against the config file's directory, never the working directory. Unknown fields
 are rejected. No path value includes credentials; only `bridge_token` names a

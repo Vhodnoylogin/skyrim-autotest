@@ -224,7 +224,10 @@ def preflight(profile, restart_idle_mo2=False):
                 if not file.resolve().is_relative_to(root):
                     raise Blocked('Configuration symlink escapes its mod directory')
                 configs[str(file)] = sha(file)
+    from . import steam_restore
+    steam_client = steam_restore.preflight(P.snapshot())
     return {'profile': profile, 'bridgeSession': bridge_session, 'originalBridgeProfile': bridge_profile,
+            'steamClientRestart': steam_client,
             'runtime': str(runtime), 'settings': str(config),
             'viveInputProfile': str(vive_profile), 'viveInputProfileHash': sha(vive_profile),
             'idleMO2': native.identity(idle_mo2[0]['pid']) if idle_mo2 else None,
@@ -962,6 +965,8 @@ class Session:
         with self.lock:
             self.state['restoringFiles'] = True
             self.save()
+        from . import steam_restore
+        steam_restore.prepare(self)
         errors = []
         for snapshot in reversed(self.state['snapshots']):
             path = Path(snapshot['path'])
@@ -971,7 +976,10 @@ class Session:
                     if sha(backup) != snapshot['sha256']:
                         raise RuntimeError('Backup hash mismatch')
                     path.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(backup, path)
+                    # Already restored mapped files need verification, not another
+                    # write that can fail solely because the client reopened.
+                    if not path.is_file() or sha(path) != snapshot['sha256']:
+                        shutil.copy2(backup, path)
                     if sha(path) != snapshot['sha256']:
                         raise RuntimeError('Restored file hash mismatch')
                 elif path.exists():
@@ -983,6 +991,7 @@ class Session:
         self.save()
         if errors:
             raise RuntimeError(f'Restoration incomplete: {errors}')
+        steam_restore.reopen(self)
         profile = self.state.get('testProfile')
         if self.state.get('reusableProfile'):
             from . import profile_cache

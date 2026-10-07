@@ -183,6 +183,40 @@ def processes():
     return out
 
 
+def modules(ident):
+    """Identity-bracketed module paths; unavailable enumeration is an error."""
+    if not alive(ident):
+        raise RuntimeError('Module inventory process identity changed')
+    K.Module32FirstW.argtypes = [W.HANDLE, C.POINTER(MODULEENTRY32W)]
+    K.Module32NextW.argtypes = [W.HANDLE, C.POINTER(MODULEENTRY32W)]
+    snapshot = None
+    for attempt in range(3):
+        snapshot = K.CreateToolhelp32Snapshot(0x18, ident['pid'])
+        if snapshot != C.c_void_p(-1).value:
+            break
+        error = C.get_last_error()
+        if error != 24 or attempt == 2:
+            raise C.WinError(error)
+        time.sleep(.05)
+    try:
+        entry = MODULEENTRY32W()
+        entry.dwSize = C.sizeof(entry)
+        out = []
+        if not K.Module32FirstW(snapshot, C.byref(entry)):
+            raise C.WinError(C.get_last_error())
+        while True:
+            out.append(entry.szExePath)
+            if not K.Module32NextW(snapshot, C.byref(entry)):
+                if C.get_last_error() != 18:
+                    raise C.WinError(C.get_last_error())
+                break
+    finally:
+        K.CloseHandle(snapshot)
+    if not alive(ident):
+        raise RuntimeError('Module inventory process identity changed')
+    return out
+
+
 def close(ident, *, system_command=False):
     if not alive(ident):
         return {'requested': False, 'windows': [], 'reason': 'identity-not-live'}
