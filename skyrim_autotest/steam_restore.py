@@ -14,6 +14,10 @@ VR_GAME_NAMES = {'skyrimvr.exe', 'sksevr_loader.exe', 'vrserver.exe', 'vrmonitor
                  'vrcompositor.exe', 'vrstartup.exe', 'vrdashboard.exe', 'vrwebhelper.exe', 'vrprismhost.exe'}
 
 
+class ClientInventoryUnavailable(RuntimeError):
+    """Unknown identity, never evidence that the client is absent."""
+
+
 def digest(path):
     with Path(path).open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
@@ -39,16 +43,27 @@ def running_apps():
 
 
 def clients(exe):
-    out = []
-    for row in native.processes():
-        if row['name'].lower() == 'steam.exe':
+    # Toolhelp rows can outlive their process during graceful exit. An unknown
+    # row is never treated as absence: obtain a fresh complete inventory first.
+    for attempt in range(3):
+        out, unavailable = [], False
+        for row in native.processes():
+            if row['name'].lower() != 'steam.exe':
+                continue
             ident = native.identity(row['pid'])
-            if not ident or Path(ident['path']).resolve() != Path(exe).resolve():
-                raise RuntimeError('Different or unavailable Steam client identity')
+            if ident is None:
+                unavailable = True
+                break
+            if Path(ident['path']).resolve() != Path(exe).resolve():
+                raise RuntimeError('Different Steam client executable identity')
             out.append(ident)
-    if len(out) > 1:
-        raise RuntimeError('Multiple Steam clients prevent graceful restoration')
-    return out
+        if not unavailable:
+            if len(out) > 1:
+                raise RuntimeError('Multiple Steam clients prevent graceful restoration')
+            return out
+        if attempt < 2:
+            time.sleep(.05)
+    raise ClientInventoryUnavailable('Unavailable Steam client identity persisted after bounded resampling')
 
 
 def preflight(configuration):
@@ -161,11 +176,20 @@ def prepare(session):
     session.log('steam-driver-graceful-shutdown-requested', **lifecycle)
     launch(lifecycle['shutdownCommand'])
     end = time.monotonic() + 45
+    observed = False
     while time.monotonic() < end:
-        if not native.alive(ident) and not clients(ident['path']):
-            break
+        if not native.alive(ident):
+            try:
+                found = clients(ident['path'])
+            except ClientInventoryUnavailable as error:
+                session.log('steam-client-inventory-unavailable', phase='shutdown-observation', error=str(error), absenceObserved=False)
+            else:
+                if found:
+                    raise RuntimeError('Foreign Steam client appeared during shutdown; no force or replay')
+                observed = True
+                break
         time.sleep(.25)
-    if native.alive(ident) or clients(ident['path']):
+    if not observed:
         raise RuntimeError('Graceful Steam shutdown not observed; no force or replay')
     lifecycle['shutdownObserved'] = True
     session.save()
@@ -212,7 +236,10 @@ def reopen(session):
     end = time.monotonic() + 25
     while not found and time.monotonic() < end:
         time.sleep(.25)
-        found = clients(before['path'])
+        try:
+            found = clients(before['path'])
+        except ClientInventoryUnavailable as error:
+            session.log('steam-client-inventory-unavailable', phase='reopen-observation', error=str(error), absenceObserved=False)
     if len(found) != 1 or found[0] == before:
         raise RuntimeError('New matching Steam client not observed; no launch replay')
     lifecycle.update(reopened=True, after=found[0],

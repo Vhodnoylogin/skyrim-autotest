@@ -74,3 +74,16 @@ of each explicitly allowed output, recording expected/actual hashes and mismatch
 metadata. A changed file is evidence, not a collection failure by itself; missing,
 unreadable, unselected or changing-during-copy files remain collection errors.
 Collecting a failed test's output never changes its testing outcome to passed.
+
+VRIK can save moved slot poses during interaction or game exit. A later owned
+variant may reconcile only numeric `posX/Y/Z` and `rotA..I` values for slots1..14
+in a file previously written by this executor. All other bytes, flags, comments,
+keys and formatting remain protected. Two matching actual loaded VRIK getter
+batches, guarded by the current owned world/process, corroborate the values;
+float serialization tolerance is absolute5e-6/relative1e-7. An exit save may use
+that same pre-exit sample before the next launch. Unknown/legacy writes,
+unmatched values, stale process/write identity, duplicate/nonfinite/extreme
+values and changes outside pose fields still block writes. Exact initial write
+bytes, accepted output and native samples are retained independently. Writer
+identity and atomic observation are explicitly unavailable. The next variant
+still derives its new settings from the immutable baseline.

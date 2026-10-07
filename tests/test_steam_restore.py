@@ -65,6 +65,21 @@ class SteamRestoreTests(unittest.TestCase):
         self.driver.write_bytes(b'original')
         steam.prepare(self.session); self.launcher.assert_not_called()
 
+    def test_issued_shutdown_waits_within_original_window_for_unidentified_exit_rows(self):
+        with patch.object(steam, 'clients', side_effect=[[self.before], [self.before],
+                steam.ClientInventoryUnavailable('teardown'), []]):
+            steam.prepare(self.session)
+        self.assertTrue(self.session.state['steamClientRestore']['shutdownObserved'])
+        self.assertEqual(self.commands, [[str(self.exe), '-shutdown']])
+        self.assertTrue(any(call.kwargs.get('absenceObserved') is False for call in self.session.log.call_args_list))
+
+    def test_reopen_waits_for_available_new_identity_without_relaunch(self):
+        steam.prepare(self.session)
+        with patch.object(steam, 'clients', side_effect=[[], steam.ClientInventoryUnavailable('starting'), [self.after]]):
+            steam.reopen(self.session)
+        self.assertTrue(self.session.state['steamClientRestore']['reopened'])
+        self.assertEqual(self.commands, [[str(self.exe), '-shutdown'], [str(self.exe), '-silent']])
+
     def test_client_without_observed_owned_module_is_left_alone(self):
         with patch.object(steam,'observe_module',return_value={'observed':False}):steam.prepare(self.session)
         self.launcher.assert_not_called()
@@ -161,6 +176,33 @@ class IdleClientTests(unittest.TestCase):
     def test_opt_out_preflight_needs_no_steam_or_registry(self):
         with patch.object(steam,'clients') as clients:self.assertIsNone(steam.preflight({}))
         clients.assert_not_called()
+
+    def test_vanished_client_row_requires_fresh_absent_inventory(self):
+        row = {'pid': 10, 'name': 'steam.exe'}
+        with patch.object(native, 'processes', side_effect=[[row], []]) as rows, \
+             patch.object(native, 'identity', return_value=None), patch.object(steam.time, 'sleep'):
+            self.assertEqual(steam.clients(self.exe), [])
+        self.assertEqual(rows.call_count, 2)
+
+    def test_persistently_unidentified_client_never_counts_as_absence(self):
+        row = {'pid': 10, 'name': 'steam.exe'}
+        with patch.object(native, 'processes', return_value=[row]) as rows, \
+             patch.object(native, 'identity', return_value=None), patch.object(steam.time, 'sleep'), \
+             self.assertRaisesRegex(RuntimeError, 'persisted'):
+            steam.clients(self.exe)
+        self.assertEqual(rows.call_count, 3)
+
+    def test_resampled_client_still_requires_exact_executable_and_unique_identity(self):
+        row = {'pid': 10, 'name': 'steam.exe'}
+        foreign = dict(self.parent, path=str(self.exe.parent/'elsewhere/steam.exe'))
+        with patch.object(native, 'processes', return_value=[row]), \
+             patch.object(native, 'identity', side_effect=[None, foreign]), patch.object(steam.time, 'sleep'), \
+             self.assertRaisesRegex(RuntimeError, 'Different'):
+            steam.clients(self.exe)
+        with patch.object(native, 'processes', return_value=[row, dict(row, pid=11)]), \
+             patch.object(native, 'identity', side_effect=[self.parent, dict(self.parent, pid=11, birth=101)]), \
+             self.assertRaisesRegex(RuntimeError, 'Multiple'):
+            steam.clients(self.exe)
 
     def test_option_requires_explicit_path_and_boolean(self):
         base=config.template()

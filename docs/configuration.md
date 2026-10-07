@@ -23,6 +23,15 @@ process/registry inventory is sampled, not an atomic exclusion of later manual
 launches. Disabled by default; the exact opt-in configuration requires live
 qualification. Missing Steam registry observations fail conservatively.
 
+A Steam process-list row may disappear before its executable identity is read
+during graceful exit. The executor resamples the complete client inventory up to
+three times,50ms apart. Only a fresh inventory establishes absence. A persistent
+unidentified row, different executable or multiple clients still blocks cleanup;
+this never replays shutdown or authorizes killing a process.
+After a shutdown/reopen request is durably issued, unavailable identities remain
+explicitly unknown and may be reobserved within that same45/25second wait window.
+They never establish absence or extend the window; foreign identities still stop.
+
 The opt-in path observes the exact client's modules for up to eight seconds,
 allowing its delayed post-VR watchdog startup before deciding a restart is
 unnecessary. A later Win32 sharing violation on this exact staged driver permits

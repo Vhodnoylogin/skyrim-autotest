@@ -132,7 +132,7 @@ def bytes_for(b,target):
     return None
 
 
-def atomic_write(b,target,data,profile=False,program_subject=None):
+def atomic_write(b,target,data,profile=False,program_subject=None,slot_subject=None):
     from .runner import sha
     written_json=None
     if program_subject is not None:
@@ -144,7 +144,10 @@ def atomic_write(b,target,data,profile=False,program_subject=None):
     target.parent.mkdir(parents=True,exist_ok=True)
     temp.write_bytes(data);os.replace(temp,target)
     if sha(target)!=hashlib.sha256(data).hexdigest():raise ValueError('Fixture setting write verification failed')
-    record={'path':str(target),'sha256':sha(target),'bytes':len(data),'profileLocal':profile}
+    record={'path':str(target),'sha256':sha(target),'bytes':len(data),'profileLocal':profile,
+            'writtenSha256':sha(target),'writtenBytesHex':data.hex(),
+            'writeOrdinal':len(b.s.state.get('fixtureSettingsWriteHistory',[]))+1}
+    if slot_subject is not None:record['slotSubject']=slot_subject
     if program_subject is not None:
         record.update(programSubject=program_subject,writtenSha256=record['sha256'],
                       writtenBytesHex=data.hex(),writtenJson=written_json)
@@ -220,6 +223,9 @@ def perform(b,req):
     # Read current native capability before stopping; no file-only state fallback.
     observe(b,req['subject'])
     configuration=destination(provider['settingsDestination']);slots_target=destination(provider['bodySlotsDestination'])
+    from . import slot_outputs
+    slot_sample=slot_outputs.capture(b,slots_target,req['subject'])
+    slot_outputs.reconcile(b,slots_target,req['subject'],slot_sample)
     bytes_for(b,configuration);bytes_for(b,slots_target)
     profile=Path(b.s.state['testProfile']).resolve()
     if (profile.parent!=P.profiles.resolve() or profile.name!=b.s.state['testProfileName'] or
@@ -240,10 +246,13 @@ def perform(b,req):
         from . import native
         from .runner import GAME_NAMES,set_ini
         if any(p['name'].lower() in GAME_NAMES for p in native.processes()):raise ValueError('Fixture changes require fully stopped game/loaders')
+        # VRIK may save its last loaded pose on exit. Corroborate only that
+        # numeric pose output against the pre-exit identity-bound readback.
+        slot_outputs.reconcile(b,slots_target,req['subject'],slot_sample)
         b.remaining();b.s.state.setdefault('fixtureSettingsHistory',[]).append(writes);b.s.save()
         b.s.log('platform-fixture-settings-intent',write=writes,sourceProfileEdited=False)
         atomic_write(b,configuration,(json.dumps(req['settings'],indent=2)+'\n').encode('utf-8'),program_subject=req['subject'])
-        atomic_write(b,slots_target,slot_bytes)
+        atomic_write(b,slots_target,slot_bytes,slot_subject=req['subject'])
         text=ini.read_text(encoding='utf-8-sig')
         atomic_write(b,ini,set_ini(text,'VRInput','bLeftHandedMode',str(int(req['inputHandedness']=='left'))).encode('utf-8'),profile=True)
         writes['completed']=True;b.s.save();b.s.log('platform-fixture-settings-written',write=writes)
