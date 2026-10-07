@@ -310,13 +310,15 @@ class Backend:
             reference_position = list(target)
             heading = math.radians(self.pap('ObjectReference', 'GetAngleZ', target='0x14'))
             # The old 21-unit landmark was observed with long firewood. It can
-            # leave a small bottle outside the near cast (0.15m plus 0.08m
-            # radius in the reviewed HIGGS configuration). Use a close approach
-            # candidate, retaining the exact-reference physical-grip assertion.
+            # leave a small bottle outside the near cast. The 7/7 candidate
+            # pushed the bottle before grip in run20261007-105504-b826e7:
+            # it moved once the hand node came within about15 game units.
+            # Keep a12-behind/10-above stand-off candidate (15.6units),
+            # retaining the exact-reference physical-grip assertion.
             # This is not a measured palm/collision transform or selection ACK.
-            target[0] -= math.sin(heading)*7
-            target[1] -= math.cos(heading)*7
-            target[2] += 7
+            target[0] -= math.sin(heading)*12
+            target[1] -= math.cos(heading)*12
+            target[2] += 10
             from .platform_math import solve3
             start_tracking = [frame[hand]['matrix'][index] for index in (3,7,11)]
             self.s.log('platform-reach-geometry', reference=ref, referencePositionGameUnits=reference_position,
@@ -327,9 +329,9 @@ class Backend:
                 # Track the actual dynamic target, rather than pressing at a
                 # stale point after a teleported hand has displaced it.
                 target = self.xyz(ref)
-                target[0] -= math.sin(heading)*7
-                target[1] -= math.cos(heading)*7
-                target[2] += 7
+                target[0] -= math.sin(heading)*12
+                target[1] -= math.cos(heading)*12
+                target[2] += 10
                 current = self.hand_xyz(hand)
                 if math.dist(current, target) < 2: break
                 delta = solve3(columns, [target[i]-current[i] for i in range(3)])
@@ -358,9 +360,9 @@ class Backend:
             menus = self.call('menu', {'action': 'list', 'includeFlags': True})
             can_grab = self.pap('HiggsVR', 'CanGrabObject', [hand == 'left'])
             hand_position, reference_position = self.hand_xyz(hand), self.xyz(ref)
-            current_target = [reference_position[0]-math.sin(heading)*7,
-                              reference_position[1]-math.cos(heading)*7,
-                              reference_position[2]+7]
+            current_target = [reference_position[0]-math.sin(heading)*12,
+                              reference_position[1]-math.cos(heading)*12,
+                              reference_position[2]+10]
             self.s.log('platform-grip-readiness', menus=menus, canGrab=can_grab,
                        handPositionGameUnits=hand_position,
                        referencePositionGameUnits=reference_position,

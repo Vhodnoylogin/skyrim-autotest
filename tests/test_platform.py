@@ -223,7 +223,7 @@ class PlatformTests(unittest.TestCase):
                     self.menu_observed = True
                     return {'messageBoxOpen': False, 'openMenus': [], 'menuStates': []}
                 return {'published': True, 'acknowledgedByDriver': False}
-        for prepared, escaped in ((False, False), (True, False), (True, True)):
+        for prepared, escaped, collision in ((False, False, False), (True, False, False), (True, True, False), (True, False, True)):
             with self.subTest(prepared=prepared, escaped=escaped):
                 session = Fake()
                 session.increments, session.menu_observed = [], False
@@ -243,6 +243,14 @@ class PlatformTests(unittest.TestCase):
                     point = [session.state['hardwareFrame'][hand]['matrix'][i] for i in (3,7,11)]
                     return [baseline[r]+sum(columns[c][r]*(point[c]-origin[c]) for c in range(3)) for r in range(3)]
                 backend.hand_xyz = hand_xyz
+                if collision:
+                    moving = list(reference)
+                    def dynamic_xyz(ref):
+                        # Recorded blocker: open hand pushes bottle before grip.
+                        if sum((a-b)**2 for a,b in zip(hand_xyz('right'), moving))**.5 < 15:
+                            moving[1] -= 1
+                        return list(moving)
+                    backend.xyz = dynamic_xyz
                 req = {'action': 'reach_and_grip_reference', 'hand': 'right', 'grip': 'closed',
                        'holdSeconds': 2, 'maximumReachMetres': .5, 'referenceTag': 'seed-potion'}
                 if escaped:
@@ -260,7 +268,8 @@ class PlatformTests(unittest.TestCase):
                     # left the hand over 23 game units from the reference.
                     # This checks approach distance, not collision/selection.
                     reached = hand_xyz('right')
-                    self.assertLess(sum((a-b)**2 for a,b in zip(reached,reference))**.5, 12)
+                    self.assertLess(sum((a-b)**2 for a,b in zip(reached,reference))**.5, 18)
+                    self.assertGreater(sum((a-b)**2 for a,b in zip(reached,reference))**.5, 15)
                     self.assertGreater(len(session.increments), 1)
                     self.assertTrue(all(sum(v*v for v in delta)**.5 <= .01000001 for delta in session.increments))
                 else:

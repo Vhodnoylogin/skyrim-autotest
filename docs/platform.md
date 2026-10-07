@@ -74,3 +74,11 @@ menus, modify a source profile, release queue work or declare mod acceptance.
 The new regressions verify missing identity/quantity, lifecycle invalidation,
 one-time fixture mutation, bootstrap/deadline gates and read-only polling.
 Live platform qualification and a conducted subject test remain separate facts.
+
+
+Physical small-bottle approach keeps a candidate hand-node stand-off of12 game
+units behind and10 above the observed reference. The earlier7/7 candidate pushed
+the dynamic bottle before its grip edge in run20261007-105504-b826e7. This is
+platform geometry, not a measured palm transform or selection acknowledgement.
+Keep the original request reach bound, dynamic reobservation, small increments
+and exact HIGGS held-reference assertions. Live qualification is required.
