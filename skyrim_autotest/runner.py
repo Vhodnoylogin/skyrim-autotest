@@ -340,7 +340,8 @@ class Session:
                 parent = entry['parent']
             if not related:
                 continue
-            self.own(item['pid'], 'game' if name in GAME_NAMES else 'vr' if name in VR_NAMES else 'mo2')
+            role = 'loader' if name == 'sksevr_loader.exe' else 'game' if name in GAME_NAMES else 'vr' if name in VR_NAMES else 'mo2'
+            self.own(item['pid'], role)
 
     def spawn(self, command, role, cwd=None):
         self.state['launchIntents'][role] = {'at': time.time(), 'directory': str(Path(command[0]).parent)}
