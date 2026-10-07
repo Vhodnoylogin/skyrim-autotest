@@ -1,8 +1,8 @@
 # Semantic platform backend
 
-Body-slot approaches anchor each controller increment to the observed hand and
-its measured calibration origin. A constrained hand does not cause repeated
-unobserved movement to accumulate. Each update remains at most .01m; five seconds
+Body-slot approaches correct the current observed target error using local
+calibration. They do not assume a rigid absolute controller-to-skeleton mapping:
+the avatar's response can change with pose and grip. Each update remains at most .01m; five seconds
 without at least .005m reduction of target distance stops with a logged feedback
 stall. Sideways motion alone cannot renew progress. A physical obstruction is
 reported rather than overridden; subject fixtures may declare an explicit

@@ -21,23 +21,35 @@ def solve3(columns, value):
 
 
 def feedback_increment(columns, origin, baseline, commanded, observed, target):
-    """Do not integrate position error while the observed hand is constrained.
+    """Local measured-error servo, bounded per update, not a rigid IK model.
 
-    Baseline and columns are measured at the same tracking origin. Cap each
-    requested change to .01m and place the next command at most .01m ahead of
-    the observed hand, rather than ahead of the previous command.
+    The skeleton response can change with pose/grip. Its initial calibration
+    cannot supply an absolute controller position. TargetProgress separately
+    stops nonprogress before further commands; tracking lead is diagnostic.
     """
     actual=solve3(columns,[a-b for a,b in zip(observed,baseline)])
     error=solve3(columns,[a-b for a,b in zip(target,observed)])
     distance=math.sqrt(sum(v*v for v in error))
     fraction=min(1.,.01/distance) if distance else 0.
-    desired=[a+b+v*fraction for a,b,v in zip(origin,actual,error)]
-    change=[a-b for a,b in zip(desired,commanded)]
-    length=math.sqrt(sum(v*v for v in change))
-    if length>.01:change=[v*.01/length for v in change]
+    change=[v*fraction for v in error]
     lead=[a-b-c for a,b,c in zip(commanded,origin,actual)]
     return change,{'targetDistanceMetres':distance,'trackingLeadMetres':lead,
-                   'basis':'observed hand relative to measured calibration origin; no accumulated unobserved movement'}
+                    'basis':'local observed target error; initial calibration is not an absolute rigid controller-to-skeleton model'}
+
+
+class TargetProgress:
+    """Lateral wobble must not renew a stalled target-distance deadline."""
+    def __init__(self):
+        self.best=None
+        self.at=None
+
+    def observe(self, distance, now):
+        if not math.isfinite(distance) or distance<0 or not math.isfinite(now):
+            raise ValueError('Invalid observed feedback progress')
+        if self.best is None or distance<self.best-.005:
+            self.best=distance
+            self.at=now
+        return now-self.at<=5
 
 
 def pose_frames(start, target):

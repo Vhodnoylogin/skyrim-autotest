@@ -114,7 +114,8 @@ def pose(b, req):
     side='L' if hand=='left' else 'R'
     names=[f'NPC {side} UpperArm [{side}Uar]',f'NPC {side} Forearm [{side}Lar]',f'NPC {side} Hand [{side}Hnd]']
     origin=[frame[hand]['matrix'][i] for i in (3,7,11)]
-    progress_at=None;best_distance=None
+    from .platform_math import feedback_increment,TargetProgress
+    progress=TargetProgress()
     import time
     for _ in range(256):
         points,nodes=centres(b,[req['slot']],[(name,True) for name in names])
@@ -127,16 +128,13 @@ def pose(b, req):
         delta=solve3(columns,[a-c for a,c in zip(target,current)]);distance=math.sqrt(sum(v*v for v in delta))
         if distance<=.025:break
         now=time.monotonic()
-        # Lateral wobble at a physics constraint must not renew forward
-        # progress or accumulate a controller pose beyond the observed hand.
-        if best_distance is None or distance<best_distance-.005:
-            best_distance=distance;progress_at=now
-        elif now-progress_at>5:
+        # Lateral wobble cannot renew progress. Do not turn initial local
+        # calibration into a rigid controller-to-skeleton position constraint.
+        if not progress.observe(distance,now):
             b.s.log('platform-body-slot-feedback-stall',slot=req['slot'],hand=hand,
-                    bestDistanceMetres=best_distance,currentDistanceMetres=distance,
+                    bestDistanceMetres=progress.best,currentDistanceMetres=distance,
                     handGameUnits=current,targetGameUnits=target,actionReplayed=False)
             raise ValueError('Body-slot approach made no observed target progress for five seconds')
-        from .platform_math import feedback_increment
         increment,feedback=feedback_increment(columns,origin,baseline,
             [frame[hand]['matrix'][i] for i in (3,7,11)],current,target)
         for index,change in zip((3,7,11),increment):frame[hand]['matrix'][index]+=change
