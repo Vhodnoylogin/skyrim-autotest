@@ -268,7 +268,7 @@ class PlatformTests(unittest.TestCase):
                 def center(ref, hand=None):
                     position=hand_xyz('right')
                     shoulder=[reference[0],reference[1],reference[2]+70]
-                    backend._reach_body={'hand':position,'shoulder':shoulder,
+                    backend._reach_body={'hand':position,'armHand':position,'shoulder':shoulder,
                                          'elbow':[(a+b)/2 for a,b in zip(shoulder,position)]}
                     return backend.xyz(ref)
                 backend.reference_center = center

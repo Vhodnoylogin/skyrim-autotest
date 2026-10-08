@@ -307,7 +307,11 @@ class Backend:
         if hand:
             names = (['NPC L UpperArm [LUar]', 'NPC L Forearm [LLar]', 'NPC L Hand [LHnd]']
                      if hand == 'left' else ['NPC R UpperArm [RUar]', 'NPC R Forearm [RLar]', 'NPC R Hand [RHnd]'])
-            query['nodes']=[{'ref':'0x14','name':name,'firstPerson':True} for name in names]
+            # FP arms are a controller-following model, not a body anchor.
+            # Keep the actual FP hand for the HIGGS palm/servo; derive the
+            # workspace exclusively from the loaded third-person arm chain.
+            query['nodes']=[{'ref':'0x14','name':name,'firstPerson':False} for name in names]
+            query['nodes'].append({'ref':'0x14','name':names[-1],'firstPerson':True})
         snapshot=self.call('inspect',query)
         if snapshot.get('ok') is not True or snapshot.get('units')!='skyrim_engine_units' or snapshot.get('space')!='world':
             raise ValueError('Observer grip target units/space unavailable')
@@ -335,8 +339,8 @@ class Backend:
             nodes=snapshot.get('nodes',[])
             points=[]
             player_identity=None
-            for name in names:
-                exact=[node for node in nodes if node.get('name')==name and node.get('firstPerson') is True and int(node.get('form','0'),16)==0x14]
+            for name,first in [(name,False) for name in names]+[(names[-1],True)]:
+                exact=[node for node in nodes if node.get('name')==name and node.get('firstPerson') is first and int(node.get('form','0'),16)==0x14]
                 if len(exact)!=1 or exact[0].get('status')!='available':
                     raise ValueError('Observed body reach node unavailable: '+name)
                 node=exact[0];ident=node.get('identity',{})
@@ -348,12 +352,14 @@ class Backend:
                     raise ValueError('Observed body node identity/coordinates unavailable')
                 if player_identity is not None and player_identity!=ident:raise ValueError('Observed body node identities differ')
                 player_identity=ident;points.append(point)
-            self._reach_body={'shoulder':points[0],'elbow':points[1],'hand':points[2]}
+            self._reach_body={'shoulder':points[0],'elbow':points[1],'armHand':points[2],'hand':points[3]}
             self._reach_hand_transform=copy.deepcopy(node['world'])
             player_key=(snapshot['sessionId'],snapshot['loadGeneration'],player_identity['runtimeHandle'])
             if hasattr(self,'_reach_player_identity') and self._reach_player_identity!=player_key:
                 raise ValueError('Body reach player identity changed')
             self._reach_player_identity=player_key
+            self.s.log('platform-reach-body-geometry',snapshot=snapshot,hand=hand,
+                       basis='third-person arm chain for body workspace; first-person hand for physical palm/servo; same native sample/incarnation')
         return center
 
     def reach_target(self,ref,hand,columns):
@@ -590,7 +596,7 @@ class Backend:
                 # stale point after a teleported hand has displaced it.
                 target = self.reach_target(ref, hand, columns)
                 current = self._reach_body['hand']
-                envelope=body_reach_envelope(columns,self._reach_body['shoulder'],self._reach_body['elbow'],current,target)
+                envelope=body_reach_envelope(columns,self._reach_body['shoulder'],self._reach_body['elbow'],self._reach_body['armHand'],target)
                 if math.dist(current, target) < 2: break
                 if previous_hand is None or math.dist(previous_hand,current)>=.25:
                     previous_hand=list(current);progress_at=time.monotonic()
@@ -629,7 +635,7 @@ class Backend:
                        handPositionGameUnits=hand_position,
                        referencePositionGameUnits=reference_position,
                        currentTargetHandGameUnits=current_target)
-            body_reach_envelope(columns,self._reach_body['shoulder'],self._reach_body['elbow'],hand_position,current_target)
+            body_reach_envelope(columns,self._reach_body['shoulder'],self._reach_body['elbow'],self._reach_body['armHand'],current_target)
             if menus_block_gameplay(menus):
                 raise AssertionError('Gameplay input blocked by an open menu')
             if can_grab is not True:

@@ -81,10 +81,11 @@ class ObservedReachTests(unittest.TestCase):
                 'sampleId':10,'refs':[{'identity':identity,'loaded3D':True,'deleted':False,'disabled':False,
                                      'status':'available','sceneTransform':world}],
                 'nodes':[{'form':'0x00000014','identity':copy.deepcopy(node_identity),'name':name,
-                          'firstPerson':True,'status':'available','world':dict(world,translation=point)}
-                         for name,point in [('NPC R UpperArm [RUar]',[0,0,60]),
-                                            ('NPC R Forearm [RLar]',[0,0,35]),
-                                            ('NPC R Hand [RHnd]',[0,0,10])]]}
+                          'firstPerson':first,'status':'available','world':dict(world,translation=point)}
+                         for name,first,point in [('NPC R UpperArm [RUar]',False,[0,0,60]),
+                                            ('NPC R Forearm [RLar]',False,[0,0,35]),
+                                            ('NPC R Hand [RHnd]',False,[0,0,10]),
+                                            ('NPC R Hand [RHnd]',True,[0,0,10])]]}
 
     def backend(self,snapshot):
         class Session:
@@ -135,6 +136,41 @@ class ObservedReachTests(unittest.TestCase):
         for change in cases:
             s=self.snapshot();change(s)
             with self.subTest(snapshot=s),self.assertRaises(ValueError):self.backend(s).reference_center('0xFF001234','right')
+
+    def test_body_workspace_does_not_follow_translated_first_person_hand(self):
+        snapshot=self.snapshot();b=self.backend(snapshot)
+        columns=[[70,0,0],[0,70,0],[0,0,70]]
+        def envelope():
+            b.reference_center('0xFF001234','right')
+            arm=b._reach_body
+            return body_reach_envelope(columns,arm['shoulder'],arm['elbow'],arm['armHand'],[0,0,0])
+        original=envelope()
+        snapshot['nodes'][-1]['world']['translation']=[0,0,110]
+        self.assertEqual(envelope(),original)
+        self.assertEqual(b._reach_body['hand'],[0,0,110])
+        self.assertEqual(b._reach_hand_transform['translation'],[0,0,110])
+        # The same body workspace still rejects an actually extreme target.
+        arm=b._reach_body
+        with self.assertRaisesRegex(ValueError,'body reach envelope'):
+            body_reach_envelope(columns,arm['shoulder'],arm['elbow'],arm['armHand'],[700,0,0])
+
+    def test_missing_or_mismatched_third_person_arm_never_uses_fp_chain(self):
+        for change in (lambda s:s['nodes'][0].update(firstPerson=True),
+                       lambda s:s['nodes'][1]['identity'].update(runtimeHandle=999),
+                       lambda s:s['nodes'][2]['identity'].update(loadGeneration=3),
+                       lambda s:s['nodes'][2].update(status='unavailable')):
+            snapshot=self.snapshot();change(snapshot)
+            with self.subTest(change=change),self.assertRaises(ValueError):
+                self.backend(snapshot).reference_center('0xFF001234','right')
+
+    def test_tp_workspace_and_fp_palm_share_one_exact_observer_query(self):
+        snapshot=self.snapshot();b=self.backend(snapshot);queries=[];call=b.call
+        def observe(tool,args):
+            queries.append(copy.deepcopy(args));return call(tool,args)
+        b.call=observe;b.reference_center('0xFF001234','right')
+        queries=[q for q in queries if q['kind']=='world_observer']
+        self.assertEqual(len(queries),1)
+        self.assertEqual([n['firstPerson'] for n in queries[0]['nodes']],[False,False,False,True])
 
 
 if __name__=='__main__':unittest.main()

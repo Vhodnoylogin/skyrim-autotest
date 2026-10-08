@@ -309,8 +309,15 @@ maximumReachMetres is retained as a legacy request field and logged, but no long
 acts as a cumulative travel cap from the hand's previous pose. A0.7m move can be
 normal if both endpoints are in the avatar's workspace. This change requires a
 new qualified platform; do not rewrite retained orders/packets. The new source
-uses one Observer task per sample for exact target scene transform and the
-first-person upper-arm, forearm and hand nodes. Native local model bounds are
+uses one Observer task per sample for exact target scene transform, the loaded
+third-person upper-arm/forearm/hand chain for the body workspace, and the
+first-person hand for the actual HIGGS palm and motion feedback. First-person
+arm origins follow the controller and cannot anchor a body workspace. Missing
+third-person nodes stop; there is no fallback to the floating first-person arm.
+The reach repair retains the existing radius formula and needs separate native
+qualification, including a return from a high hand pose to a second floor item.
+This change is limited to reference reach; body-slot pose/withdrawal retains its
+previous separately qualified behavior. Native local model bounds are
 transformed by observed row-major rotation/scale/translation, consistently for
 approach and final pregrip validation. Missing nodes, units, handles, generations
 or transforms stop before Grip; no fallback to guessed Euler angles or origin.
