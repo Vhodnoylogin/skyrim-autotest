@@ -19,6 +19,7 @@ class Session:
         self.validations += 1
         if not self.state['probeObjectLive']: raise ValueError('generation changed')
     def log(self, *args, **kwargs): pass
+    def save(self): pass
     def tool(self, tool, args, timeout=12, deadline=None):
         self.calls.append((tool, args))
         self.deadlines.append(deadline)

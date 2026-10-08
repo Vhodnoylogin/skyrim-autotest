@@ -57,6 +57,13 @@ def read(b, req):
         raise ValueError('Reference tag is unavailable in this world generation')
     ref = tagged['id']
     wanted = form(ref)
+    # An id-only creation tag can have a later acquired alias with a known
+    # incarnation. Reuse that evidence, never adopt a replacement live handle.
+    known = [v['incarnation'] for v in b.s.state.get('platformReferences', {}).values()
+             if isinstance(v, dict) and form(v.get('id')) == wanted and 'incarnation' in v]
+    if known and any(v != known[0] for v in known):
+        raise ValueError('Reference tags disagree about the observed incarnation')
+    expected = dict(tagged, **({'incarnation': known[0]} if known else {}))
     raw = b.call('inspect', {'kind': 'refs', 'formId': ref})
     if not isinstance(raw, dict) or not isinstance(raw.get('refs'), list):
         raise ValueError('Exact native reference/stack-count observation unavailable')
@@ -71,7 +78,7 @@ def read(b, req):
     # A missing count may be expected after stow/deletion. Ask the native presence
     # provider instead of synthesizing zero, trusting an empty list, or retrying.
     row = rows[0] if rows else None
-    state, observer = presence(b, ref, tagged)
+    state, observer = presence(b, ref, expected)
     if state == 'loaded':
         if row is None:
             raise ValueError('Native reference presence changed between samples')
@@ -91,6 +98,12 @@ def read(b, req):
         reference = {'id': ref, 'existsInLoadedWorld': True,
                      'quantity': {'items': row['quantityItems']}, 'item': b.item(ref)}
     b.guard_world()
+    if state == 'loaded' and 'incarnation' not in tagged:
+        identity = observer['refs'][0]['identity']
+        tagged['incarnation'] = {'sessionId': observer['sessionId'],
+                                 'loadGeneration': observer['loadGeneration'],
+                                 'runtimeHandle': identity['runtimeHandle']}
+        b.s.save()
     result = {'reference': reference, 'providerObservation': raw,
               'observationBasis': 'sequential native reads bracketed by world lifecycle; not atomic'}
     if observer is not None:

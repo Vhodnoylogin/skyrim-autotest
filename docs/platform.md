@@ -16,6 +16,9 @@ not global permanent deletion, atomic quantity/presence, or continuous absence.
 Raw provider responses are retained. Actions and physics reads keep their stricter
 live-reference guards. This repair requires its own live qualification before
 platform activation; historical results and mod orders remain unchanged.
+The first successful live read retains its actual incarnation on the tag. An
+id-only tag also checks an already acquired alias for that same FormID; conflicting
+aliases or later handle reuse fail rather than silently binding a new object.
 
 `controller.perform/release_hand` takes `hand` and `settleSeconds`: it opens only
 that hand at the current controller pose, preserving HMD and the other hand.

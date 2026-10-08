@@ -13,6 +13,8 @@ class Session:
     def __init__(self):
         self.state = {'platformReferences': {'fixture': {'id': REF}}}
 
+    def save(self): pass
+
 
 class ReferenceStateTests(unittest.TestCase):
     def setUp(self):
@@ -71,6 +73,19 @@ class ReferenceStateTests(unittest.TestCase):
         self.assertTrue(result['existsInLoadedWorld'])
         self.assertEqual(result['quantity']['items'], 5)
         self.assertEqual(result['item']['runtimeId'], '0x0003EADD')
+
+    def test_first_live_read_binds_incarnation_and_rejects_later_reuse(self):
+        self.read()
+        self.assertEqual(self.b.s.state['platformReferences']['fixture']['incarnation']['runtimeHandle'], 7)
+        self.row['identity']['runtimeHandle'] = 8
+        with self.assertRaisesRegex(ValueError, 'handle changed'):
+            self.read()
+
+    def test_id_only_tag_reuses_acquired_alias_identity_guard(self):
+        self.b.s.state['platformReferences']['acquired'] = {'id': REF, 'incarnation': {
+            'sessionId': 'same-session', 'loadGeneration': 1, 'runtimeHandle': 8}}
+        with self.assertRaisesRegex(ValueError, 'handle changed'):
+            self.read()
 
     def test_loaded_missing_count_cannot_be_synthesized(self):
         del self.raw['refs'][0]['quantityItems']
