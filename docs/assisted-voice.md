@@ -21,6 +21,12 @@ still add time. This bridge only works **while its agent turn is active**. Endin
 that turn, application exit, context errors or sleeping the machine suspends
 real-time delivery. Keep microphone and unacknowledged records intact. Do not
 advertise this as an independently running voice service.
+The reproducible Codex host adapter source is
+`integrations/codex-voice-bridge.js`: run it within an authorized active
+`functions.exec` with `VOICE_BRIDGE_CONFIG={repository,inbox,threadId,durationSeconds}`.
+Paths must be absolute and duration at most300 seconds per invocation. It is not
+a Node executable and cannot wake itself after the host turn ends. Preserve its
+external dispatch receipts and reconcile pending speech before restarting.
 
 For delayed background delivery, configure a **supported thread heartbeat** in the AI desktop host, targeting the
 exact assisted operator chat. An example interval is one minute; scheduling,
@@ -64,3 +70,35 @@ Qualification needs a **fresh real spoken phrase**, automatically delivered by
 the active bridge or heartbeat and answered in the target chat without an intervening typed
 message. Record ASR sequence/time, claim ID, automatic turn and actual response;
 measure latency. Synthetic files/unit tests do not qualify this live path.
+
+## Interactive requests and screenshots
+
+"Give me items" defaults to adding them to the player's **inventory** (for
+example `player.additem <form> <count>`), not spawning physical objects at the
+player's feet. World spawning needs an explicit owner request or scenario.
+Do not repeat a previously executed request when correcting its interpretation.
+ASR ambiguity is clarified by the operator, not silently turned into an action.
+
+For an explicit screenshot request use the optional companion:
+
+```text
+python -m skyrim_autotest.assisted_capture --out C:/TestBench/voice/shots --id voice-<SEQ> --identity C:/TestBench/manual-game-identity.json --port <VERIFIED-PORT> --voice-output "EXACT HEADSET OUTPUT"
+```
+
+The identity file is the already verified manual game's exact `{pid,birth,path}`;
+do not discover an arbitrary foreground process. The command synchronously
+announces capture/counts down through the explicit Russian headset output,
+checks identity again, calls DevBench capture once, and validates an actual fresh
+PNG/BMP file in its unique external output directory. It uses no F12, keyboard,
+focus request or restart. `auto` selects DevBench's sole registered provider or
+its native fallback; multiple providers/unsupported image format/renderer not
+producing a frame produces an explicit unavailable reason. No fallback retry
+after an uncertain capture. Duplicate request IDs never recapture.
+
+The image receipt is not a visual verdict. Open the actual image, show/link it
+in chat and check scene/content, retaining native/provider degraded metadata.
+The voice response is short; analysis remains text. A minimized/not-rendering
+game may fail even though foreground is not a prerequisite. Do not steal focus
+to conceal that limitation. Live background-frame qualification is pending;
+unit tests only verify countdown/capture/file guards. If no game is running,
+report capture unavailable rather than launch one.

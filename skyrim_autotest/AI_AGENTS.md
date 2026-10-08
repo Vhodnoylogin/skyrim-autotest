@@ -5,6 +5,20 @@ supported heartbeat plus skyrim_autotest.voice_inbox, an exact operator thread a
 a private cursor. Do not claim continuous accompaniment from listener health or
 queued speech. A pending delivery requires prior-response/action reconciliation;
 never repeat uncertain game mutations. Keep transcripts/receipts outside Git.
+"Give me items" means inventory by default; world spawning requires explicit
+wording/scenario. Screenshot requests use assisted_capture with spoken countdown,
+exact manual-game identity and headset output, one capture and verified actual
+file. No focus takeover, keyboard shortcut or automatic retry. Read the voice
+guide; file verification still requires viewing the actual picture.
+
+Optional companion commands (no executor --config needed):
+`python -m skyrim_autotest.voice_inbox --inbox <EXTERNAL> --thread <UUID> claim --wait 30`
+returns immediately on new speech. After processing use the same module's `ack`
+with --id, --sha256 and --response-ref. For one owner-requested screenshot:
+`python -m skyrim_autotest.assisted_capture --out <EXTERNAL> --id voice-<SEQ> --identity <GAME-IDENTITY-JSON> --port <VERIFIED> --voice-output <EXACT-DEVICE>`.
+The identity file contains the existing game's {pid,birth,path}. A missing game
+is capture unavailable; neither companion starts it. Detailed voice docs and
+the Codex host adapter live in the source repository.
 
 Use this tool for autonomous, bounded Skyrim VR tests after the owner has
 requested/authorized testing. Existing authorization persists; do not ask again
