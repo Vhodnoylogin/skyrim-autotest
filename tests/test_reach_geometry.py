@@ -173,5 +173,17 @@ class ObservedReachTests(unittest.TestCase):
         self.assertEqual(len(queries),1)
         self.assertEqual([n['firstPerson'] for n in queries[0]['nodes']],[False,False,False,True,False])
 
+    def test_crouch_rig_uses_exact_native_names_and_availability(self):
+        snapshot=self.snapshot()
+        snapshot['vrPicking']={'status':'available','units':'skyrim_engine_units','space':'world','nodes':{
+            key:{'status':'available','name':name,'world':{'translation':point}}
+            for key,name,point in [('uprightHmd','UprightHmdNode',[0,0,120]),
+                                   ('leftWand','LeftWandNode',[-20,0,10]),
+                                   ('rightWand','RightWandNode',[20,0,10])]}}
+        b=self.backend(snapshot);b.reference_center('0xFF001234','right')
+        self.assertEqual(b._reach_rig['head'],[0,0,120])
+        snapshot['vrPicking']['nodes']['uprightHmd']['name']='unrelated'
+        b.reference_center('0xFF001234','right');self.assertIsNone(b._reach_rig)
+
 
 if __name__=='__main__':unittest.main()

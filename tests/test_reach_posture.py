@@ -13,7 +13,8 @@ class Fake:
         self.frame=neutral();self.start=self.frame['hmd']['matrix'][7]
         self._reach_body={'shoulder':[0,0,100],'elbow':[0,0,86],
                           'armHand':[0,0,72],'hand':[0,0,10],'head':[0,0,115]}
-    def pap(self,*a):return self.held
+        self._reach_rig={'head':[0,0,120],'left':[-20,0,10],'right':[20,0,10]}
+    def pap(self,script,function,*a,**k):return False if function=='IsSneaking' else self.held
     def xyz(self,*a):return [0,0,0]
     def guard_world(self):pass
     def pause(self,*a):pass
@@ -21,6 +22,7 @@ class Fake:
     def publish(self,frame,*a):
         self.calls.append(copy.deepcopy(frame))
         if self.response:
+            self._reach_rig['head'][2]-=.7
             for key in ('shoulder','elbow','armHand','head'):
                 self._reach_body[key][2]-=.7
     def reach_target(self,*a):return [0,0,0]
@@ -61,6 +63,43 @@ class ReachPostureTests(unittest.TestCase):
     def test_publication_without_observed_head_response_is_not_replayed(self):
         b=Fake();b.response=False
         with patch('time.monotonic',side_effect=[0,0,3]),self.assertRaisesRegex(ValueError,'no observed body lowering'):
+            self.posture(b).ensure('R','right',[0,0,0])
+        self.assertEqual(len(b.calls),1)
+
+    def test_common_vertical_rig_shift_is_not_misread_as_large_hmd_input(self):
+        b=Fake();original=b.publish
+        def publish(*a):
+            original(*a)
+            if len(b.calls)==1:
+                for point in b._reach_rig.values():point[2]-=14
+                for key in ('head','shoulder','elbow','armHand'):b._reach_body[key][2]-=14
+        b.publish=publish
+        with patch('time.monotonic',side_effect=[i*.1 for i in range(1000)]):
+            self.posture(b).ensure('R','right',[0,0,0])
+        self.assertGreater(len(b.calls),0)
+
+    def test_missing_rig_and_disagreeing_wands_never_prove_crouch_consumption(self):
+        b=Fake();b._reach_rig=None
+        with self.assertRaisesRegex(ValueError,'rig origins unavailable'):self.posture(b).ensure('R','right',[0,0,0])
+        self.assertEqual(b.calls,[])
+        b=Fake();original=b.publish
+        def publish(*a):original(*a);b._reach_rig['left'][2]-=7
+        b.publish=publish
+        with self.assertRaisesRegex(ValueError,'controllers disagree'):self.posture(b).ensure('R','right',[0,0,0])
+        self.assertEqual(len(b.calls),1)
+
+    def test_common_rig_motion_still_obeys_actual_body_and_player_bounds(self):
+        b=Fake();original=b.publish
+        def publish(*a):
+            original(*a)
+            for point in b._reach_rig.values():point[2]-=56
+            for key in ('head','shoulder','elbow','armHand'):b._reach_body[key][2]-=56
+        b.publish=publish
+        with self.assertRaisesRegex(ValueError,'total posture bound'):
+            self.posture(b).ensure('R','right',[0,0,0])
+        self.assertEqual(len(b.calls),1)
+        b=Fake();b.xyz=lambda *a:([0,0,0] if not b.calls else [7,0,0])
+        with self.assertRaisesRegex(ValueError,'Player origin moved'):
             self.posture(b).ensure('R','right',[0,0,0])
         self.assertEqual(len(b.calls),1)
 

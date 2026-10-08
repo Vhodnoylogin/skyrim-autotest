@@ -345,6 +345,16 @@ unchanged body envelope; no object relocation, direct grab or guard enlargement.
 This posture candidate needs a new separate native qualification. A published
 HMD frame alone does not establish crouching or an acquired reference.
 
+HMD input consumption is measured relative to both unchanged native wand origins
+in the same Observer sample. Skyrim may translate the entire VR rig vertically;
+raw skeletal-head displacement cannot represent the requested tracking step.
+Both wand deltas must agree within5mm; the existing HMD differential motion
+limits remain. A common vertical rig shift freezes further input until actual
+body motion settles under the original deadline. Player origin must stay within
+5cm and actual cumulative head lowering is additionally capped at0.75m. Actual
+Actor.IsSneaking is recorded separately; an observed common shift alone does not
+prove its cause. Missing/mismatched rig data or an unsettled transition stops.
+
 Disposable fixture references receive separate20-game-unit-spaced initial slots
 in a heading-rotated4x4 layout. One native spawn/drop and one initial MoveTo per
 reference are retained. No item teleport or directGrabObject is used during

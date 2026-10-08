@@ -359,6 +359,16 @@ class Backend:
             if hasattr(self,'_reach_player_identity') and self._reach_player_identity!=player_key:
                 raise ValueError('Body reach player identity changed')
             self._reach_player_identity=player_key
+            # VR rig origins are used only by the optional physical crouch.
+            # Keep absence explicit; ordinary reaches need no rig fallback.
+            picking=snapshot.get('vrPicking',{})
+            self._reach_rig=None
+            if picking.get('status')=='available' and picking.get('units')=='skyrim_engine_units' and picking.get('space')=='world':
+                from .platform_math import world_translation
+                rig=picking.get('nodes',{})
+                roles={'head':('uprightHmd','UprightHmdNode'),'left':('leftWand','LeftWandNode'),'right':('rightWand','RightWandNode')}
+                if all(rig.get(role,{}).get('status')=='available' and rig[role].get('name')==name for role,name in roles.values()):
+                    self._reach_rig={key:world_translation(rig[role]['world']) for key,(role,_) in roles.items()}
             self.s.log('platform-reach-body-geometry',snapshot=snapshot,hand=hand,
                        basis='third-person arm chain for body workspace; first-person hand for physical palm/servo; same native sample/incarnation')
         return center
