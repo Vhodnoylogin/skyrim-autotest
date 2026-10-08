@@ -473,7 +473,8 @@ class Session:
                 atomic_json(self.dir / 'input-state.json',
                             runner_monitor.snapshot(self.state, self.heartbeat_error))
                 result['publication'] = copy.deepcopy(self.state['hardwareFrame'].get('_publication'))
-            self.log('driver', action=action, result=result)
+            self.log('driver', action=action, result=result,
+                     frame=self.state.get('hardwareFrame') if action != 'status' else None)
             return result
 
     def publish_hardware(self, frame, new_command=False):
