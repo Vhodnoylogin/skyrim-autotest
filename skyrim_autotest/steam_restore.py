@@ -133,6 +133,34 @@ def observe_module(ident, target):
             'basis': 'Identity-bracketed module snapshots during delayed Steam watchdog startup; later loads remain possible'}
 
 
+def staged_digest(session, target):
+    actual = digest(target)
+    if session.state.get('driverBackend') != 'file':
+        raise RuntimeError('Staged driver identity unavailable for graceful Steam restoration')
+    if actual == session.state.get('driverManifest', {}).get('dllSha256'):
+        return actual
+    # Setup first unpacks the hash-pinned upstream archive, then replaces its
+    # DLL with our adapter. An interrupted pre-launch setup can leave this
+    # intermediate, equally identified payload. Do not invent an adapter
+    # manifest or accept arbitrary bytes to recover that state.
+    from . import runner
+    archive = runner.ROOT / 'dependencies/driver-dedb8ab.zip'
+    if (session.state.get('owned') or session.state.get('launchIntents') or
+            session.state.get('game') or session.state.get('hardwareFrame') or
+            actual != runner.DRIVER_DLL_HASH or not archive.is_file() or
+            digest(archive) != runner.DRIVER_ZIP_HASH):
+        raise RuntimeError('Staged driver identity unavailable for graceful Steam restoration')
+    import zipfile
+    member = 'null/bin/win64/driver_null.dll'
+    with zipfile.ZipFile(archive) as z:
+        if z.namelist().count(member) != 1 or hashlib.sha256(z.read(member)).hexdigest() != actual:
+            raise RuntimeError('Pinned intermediate driver payload mismatch')
+    session.log('steam-driver-intermediate-identity', driverSha256=actual,
+                archiveSha256=runner.DRIVER_ZIP_HASH, noLaunchIntent=True,
+                basis='Exact pinned upstream archive/DLL during interrupted pre-launch staging')
+    return actual
+
+
 def prepare(session):
     grant = session.state.get('preflight', {}).get('steamClientRestart')
     if not grant:
@@ -146,8 +174,7 @@ def prepare(session):
         return # Already restored, including after an interrupted client reopen.
     if snapshot['exists'] and digest(snapshot['backup']) != original:
         raise RuntimeError('Driver backup changed before graceful Steam restoration')
-    if session.state.get('driverBackend') != 'file' or digest(target) != session.state.get('driverManifest', {}).get('dllSha256'):
-        raise RuntimeError('Staged driver identity unavailable for graceful Steam restoration')
+    staged = staged_digest(session, target)
     ident = grant['identity']
     found = clients(ident['path'])
     lifecycle = session.state.get('steamClientRestore')
@@ -166,7 +193,7 @@ def prepare(session):
     if not module['observed']:
         return # No observed owned-driver module: do not gratuitously restart Steam.
     inventory = idle_inventory(ident)
-    if clients(ident['path']) != [ident] or not native.alive(ident) or digest(target) != session.state['driverManifest']['dllSha256']:
+    if clients(ident['path']) != [ident] or not native.alive(ident) or digest(target) != staged:
         raise RuntimeError('Steam identity changed before graceful shutdown')
     lifecycle = {'before': ident, 'target': str(target), 'driverSha256': digest(target),
                  'inventory': inventory, 'moduleObservation': module, 'shutdownRequested': True, 'shutdownObserved': False,

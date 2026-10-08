@@ -99,6 +99,21 @@ def read_json(path):
     return json.loads(Path(path).read_text(encoding='utf-8-sig'))
 
 
+def verified_driver_build():
+    """Validate the external adapter before any setup mutation can occur."""
+    build = ROOT / 'dependencies/driver-build'
+    manifest = read_json(build / 'manifest.json')
+    here = Path(__file__).resolve().parent
+    if (sha(build / 'driver_null.dll') != manifest['dllSha256'] or
+            sha(here / 'autotest_protocol.h') != manifest['ownProtocolSha256'] or
+            sha(here / 'build_driver.py') != manifest['buildScriptSha256'] or
+            sha(here / 'driver_sources.json') != manifest.get('sourceCatalogueSha256')):
+        raise Blocked('External driver adapter is stale; run build-driver')
+    if manifest.get('protocolVersion') != 2 or sha(here / 'driver_protocol_v2.h') != manifest.get('protocolV2Sha256'):
+        raise Blocked('External driver adapter protocol mismatch; run build-driver')
+    return manifest
+
+
 def request(port, route, body=None, token=None, timeout=12):
     headers = {'Content-Type': 'application/json'}
     if token:
@@ -633,6 +648,9 @@ class Session:
             raise Blocked('MO2 profile selection verification failed')
 
     def setup(self):
+        # Missing/stale acquisition inputs must fail before profiles, plugins,
+        # Root Builder or the stock SteamVR driver can be changed.
+        manifest = verified_driver_build() if self.state['driverBackend'] == 'file' else None
         self.phase('snapshot', 180)
         info = self.state['preflight']
         if P.value.get('reuse_test_profile', False):
@@ -803,12 +821,8 @@ class Session:
                 self.write(driver / Path(*relative.parts[1:]), archive.read(name))
         if self.state['driverBackend'] == 'file':
             build = ROOT / 'dependencies/driver-build'
-            manifest = read_json(build / 'manifest.json')
-            here = Path(__file__).resolve().parent
-            if sha(build / 'driver_null.dll') != manifest['dllSha256'] or sha(here / 'autotest_protocol.h') != manifest['ownProtocolSha256'] or sha(here / 'build_driver.py') != manifest['buildScriptSha256'] or sha(here / 'driver_sources.json') != manifest.get('sourceCatalogueSha256'):
-                raise Blocked('External driver adapter is stale; run build_driver.py')
-            if manifest.get('protocolVersion')!=2 or sha(here/'driver_protocol_v2.h')!=manifest.get('protocolV2Sha256'):
-                raise Blocked('External driver adapter protocol mismatch; rebuild the owned adapter')
+            if verified_driver_build() != manifest:
+                raise Blocked('External driver adapter changed during setup')
             self.write(driver / 'bin/win64/driver_null.dll', (build / 'driver_null.dll').read_bytes())
             signature = driver / 'bin/win64/driver_null.dll.sig'
             if signature.exists():

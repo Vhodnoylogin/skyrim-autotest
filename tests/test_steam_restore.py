@@ -1,11 +1,13 @@
 """Exact-client shutdown/reopen and interrupted recovery; no programs launched."""
 import contextlib
+import hashlib
+import zipfile
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
-from skyrim_autotest import native, steam_restore as steam, config
+from skyrim_autotest import native, steam_restore as steam, config, runner
 
 
 class SteamRestoreTests(unittest.TestCase):
@@ -64,6 +66,36 @@ class SteamRestoreTests(unittest.TestCase):
     def test_same_driver_bytes_need_no_client_restart(self):
         self.driver.write_bytes(b'original')
         steam.prepare(self.session); self.launcher.assert_not_called()
+
+    def intermediate_archive(self):
+        archive=self.root/'dependencies/driver-dedb8ab.zip';archive.parent.mkdir()
+        with zipfile.ZipFile(archive,'w') as z:z.writestr('null/bin/win64/driver_null.dll',b'upstream-intermediate')
+        self.driver.write_bytes(b'upstream-intermediate');self.session.state.pop('driverManifest')
+        self.session.state.update(owned=[],launchIntents={})
+        self.stack.enter_context(patch.object(runner,'ROOT',self.root))
+        self.stack.enter_context(patch.object(runner,'DRIVER_ZIP_HASH',steam.digest(archive)))
+        self.stack.enter_context(patch.object(runner,'DRIVER_DLL_HASH',steam.digest(self.driver)))
+        return archive
+
+    def test_interrupted_archive_staging_identified_without_invented_adapter_manifest(self):
+        self.intermediate_archive();steam.prepare(self.session)
+        self.assertTrue(self.session.state['steamClientRestore']['shutdownObserved'])
+        self.assertNotIn('driverManifest',self.session.state)
+        self.assertEqual(self.commands,[[str(self.exe),'-shutdown']])
+
+    def test_intermediate_payload_requires_no_launch_and_pinned_archive(self):
+        archive=self.intermediate_archive();original=archive.read_bytes()
+        for change in ('owned','intent','game','frame','archive','foreign-dll'):
+            self.session.state.update(owned=[],launchIntents={});self.session.state.pop('game',None);self.session.state.pop('hardwareFrame',None)
+            archive.write_bytes(original);self.driver.write_bytes(b'upstream-intermediate')
+            if change=='owned':self.session.state['owned']=[{'role':'vr','identity':self.before}]
+            if change=='intent':self.session.state['launchIntents']={'vr':{'unknown':True}}
+            if change=='game':self.session.state['game']=self.before
+            if change=='frame':self.session.state['hardwareFrame']={'pressed':4}
+            if change=='archive':archive.write_bytes(b'changed')
+            if change=='foreign-dll':self.driver.write_bytes(b'foreign')
+            with self.subTest(change=change),self.assertRaisesRegex(RuntimeError,'identity unavailable'):steam.prepare(self.session)
+        self.launcher.assert_not_called()
 
     def test_issued_shutdown_waits_within_original_window_for_unidentified_exit_rows(self):
         with patch.object(steam, 'clients', side_effect=[[self.before], [self.before],

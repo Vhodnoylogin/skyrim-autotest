@@ -453,3 +453,12 @@ Driver events retain publication metadata and synchronous durable logging.
 Timed withdrawal still uses its original monotonic deadline, at most 1cm steps,
 body/head guards and no replay; transport overruns stop and record the actual
 step, elapsed time and publication. An ACK alone is not observed game behavior.
+
+The external adapter manifest/DLL/protocol/build pins are verified before any
+setup mutation and rechecked before installing the adapter. A missing build
+therefore refuses without changing the profile, plugins or SteamVR driver.
+Recovery of historical interrupted pre-launch staging also recognizes the exact
+intermediate DLL from the pinned upstream archive, only with no owned processes,
+launch intents, game or hardware frame and a hash-matching archive/member. All
+ordinary snapshot, client identity/module, graceful shutdown and restoration
+guards remain enforced; arbitrary driver bytes cannot authorize client shutdown.

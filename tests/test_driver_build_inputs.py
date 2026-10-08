@@ -1,10 +1,20 @@
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import Mock, patch
+from skyrim_autotest import runner
 from skyrim_autotest.build_driver import compilation_sources
 
 
 class CompilationInputs(unittest.TestCase):
+    def test_missing_adapter_fails_before_any_setup_mutation(self):
+        with tempfile.TemporaryDirectory() as tmp,patch.object(runner,'ROOT',Path(tmp)):
+            session=Mock();session.state={'driverBackend':'file'}
+            with self.assertRaises(FileNotFoundError):runner.Session.setup(session)
+            session.phase.assert_not_called();session.snapshot.assert_not_called()
+            session.write.assert_not_called();session.bridge_profile.assert_not_called()
+            session.save.assert_not_called()
+
     def test_stale_extra_translation_unit_never_enters_compiler_arguments(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
