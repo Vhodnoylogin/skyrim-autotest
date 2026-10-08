@@ -47,6 +47,7 @@ def validate(operation,req):
     if kind=='prepare_fixture_actor':
         if req['equipment']!='unequip_all':raise ValueError('Unsupported fixture equipment policy')
         bounded(req['expectedScale'],.1,3);bounded(req['expectedWeightPercent'],0,100)
+        if abs(req['expectedScale']*100-round(req['expectedScale']*100))>1e-6:raise ValueError('Native reference scale requires whole percent')
     if kind=='push_fixture_actor':
         if req['source']!='player':raise ValueError('Only player-origin fixture push supported')
         bounded(req['strength'],.01,10)
@@ -152,10 +153,16 @@ def perform(b,req):
         base=b.pap('Actor','GetActorBase',target=ref)
         if not isinstance(base,dict):raise ValueError('Native actor base unavailable')
         base=form(base.get('formId'))
-        b.pap('Actor','UnequipAll',target=ref)
-        b.pap('ObjectReference','SetScale',[float(req['expectedScale'])],ref)
-        b.pap('ActorBase','SetWeight',[float(req['expectedWeightPercent'])],base)
+        if base!=form(row.get('baseForm')):raise ValueError('Actor base changed across fixture preparation')
+        expected_reference_percent=round(req['expectedScale']*100)
+        before_effective=bounded(row.get('scale'),.001,100)
+        before_weight=bounded(b.pap('ActorBase','GetWeight',target=base),0,100)
+        if type(row['actorState'].get('referenceScalePercent')) is not int:
+            raise ValueError('Native reference scale percent unavailable; effective scale is a different quantity')
+        if row['actorState']['referenceScalePercent']!=expected_reference_percent or abs(before_weight-req['expectedWeightPercent'])>1e-6:
+            raise ValueError('Fixture initial weight/reference scale differs; preparation never rewrites them')
         b.pap('Actor','SetRestrained',[req['movement']=='disabled'],ref)
+        b.pap('Actor','UnequipAll',target=ref)
     elif action=='set_fixture_actor_movement':b.pap('Actor','SetRestrained',[req['movement']=='disabled'],ref)
     else:
         b.pap('ObjectReference','PushActorAway',[{'form':ref},float(req['strength'])],'0x14')
@@ -172,10 +179,17 @@ def perform(b,req):
             fixture={'movementEnabled':not state['restrained'],'movementBasis':'actual native restrained life state; not a promise against external physics'}
             if action=='prepare_fixture_actor':
                 weight=bounded(b.pap('ActorBase','GetWeight',target=base),0,100)
-                scale=bounded(current.get('scale'),.001,100)
+                effective=bounded(current.get('scale'),.001,100)
+                percent=state.get('referenceScalePercent')
+                if type(percent) is not int:raise ValueError('Native fixture reference scale percent unavailable')
+                scale=percent/100.
                 matched &= not state['wornForms'] and state['equippedLeft'] is None and state['equippedRight'] is None
-                matched &= abs(weight-req['expectedWeightPercent'])<=1e-6 and abs(scale-req['expectedScale'])<=1e-6
-                fixture.update(prepared=bool(matched),weightPercent=weight,scale=scale,wornForms=state['wornForms'])
+                if (form(current.get('baseForm'))!=base or percent!=expected_reference_percent or
+                    abs(weight-before_weight)>1e-6 or abs(effective-before_effective)>1e-6):
+                    raise ValueError('Fixture weight/reference/effective scale changed during equipment/movement preparation')
+                fixture.update(prepared=bool(matched),weightPercent=weight,scale=scale,referenceScalePercent=percent,
+                               effectiveScale=effective,scaleBasis='actual native reference percent; effective actor scale retained separately',
+                               weightAndScalesUnchanged=True,wornForms=state['wornForms'])
         if matched:
             b.guard_world();return {'fixture':{'actor':fixture},'actor':now,'providerObservation':final}
         b.pause(.1)

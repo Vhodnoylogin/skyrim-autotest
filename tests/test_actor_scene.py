@@ -31,9 +31,9 @@ class ActorSceneTests(unittest.TestCase):
         self.s=Session(Path(self.temp.name));self.b=platform.Backend(self.s,time.monotonic()+5)
         self.b.guard_world=lambda:None;self.b.resolve=lambda spec:REF
         self.ident={'form':REF,'runtimeHandle':42,'loadGeneration':1,'sourcePlugin':'fixture.esp','localFormId':'0x00000900'}
-        self.actor={'status':'available','identity':self.ident,'loaded3D':True,'deleted':False,'disabled':False,'scale':1.,
+        self.actor={'status':'available','identity':self.ident,'loaded3D':True,'deleted':False,'disabled':False,'scale':1.,'baseForm':'0x12000800',
                     'actorState':{'status':'available','lifeState':0,'restrained':False,'knockState':0,
-                                  'wornForms':[],'equippedLeft':None,'equippedRight':None}}
+                                  'wornForms':[],'equippedLeft':None,'equippedRight':None,'referenceScalePercent':100}}
         self.raw={'ok':True,'phase':'skse_main_thread_task','sessionId':'native-session','loadGeneration':1,
                   'space':'world','units':'skyrim_engine_units','refs':[self.actor],'nodes':[]}
         self.calls=[];self.paps=[]
@@ -121,7 +121,44 @@ class ActorSceneTests(unittest.TestCase):
         result=self.b.mutate({'action':'prepare_fixture_actor','actor':SPEC,'equipment':'unequip_all',
             'expectedScale':1,'expectedWeightPercent':100,'movement':'disabled'})
         self.assertTrue(result['fixture']['actor']['prepared'])
-        self.assertEqual([v[1] for v in self.paps],['GetActorBase','UnequipAll','SetScale','SetWeight','SetRestrained','GetWeight'])
+        self.assertEqual([v[1] for v in self.paps],['GetActorBase','GetWeight','SetRestrained','UnequipAll','GetWeight'])
+    def test_reference_scale_one_with_actual_effective_actor_height_103_is_not_rewritten(self):
+        self.actor['scale']=1.0299999713897705
+        result=self.b.mutate({'action':'prepare_fixture_actor','actor':SPEC,'equipment':'unequip_all',
+            'expectedScale':1,'expectedWeightPercent':100,'movement':'disabled'})['fixture']['actor']
+        self.assertTrue(result['prepared']);self.assertEqual(result['scale'],1)
+        self.assertEqual(result['effectiveScale'],1.0299999713897705)
+        self.assertTrue(result['weightAndScalesUnchanged'])
+        self.assertFalse(any(v[1] in ('SetScale','SetWeight','SetHeight') for v in self.paps))
+    def test_wrong_initial_reference_scale_is_not_fixed_or_relaxed(self):
+        self.actor['actorState']['referenceScalePercent']=103
+        with self.assertRaisesRegex(ValueError,'initial weight/reference scale'):
+            self.b.mutate({'action':'prepare_fixture_actor','actor':SPEC,'equipment':'unequip_all',
+                'expectedScale':1,'expectedWeightPercent':100,'movement':'disabled'})
+        self.assertEqual([v[1] for v in self.paps],['GetActorBase','GetWeight'])
+    def test_effective_scale_without_native_reference_percent_is_unavailable(self):
+        del self.actor['actorState']['referenceScalePercent']
+        with self.assertRaisesRegex(ValueError,'different quantity'):
+            self.b.mutate({'action':'prepare_fixture_actor','actor':SPEC,'equipment':'unequip_all',
+                'expectedScale':1,'expectedWeightPercent':100,'movement':'disabled'})
+    def test_wrong_initial_weight_stops_before_any_fixture_mutation(self):
+        original=self.b.pap
+        self.b.pap=lambda script,function,*args,**kw:50. if function=='GetWeight' else original(script,function,*args,**kw)
+        with self.assertRaisesRegex(ValueError,'initial weight/reference scale'):
+            self.b.mutate({'action':'prepare_fixture_actor','actor':SPEC,'equipment':'unequip_all',
+                'expectedScale':1,'expectedWeightPercent':100,'movement':'disabled'})
+        self.assertFalse(any(v[1] in ('SetRestrained','UnequipAll','SetWeight') for v in self.paps))
+    def test_unexpected_effective_height_change_during_prepare_is_terminal(self):
+        original=self.b.pap
+        def changed(script,function,*args,**kw):
+            result=original(script,function,*args,**kw)
+            if function=='UnequipAll':self.actor['scale']=1.03
+            return result
+        self.b.pap=changed
+        with self.assertRaisesRegex(ValueError,'scale changed'):
+            self.b.mutate({'action':'prepare_fixture_actor','actor':SPEC,'equipment':'unequip_all',
+                'expectedScale':1,'expectedWeightPercent':100,'movement':'disabled'})
+        self.assertEqual(sum(v[1]=='UnequipAll' for v in self.paps),1)
     def test_successful_callback_cannot_replace_equipment_postcondition(self):
         self.actor['actorState']['wornForms']=['0x123']
         self.b.pause=lambda seconds:(_ for _ in ()).throw(TimeoutError('readback unchanged'))

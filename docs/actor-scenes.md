@@ -3,7 +3,8 @@
 These generic operations require a separately qualified platform. Source support
 and offline tests do not qualify the installed game. Existing platforms and
 immutable subject orders are unaffected. Use Observer 0.2.5 for actor-state and
-bounded-capture requests; acquire/build it separately, never vendor its DLL here.
+bounded-capture requests, and0.2.6 for reference scale percent; acquire/build it
+separately, never vendor its DLL here.
 
 `world.read` accepts an exact `actor: {plugin, localId}` and these observations:
 
@@ -24,14 +25,22 @@ callbacks and main-thread scene reads are asynchronous, not one atomic sample.
 Fixture actions require an operator-pinned `fixture_actor_allowlist` containing
 at most16 exact selectors, an owned disposable test profile and completed common
 gameplay readiness. The player cannot be a fixture target. Only allow expendable
-NPCs in a disposable save: base weight changes can affect NPCs sharing that base.
+NPCs in a disposable save. Preparation never rewrites base weight, base height,
+reference scale or race to make a fixture pass.
 The executor restores the profile/save files, not a persistent in-memory actor.
 
 `object.perform prepare_fixture_actor` takes `actor`, `equipment: "unequip_all"`,
-`expectedScale` (0.1..3), `expectedWeightPercent` (0..100) and `movement` (enabled
-or disabled). Each native mutation executes once. Only reads repeat until actual
-equipment, actor scale/base weight and restraint match. A callback alone never
-passes preparation. `set_fixture_actor_movement` takes actor/movement and verifies
+`expectedScale` (0.1..3, whole percent), `expectedWeightPercent` (0..100) and
+`movement` (enabled or disabled). Expected scale is the stored **reference**
+scale: actual native uint16 refScale percent divided by100. The engine GetScale
+and scene transform can additionally include actor height (for example reference1
+with effective1.03). Both quantities are retained separately; no hardcoded race
+coefficient, changed tolerance or inferred echo substitutes for the native field.
+Initial reference scale and base weight must match before any fixture mutation.
+Only SetRestrained and UnequipAll execute once; reads verify actual equipment and
+restraint while requiring the same base identity, weight, reference and effective
+scales unchanged. A callback alone never passes preparation.
+`set_fixture_actor_movement` takes actor/movement and verifies
 native restraint. Disabled means restrained voluntary movement; external physics
 can still move the actor. `push_fixture_actor` takes `source: "player"`, exact
 `target` and `strength` (0.01..10). `pushCompleted` means the native Papyrus call
