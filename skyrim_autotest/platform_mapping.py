@@ -29,7 +29,7 @@ def operations():
                        'speech.broker.interfaceVersion', 'speech.broker.adapters', 'speech.broker.asrSource',
                        'speech.subscribers.namespaces', 'speech.vocabulary.phrase', 'speech.events.roundtripCompleted',
                        'speech.recognition.doorTextCount', 'speech.auction.doorGreedyAwardCount', 'speech.utterances.records'],
-        'controller.perform': [], 'object.perform': ['action.completed','fixture.actor.prepared','fixture.actor.movementEnabled','fixture.actor.pushCompleted'], 'input.perform': [], 'menu.read': []
+        'controller.perform': ['inputIssued','gripExchange.singlePublication'], 'object.perform': ['action.completed','fixture.actor.prepared','fixture.actor.movementEnabled','fixture.actor.pushCompleted'], 'input.perform': [], 'menu.read': []
     }
     result = {}
     for op, names in fields.items():

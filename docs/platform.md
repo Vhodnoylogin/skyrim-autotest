@@ -1,5 +1,25 @@
 # Semantic platform backend
 
+Candidate `controller.perform` action `exchange_grip` accepts `fromHand`,
+`toHand` (different physical left/right hands), an existing `referenceTag` and
+`settleSeconds` in0.1..2. It requires the exact native reference in the source
+hand, an empty receiver, matching live incarnation and already prepared source
+grip-only/neutral receiver inputs. It issues source grip open and receiver grip
+closed in one full-device command, with all poses unchanged. It performs no
+approach, hand seeding, native GrabObject call, callback injection or task delay.
+Prepare the receiver using ordinary bounded physical movement before this action.
+The same absolute step deadline, world guards and recovery apply; an uncertain
+publication never retries. Subsequent native held-reference/count checks are
+required to establish actual transfer. Driver component updates and game input
+consumption are not atomic merely because one command was issued.
+
+This can attempt a genuine queued-release/regrab race without inserting host
+roundtrips between the two grip changes. Qualify it separately in the actual
+game before use. A race is exercised only when real native causal events show
+enqueue < regrab < task for the same reference/serial/world. A normal transfer,
+driver ACK, host timestamp or endpoint read cannot prove that interval. An unhit
+interval stays not_exercised; do not alter subject guards or delay its tasks.
+
 Generic actor fixture, scene/node and bounded contact-capture candidates are
 documented in [actor scenes](actor-scenes.md). Their new mapping fields require
 separate live qualification; they do not change already frozen platforms.

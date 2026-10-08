@@ -44,6 +44,8 @@ def validate(args):
     req = args.get('request', {})
     if not isinstance(req, dict):
         raise ValueError('Semantic request must be an object')
+    from . import grip_exchange
+    if grip_exchange.validate(operation, req): return
     from . import actor_domain
     from . import actor_scene
     if actor_scene.validate(operation, req): return
@@ -528,6 +530,8 @@ class Backend:
 
     def controller(self, req):
         action = req['action']
+        from . import grip_exchange
+        if action == grip_exchange.ACTION:return grip_exchange.perform(self,req)
         if action in ('pose_hand_at_body_slot','grip_and_withdraw_from_body_slot'):
             from .body_scene import pose
             return pose(self,req)
