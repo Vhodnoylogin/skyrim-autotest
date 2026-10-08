@@ -354,6 +354,12 @@ body motion settles under the original deadline. Player origin must stay within
 5cm and actual cumulative head lowering is additionally capped at0.75m. Actual
 Actor.IsSneaking is recorded separately; an observed common shift alone does not
 prove its cause. Missing/mismatched rig data or an unsettled transition stops.
+The native input-consumption wait remains2seconds. A proven common rig transition
+gets a separate fixed5second read-only settling window measured from the same
+publication, capped by the original action time remaining. Neither deadline is
+renewed per read, and no input is published while waiting. Actual IsSneaking is
+recorded at transition detection and after settling; it does not replace pose,
+height, input-consumption or world-continuity evidence.
 
 Disposable fixture references receive separate20-game-unit-spaced initial slots
 in a heading-rotated4x4 layout. One native spawn/drop and one initial MoveTo per

@@ -59,7 +59,9 @@ class ReachPosture:
             b.publish(self.frame,10);b.pause(.1)
             # A publication cannot authorize a further body step. Wait only
             # for read-only evidence of this actual head lowering, never replay.
-            end=time.monotonic()+min(2.,b.remaining())
+            started=time.monotonic();remaining=b.remaining()
+            input_end=started+min(2.,remaining)
+            transition_end=started+min(5.,remaining)
             settle=None;last=None;transition=False
             while True:
                 target=b.reach_target(ref,hand,self.columns)
@@ -87,7 +89,15 @@ class ReachPosture:
                         raise ValueError('Observed crouch crossed minimum body height')
                     if self.relative(self.initial_head,after)[1]>.75:
                         raise ValueError('Observed body lowering exceeds total posture bound')
-                    transition=transition or abs(common[1])>.05
+                    if not transition and abs(common[1])>.05:
+                        sneaking=b.pap('Actor','IsSneaking',target='0x14')
+                        if type(sneaking) is not bool:raise ValueError('Native crouch state unavailable')
+                        b.s.log('platform-reach-rig-transition',nativeSneaking=sneaking,
+                                nativeRigCommonDeltaMetres=common,headDeltaMetres=delta,
+                                consumedHmdRelativeToWandsMetres=consumed,
+                                inputDeadlineMonotonic=input_end,transitionDeadlineMonotonic=transition_end,
+                                publicationFrozen=True,causeInferred=False)
+                        transition=True
                     now=time.monotonic()
                     if transition:
                         # Freeze commands during an actual common rig shift.
@@ -96,7 +106,7 @@ class ReachPosture:
                         else:settle=settle if settle is not None else now
                         last=list(after)
                         if settle is None or now-settle<.2:
-                            if now>=end:raise ValueError('Native crouch rig transition did not settle')
+                            if now>=transition_end:raise ValueError('Native crouch rig transition did not settle')
                             b.pause(.1);continue
                     sneaking=b.pap('Actor','IsSneaking',target='0x14')
                     if type(sneaking) is not bool:raise ValueError('Native crouch state unavailable')
@@ -108,6 +118,6 @@ class ReachPosture:
                             shoulderGameUnits=b._reach_body['shoulder'],targetHandGameUnits=target,
                             basis='actual same-incarnation third-person body response; publication alone is insufficient')
                     break
-                if time.monotonic()>=end:
+                if time.monotonic()>=(transition_end if transition else input_end):
                     raise ValueError('Crouch publication produced no observed body lowering')
                 b.pause(.1)

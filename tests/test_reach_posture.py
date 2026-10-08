@@ -98,6 +98,40 @@ class ReachPostureTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'total posture bound'):
             self.posture(b).ensure('R','right',[0,0,0])
         self.assertEqual(len(b.calls),1)
+
+    def test_legitimate_rig_transition_may_settle_after_two_seconds_without_republication(self):
+        b=Fake();publish=b.publish;reads=[]
+        def command(*a):
+            publish(*a)
+            if len(b.calls)==1:
+                for point in b._reach_rig.values():point[2]-=14
+                for key in ('head','shoulder','elbow','armHand'):b._reach_body[key][2]-=14
+        def read(*a):
+            reads.append(len(b.calls))
+            if len(reads)<=7:
+                for point in b._reach_rig.values():point[2]-=.5
+                for key in ('head','shoulder','elbow','armHand'):b._reach_body[key][2]-=.5
+            return [0,0,0]
+        b.publish=command;b.reach_target=read
+        with patch('time.monotonic',side_effect=[i*.3 for i in range(1000)]):
+            self.posture(b).ensure('R','right',[0,0,0])
+        self.assertEqual(reads[:9],[1]*9)
+
+    def test_original_remaining_deadline_caps_transition_wait(self):
+        b=Fake();b.remaining=lambda:.5;publish=b.publish;reads=[]
+        def command(*a):
+            publish(*a)
+            for point in b._reach_rig.values():point[2]-=14
+            for key in ('head','shoulder','elbow','armHand'):b._reach_body[key][2]-=14
+        def read(*a):
+            reads.append(1)
+            for point in b._reach_rig.values():point[2]-=.5
+            for key in ('head','shoulder','elbow','armHand'):b._reach_body[key][2]-=.5
+            return [0,0,0]
+        b.publish=command;b.reach_target=read
+        with patch('time.monotonic',side_effect=[i*.2 for i in range(1000)]),self.assertRaisesRegex(ValueError,'transition did not settle'):
+            self.posture(b).ensure('R','right',[0,0,0])
+        self.assertEqual(len(b.calls),1)
         b=Fake();b.xyz=lambda *a:([0,0,0] if not b.calls else [7,0,0])
         with self.assertRaisesRegex(ValueError,'Player origin moved'):
             self.posture(b).ensure('R','right',[0,0,0])
