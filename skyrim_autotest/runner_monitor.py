@@ -16,9 +16,9 @@ def snapshot(state, error=None):
             'recovery':{k:copy.deepcopy(state[k]) for k in RECOVERY_KEYS if k in state}}
 
 
-def read(directory, state):
+def read(directory, state, filename='heartbeat.json'):
     try:
-        value=json.loads((Path(directory)/'heartbeat.json').read_text(encoding='utf-8-sig'))
+        value=json.loads((Path(directory)/filename).read_text(encoding='utf-8-sig'))
     except (OSError, ValueError):
         return None
     if (not isinstance(value,dict) or value.get('schemaVersion')!=1 or value.get('id')!=state.get('id')
@@ -39,13 +39,14 @@ def read(directory, state):
 
 
 def restore(directory, state):
-    pulse=read(directory,state)
-    if not pulse:return
-    for row in pulse['recovery'].get('owned',[]):
-        if row not in state.setdefault('owned',[]):state['owned'].append(row)
-    if pulse['at']>state.get('stateSavedAt',state.get('heartbeat',0)):
-        for key in RECOVERY_KEYS:
-            if key!='owned' and key in pulse['recovery']:state[key]=copy.deepcopy(pulse['recovery'][key])
+    pulses=[p for name in ('heartbeat.json','input-state.json')
+            if (p:=read(directory,state,name)) is not None]
+    for pulse in sorted(pulses,key=lambda p:p['at']):
+        for row in pulse['recovery'].get('owned',[]):
+            if row not in state.setdefault('owned',[]):state['owned'].append(row)
+        if pulse['at']>state.get('stateSavedAt',state.get('heartbeat',0)):
+            for key in RECOVERY_KEYS:
+                if key!='owned' and key in pulse['recovery']:state[key]=copy.deepcopy(pulse['recovery'][key])
 
 
 def observed_at(directory, state):

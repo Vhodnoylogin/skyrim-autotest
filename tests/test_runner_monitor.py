@@ -100,5 +100,50 @@ class MonitorTests(unittest.TestCase):
         pulse=monitor.snapshot(self.state);pulse['recovery']['owned']=[{'role':'steam','identity':self.ident}]
         self.write_pulse(pulse);self.assertIsNone(monitor.read(self.root,self.state))
 
+    def test_driver_checkpoint_never_serializes_accumulated_subject_state(self):
+        class SubjectState:
+            def __deepcopy__(self,memo):raise AssertionError('Subject state traversed')
+        self.state.update(checks=SubjectState(),inputBackend='driver',driverBackend='file')
+        frame=hardware.neutral();frame['right']['controller']['pressed']=4
+        with patch.object(hardware,'PATH',self.root/'frame.txt'):
+            receipt=self.session.driver_tool({'action':'publish','frame':frame,'holdSeconds':2})
+        pulse=monitor.read(self.root,self.state,'input-state.json')
+        self.assertEqual(pulse['recovery']['hardwareFrame']['right']['controller']['pressed'],4)
+        self.assertEqual(receipt['publication'],pulse['recovery']['hardwareFrame']['_publication'])
+        self.assertFalse((self.root/'state.json').exists())
+        self.assertFalse((self.root/'heartbeat.json').exists())
+        self.assertEqual(monitor.observed_at(self.root,self.state),(0,None))
+
+    def test_latest_input_checkpoint_recovers_between_heartbeats_without_hiding_health(self):
+        old=monitor.snapshot(self.state);old['at']=time.time()-1
+        old['recovery']['hardwareFrame']=hardware.neutral();self.write_pulse(old)
+        new=copy.deepcopy(old);new['at']=time.time();new['recovery']['hardwareFrame']['right']['controller']['pressed']=4
+        runner.atomic_json(self.root/'input-state.json',new)
+        recovered=copy.deepcopy(self.state);monitor.restore(self.root,recovered)
+        self.assertEqual(recovered['hardwareFrame']['right']['controller']['pressed'],4)
+        self.assertEqual(monitor.observed_at(self.root,self.state)[0],old['at'])
+        # A later heartbeat release is newer than the input checkpoint.
+        old['at']=time.time();self.write_pulse(old)
+        recovered=copy.deepcopy(self.state);monitor.restore(self.root,recovered)
+        self.assertEqual(recovered['hardwareFrame']['right']['controller']['pressed'],0)
+
+    def test_foreign_input_checkpoint_and_stale_input_cannot_override_full_state(self):
+        pulse=monitor.snapshot(self.state);pulse['recovery']['hardwareOwner']='candidate'
+        runner.atomic_json(self.root/'input-state.json',dict(pulse,runner=dict(self.ident,birth=101)))
+        recovered=copy.deepcopy(self.state);monitor.restore(self.root,recovered)
+        self.assertNotIn('hardwareOwner',recovered)
+        runner.atomic_json(self.root/'input-state.json',pulse)
+        recovered.update(stateSavedAt=time.time()+.01,hardwareOwner='newer-full-state')
+        monitor.restore(self.root,recovered);self.assertEqual(recovered['hardwareOwner'],'newer-full-state')
+
+    def test_failed_input_checkpoint_stops_publication_call_and_preserves_prior_durable_state(self):
+        self.state.update(inputBackend='driver',driverBackend='file',hardwareFrame=hardware.neutral())
+        self.session.save();before=(self.root/'state.json').read_bytes()
+        with patch.object(hardware,'PATH',self.root/'frame.txt'),patch.object(runner,'atomic_json',side_effect=PermissionError('disk fault')):
+            with self.assertRaisesRegex(PermissionError,'disk fault'):
+                self.session.driver_tool({'action':'publish','frame':hardware.neutral(),'holdSeconds':1})
+        self.assertEqual((self.root/'state.json').read_bytes(),before)
+        self.assertFalse((self.root/'input-state.json').exists())
+
 
 if __name__=='__main__':unittest.main()

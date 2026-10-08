@@ -464,7 +464,15 @@ class Session:
                 result = {'published': True, 'holdSeconds': duration, **self.driver_acknowledgement()}
             else:
                 raise ValueError('Unknown driver action')
-            self.save()
+            if action != 'status':
+                # Recovery needs the latest leased input, not another copy of
+                # every accumulated subject check on each centimetre of motion.
+                # Keep the independently monitored heartbeat separate: input
+                # traffic must not hide a failed/stalled heartbeat.
+                from . import runner_monitor
+                atomic_json(self.dir / 'input-state.json',
+                            runner_monitor.snapshot(self.state, self.heartbeat_error))
+                result['publication'] = copy.deepcopy(self.state['hardwareFrame'].get('_publication'))
             self.log('driver', action=action, result=result)
             return result
 

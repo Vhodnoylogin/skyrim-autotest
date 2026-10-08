@@ -34,6 +34,9 @@ def withdraw(b, req, frame, columns, shoulder, elbow, current, head):
         publication=b.publish(changed,duration+req['durationSeconds'])
         elapsed=time.monotonic()-began
         if elapsed>duration:
+            b.s.log('platform-body-withdrawal-overrun',step=step,plannedSteps=steps,
+                    elapsedSeconds=elapsed,motionSeconds=duration,publication=publication,
+                    actionReplayed=False)
             raise TimeoutError('Timed withdrawal publication exceeded motion budget')
         scheduled=.05+(duration-.1)*step/steps
         if scheduled>elapsed:b.pause(scheduled-elapsed)

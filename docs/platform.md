@@ -442,3 +442,14 @@ rotation is not treated as a prerequisite for those position observations.
 Slot centres and palm offsets still validate the full rotation/scale before
 applying local coordinates. Raw matrices remain unchanged and retained; this
 does not normalize skeletal animation data or weaken controller pose validation.
+
+Physical driver publications checkpoint their leased frame/owner and exact
+publication token in a compact, atomically replaced `input-state.json`. They do
+not rewrite accumulated subject results for each motion increment. Recovery
+validates run/runner identity and merges the newest input/heartbeat checkpoint
+only when it is newer than the complete state. This input checkpoint never
+refreshes the guardian's heartbeat health; heartbeat failures remain terminal.
+Driver events retain publication metadata and synchronous durable logging.
+Timed withdrawal still uses its original monotonic deadline, at most 1cm steps,
+body/head guards and no replay; transport overruns stop and record the actual
+step, elapsed time and publication. An ACK alone is not observed game behavior.
