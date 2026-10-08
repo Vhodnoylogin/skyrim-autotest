@@ -312,6 +312,7 @@ class Backend:
             # workspace exclusively from the loaded third-person arm chain.
             query['nodes']=[{'ref':'0x14','name':name,'firstPerson':False} for name in names]
             query['nodes'].append({'ref':'0x14','name':names[-1],'firstPerson':True})
+            query['nodes'].append({'ref':'0x14','name':'NPC Head [Head]','firstPerson':False})
         snapshot=self.call('inspect',query)
         if snapshot.get('ok') is not True or snapshot.get('units')!='skyrim_engine_units' or snapshot.get('space')!='world':
             raise ValueError('Observer grip target units/space unavailable')
@@ -339,7 +340,7 @@ class Backend:
             nodes=snapshot.get('nodes',[])
             points=[]
             player_identity=None
-            for name,first in [(name,False) for name in names]+[(names[-1],True)]:
+            for name,first in [(name,False) for name in names]+[(names[-1],True),('NPC Head [Head]',False)]:
                 exact=[node for node in nodes if node.get('name')==name and node.get('firstPerson') is first and int(node.get('form','0'),16)==0x14]
                 if len(exact)!=1 or exact[0].get('status')!='available':
                     raise ValueError('Observed body reach node unavailable: '+name)
@@ -352,8 +353,8 @@ class Backend:
                     raise ValueError('Observed body node identity/coordinates unavailable')
                 if player_identity is not None and player_identity!=ident:raise ValueError('Observed body node identities differ')
                 player_identity=ident;points.append(point)
-            self._reach_body={'shoulder':points[0],'elbow':points[1],'armHand':points[2],'hand':points[3]}
-            self._reach_hand_transform=copy.deepcopy(node['world'])
+                if first:self._reach_hand_transform=copy.deepcopy(node['world'])
+            self._reach_body={'shoulder':points[0],'elbow':points[1],'armHand':points[2],'hand':points[3],'head':points[4]}
             player_key=(snapshot['sessionId'],snapshot['loadGeneration'],player_identity['runtimeHandle'])
             if hasattr(self,'_reach_player_identity') and self._reach_player_identity!=player_key:
                 raise ValueError('Body reach player identity changed')
@@ -591,12 +592,20 @@ class Backend:
                        approachBasis='observed transformed center at pinned provider palm near-cast endpoint; selection unobserved')
             progress_at=time.monotonic()
             previous_hand=None
+            from .reach_posture import ReachPosture
+            posture=ReachPosture(self,frame,columns)
             for _ in range(256):
                 # Track the actual dynamic target, rather than pressing at a
                 # stale point after a teleported hand has displaced it.
                 target = self.reach_target(ref, hand, columns)
+                previous_height=frame['hmd']['matrix'][7]
+                target,envelope=posture.ensure(ref,hand,target)
+                if frame['hmd']['matrix'][7]<previous_height:
+                    # ensure returned only after actual body-lowering evidence.
+                    # This is genuine body progress; the original deadline and
+                    # independent crouch travel bound still apply.
+                    previous_hand=None;progress_at=time.monotonic()
                 current = self._reach_body['hand']
-                envelope=body_reach_envelope(columns,self._reach_body['shoulder'],self._reach_body['elbow'],self._reach_body['armHand'],target)
                 if math.dist(current, target) < 2: break
                 if previous_hand is None or math.dist(previous_hand,current)>=.25:
                     previous_hand=list(current);progress_at=time.monotonic()

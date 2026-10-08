@@ -85,7 +85,8 @@ class ObservedReachTests(unittest.TestCase):
                          for name,first,point in [('NPC R UpperArm [RUar]',False,[0,0,60]),
                                             ('NPC R Forearm [RLar]',False,[0,0,35]),
                                             ('NPC R Hand [RHnd]',False,[0,0,10]),
-                                            ('NPC R Hand [RHnd]',True,[0,0,10])]]}
+                                            ('NPC R Hand [RHnd]',True,[0,0,10]),
+                                            ('NPC Head [Head]',False,[0,0,110])]]}
 
     def backend(self,snapshot):
         class Session:
@@ -145,7 +146,7 @@ class ObservedReachTests(unittest.TestCase):
             arm=b._reach_body
             return body_reach_envelope(columns,arm['shoulder'],arm['elbow'],arm['armHand'],[0,0,0])
         original=envelope()
-        snapshot['nodes'][-1]['world']['translation']=[0,0,110]
+        snapshot['nodes'][3]['world']['translation']=[0,0,110]
         self.assertEqual(envelope(),original)
         self.assertEqual(b._reach_body['hand'],[0,0,110])
         self.assertEqual(b._reach_hand_transform['translation'],[0,0,110])
@@ -170,7 +171,7 @@ class ObservedReachTests(unittest.TestCase):
         b.call=observe;b.reference_center('0xFF001234','right')
         queries=[q for q in queries if q['kind']=='world_observer']
         self.assertEqual(len(queries),1)
-        self.assertEqual([n['firstPerson'] for n in queries[0]['nodes']],[False,False,False,True])
+        self.assertEqual([n['firstPerson'] for n in queries[0]['nodes']],[False,False,False,True,False])
 
 
 if __name__=='__main__':unittest.main()

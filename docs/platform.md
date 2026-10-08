@@ -331,6 +331,20 @@ reference checks remain. Body workspace and incremental motion are candidate
 observations until actual game qualification; input publication is never Grip
 consumption proof. Initial calibration still uses three0.05m tracking probes.
 
+Low reference reach may physically lower the HMD in1cm vertical increments when
+the actual body workspace rejects a target below the shoulder. This requires
+both actual HIGGS hands empty and both controller inputs neutral; it never
+releases an existing grip or changes the other device poses. Each publication
+must produce observed same-incarnation third-person head lowering before another
+increment. Missing consumption, lateral/extreme body response, invalid arm
+geometry or five seconds without shoulder-to-target progress stops. The existing
+action deadline applies; total HMD lowering is at most0.75m and observed head
+height above the player's current origin must remain at least0.6m. There is no
+implicit stand-up afterward. Palm approach remains1cm feedback motion with the
+unchanged body envelope; no object relocation, direct grab or guard enlargement.
+This posture candidate needs a new separate native qualification. A published
+HMD frame alone does not establish crouching or an acquired reference.
+
 Disposable fixture references receive separate20-game-unit-spaced initial slots
 in a heading-rotated4x4 layout. One native spawn/drop and one initial MoveTo per
 reference are retained. No item teleport or directGrabObject is used during
