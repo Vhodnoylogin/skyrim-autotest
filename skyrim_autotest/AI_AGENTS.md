@@ -1,5 +1,11 @@
 # AI-agent instructions: Skyrim Autotest
 
+For headset-assisted voice delivery read docs/assisted-voice.md. Use the host's
+supported heartbeat plus skyrim_autotest.voice_inbox, an exact operator thread and
+a private cursor. Do not claim continuous accompaniment from listener health or
+queued speech. A pending delivery requires prior-response/action reconciliation;
+never repeat uncertain game mutations. Keep transcripts/receipts outside Git.
+
 Use this tool for autonomous, bounded Skyrim VR tests after the owner has
 requested/authorized testing. Existing authorization persists; do not ask again
 for ordinary reversible launches within that scope. New fixture setup and mod

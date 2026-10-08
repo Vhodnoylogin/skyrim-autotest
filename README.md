@@ -5,6 +5,11 @@ isolated MO2 profile, synthetic HMD/controller input, result assertions and an
 independent recovery process. No project journal, AI client, shell toolkit, or
 Python third-party package is needed at runtime.
 
+For headset-assisted chat sessions, the optional [voice delivery companion](docs/assisted-voice.md)
+provides a private durable ASR inbox with explicit processing acknowledgments.
+The AI host must wake the operator chat; microphone health alone does not provide
+continuous responses. This companion does not change automatic game execution.
+
 The independently extracted build passed a complete physical-input/world/physics
 scenario and restoration verification on 2026-10-04. See [validation](docs/validation.md)
 for the exact build, measured scope, retained failures and prototype limits.
