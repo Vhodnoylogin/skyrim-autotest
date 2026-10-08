@@ -500,19 +500,14 @@ class Backend:
             if P.value.get('subject_state_bindings'):
                 result['body_slot']['suspended']=subject_state.slot_suspended(self,slot)
             return result
+        if kind == 'reference.state':
+            from .reference_state import read
+            return read(self, req)
         ref = self.tagged(req)
         if kind == 'reference.physics':
             raw = self.call('inspect', {'kind': 'world_observer', 'physics': {'refs': [ref]}})
             return {'reference': {'id': ref, 'physics': raw}}
-        raw = self.call('inspect', {'kind': 'refs', 'formId': ref})
-        rows = raw.get('refs', [])
-        entry = next((r for r in rows if int(r.get('formId', '0'), 16) == int(ref, 16)), None)
-        if entry is None or type(entry.get('quantityItems')) is not int:
-            raise ValueError('Exact native reference/stack-count observation unavailable')
-        loaded = self.pap('ObjectReference', 'Is3DLoaded', target=ref)
-        return {'reference': {'id': ref, 'existsInLoadedWorld': loaded is True,
-                              'quantity': {'items': entry['quantityItems']}, 'item': self.item(ref)},
-                'providerObservation': raw}
+        raise ValueError('Unsupported reference observation')
 
     def recover_input_gate(self, menus):
         if not menus_block_gameplay(menus): return

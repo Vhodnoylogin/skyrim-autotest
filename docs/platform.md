@@ -1,5 +1,22 @@
 # Semantic platform backend
 
+`world.read reference.state` separates loaded presence from stack quantity.
+Exact `inspect refs` and Observer's main-thread exact-reference result are read
+once, bracketed by the current world lifecycle. Loaded references still require
+the actual integer stack count, base identity and a boolean `Is3DLoaded` result.
+Deleted or unloaded Observer references, or its exact native `Reference not resolved`
+lookup outcome, may return `existsInLoadedWorld:false`. An arbitrary empty response,
+timeout, wrong reference, malformed boolean or other unavailable reason cannot.
+For these absent states `id` identifies the requested historical tag; it does not
+attest a live incarnation. `quantity` and `item` explicitly say `available:false`,
+with no fabricated zero/count/base. Tombstone counts remain only in raw evidence.
+Known tagged session/generation/handles are checked when available; a not-resolved
+lookup has no current handle. This proves sampled absence from the loaded world,
+not global permanent deletion, atomic quantity/presence, or continuous absence.
+Raw provider responses are retained. Actions and physics reads keep their stricter
+live-reference guards. This repair requires its own live qualification before
+platform activation; historical results and mod orders remain unchanged.
+
 `controller.perform/release_hand` takes `hand` and `settleSeconds`: it opens only
 that hand at the current controller pose, preserving HMD and the other hand.
 It runs the common input gate but never recalibrates or approaches a target.

@@ -41,6 +41,10 @@ class PlatformTests(unittest.TestCase):
         session = Session()
         session.responses['inspect'] = {'refs': [{'formId': '0xFF001234', 'quantityItems': 17}]}
         backend = self.backend(session)
+        backend.call = lambda tool,args: (session.responses['inspect'] if args['kind']=='refs' else
+            {'ok':True,'phase':'skse_main_thread_task','sessionId':'test','loadGeneration':1,
+             'refs':[{'status':'available','identity':{'form':'0xFF001234','loadGeneration':1,'runtimeHandle':9},
+                      'loaded3D':True,'deleted':False,'disabled':False}]})
         backend.pap = lambda *a, **k: True
         backend.item = lambda ref: {'plugin': 'Actual.esp', 'localId': '002345'}
         observed = backend.observe({'observation': 'reference.state', 'referenceTag': 'seed-potion'})
