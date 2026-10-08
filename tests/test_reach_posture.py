@@ -46,6 +46,27 @@ class ReachPostureTests(unittest.TestCase):
     def test_reachable_target_has_no_body_or_input_mutation(self):
         b=Fake();self.posture(b).ensure('R','right',[0,0,65]);self.assertEqual(b.calls,[])
 
+    def test_consumed_hmd_can_have_small_nonlinear_skeletal_head_response(self):
+        b=Fake();publish=b.publish
+        def command(*a):
+            publish(*a)
+            # Native32 proof: HMD consumes1cm but skeletal head only~1mm.
+            b._reach_body['head'][2]+=.63
+        b.publish=command
+        target,envelope=self.posture(b).ensure('R','right',[0,0,0])
+        self.assertLessEqual(envelope['shoulderToTargetMetres'],envelope['bodyEnvelopeRadiusMetres'])
+        self.assertGreater(len(b.calls),1)
+
+    def test_consumed_input_without_actual_body_progress_cannot_renew_timeout(self):
+        b=Fake();b.response=False
+        def command(frame,*a):
+            b.calls.append(copy.deepcopy(frame));b._reach_rig['head'][2]-=.7
+        b.publish=command
+        with patch('time.monotonic',side_effect=[i*.5 for i in range(1000)]),self.assertRaisesRegex(ValueError,'shoulder-to-target progress'):
+            self.posture(b).ensure('R','right',[0,0,0])
+        self.assertGreater(len(b.calls),1)
+        self.assertLess(len(b.calls),10)
+
     def test_held_object_or_unavailable_held_identity_prevents_body_motion(self):
         for held in ({'formId':'0xFF001234'},False,{},'unknown'):
             b=Fake();b.held=held

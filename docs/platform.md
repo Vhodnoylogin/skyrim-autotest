@@ -335,8 +335,11 @@ Low reference reach may physically lower the HMD in1cm vertical increments when
 the actual body workspace rejects a target below the shoulder. This requires
 both actual HIGGS hands empty and both controller inputs neutral; it never
 releases an existing grip or changes the other device poses. Each publication
-must produce observed same-incarnation third-person head lowering before another
-increment. Missing consumption, lateral/extreme body response, invalid arm
+must produce observed native HMD consumption before another increment. Skeletal
+head response is separately observed; a1cm input need not move that bone by3mm.
+Actual shoulder-to-target progress is required within5seconds across the bounded
+increments; publications cannot renew that timer. Missing consumption,
+lateral/extreme body response, invalid arm
 geometry or five seconds without shoulder-to-target progress stops. The existing
 action deadline applies; total HMD lowering is at most0.75m and observed head
 height above the player's current origin must remain at least0.6m. There is no

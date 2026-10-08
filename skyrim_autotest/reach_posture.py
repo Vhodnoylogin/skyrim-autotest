@@ -76,11 +76,11 @@ class ReachPosture:
                 consumed=[a-c for a,c in zip(moves['head'],common)]
                 if math.hypot(common[0],common[2])>.05 or common[1]>.05:
                     raise ValueError('Unexpected native VR rig translation during crouch')
-                if consumed[1]<=-.003 and delta[1]<=-.003:
+                if consumed[1]<=-.003:
                     # Input displacement is relative to both unchanged wand
                     # origins. Engine crouch can translate the entire VR rig;
                     # a raw skeletal head delta is not the HMD input delta.
-                    if math.hypot(consumed[0],consumed[2])>.05 or consumed[1]<-.05 or math.hypot(delta[0],delta[2])>.05:
+                    if math.hypot(consumed[0],consumed[2])>.05 or consumed[1]<-.05 or math.hypot(delta[0],delta[2])>.05 or delta[1]>.05:
                         raise ValueError('Observed body motion differs from bounded vertical crouch')
                     actual_feet=b.xyz('0x14');b.guard_world()
                     if math.sqrt(sum(v*v for v in self.relative(actual_feet,feet)))>.05:
@@ -112,11 +112,13 @@ class ReachPosture:
                     if type(sneaking) is not bool:raise ValueError('Native crouch state unavailable')
                     b.s.log('platform-reach-crouch-observed',hand=hand,reference=ref,
                             headAfterGameUnits=after,headDeltaMetres=delta,
+                            actualSkeletalHeadLoweringMetres=-delta[1],
+                            perStepSkeletonLoweringGuaranteed=False,
                             nativeRigAfter=actual,nativeRigCommonDeltaMetres=common,
                             consumedHmdRelativeToWandsMetres=consumed,nativeSneaking=sneaking,
                             rigTransitionSettled=transition,
                             shoulderGameUnits=b._reach_body['shoulder'],targetHandGameUnits=target,
-                            basis='actual same-incarnation third-person body response; publication alone is insufficient')
+                            basis='native HMD consumption relative to unchanged wands; actual skeletal response copied separately; subsequent body workspace/progress remain authoritative')
                     break
                 if time.monotonic()>=(transition_end if transition else input_end):
                     raise ValueError('Crouch publication produced no observed body lowering')
