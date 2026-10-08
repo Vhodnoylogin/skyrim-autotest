@@ -45,6 +45,8 @@ def validate(args):
     if not isinstance(req, dict):
         raise ValueError('Semantic request must be an object')
     from . import actor_domain
+    from . import actor_scene
+    if actor_scene.validate(operation, req): return
     if actor_domain.validate(operation, req): return
     from . import speech_domain
     if speech_domain.validate(operation, req): return
@@ -462,6 +464,8 @@ class Backend:
                             'basis': 'native Potion and MagicEffect queries; sequential non-atomic snapshot'}}
 
     def observe(self, req):
+        from . import actor_scene
+        if req.get('observation') in actor_scene.READS:return actor_scene.observe(self,req)
         from . import subject_state
         if req.get('observation')=='subject.settings':return subject_state.observe(self,req['subject'])
         from . import speech_domain
@@ -663,6 +667,8 @@ class Backend:
 
     def mutate(self, req):
         action = req['action']
+        from . import actor_scene
+        if action in actor_scene.ACTIONS:return actor_scene.perform(self,req)
         from . import subject_state
         if action==subject_state.ACTION:return subject_state.perform(self,req)
         from . import runtime_items

@@ -1305,6 +1305,8 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
             from .platform import initialize_controllers
             initialize_controllers(session, P.snapshot())
             execute(session, scenario)
+            from .actor_scene import finish_captures
+            finish_captures(session)
             if any(sha(Path(__file__).parent / name) != digest for name, digest in state['executorHashes'].items()):
                 raise Blocked('Executor source changed during the scenario; evidence needs a stable rerun')
             session.state['result'] = 'passed'

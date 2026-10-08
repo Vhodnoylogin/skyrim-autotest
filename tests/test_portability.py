@@ -12,6 +12,15 @@ from skyrim_autotest import config, runner, hardware, queue
 from skyrim_autotest.scenarios import validate, resolve_args, check, execute
 
 class PortabilityTests(unittest.TestCase):
+    def test_actor_fixture_allowlist_is_explicit_bounded_and_unique(self):
+        spec={'plugin':'fixture.esp','localId':'000900'}
+        selected=config.configure(dict(self.value,fixture_actor_allowlist=[spec]))
+        self.assertEqual(selected['fixture_actor_allowlist'],[spec])
+        for values in (True,[spec,spec],[{'plugin':'fixture.esp','localId':'0'}],
+                       [{'plugin':'../fixture.esp','localId':'900'}],[spec]*17):
+            with self.subTest(values=values),self.assertRaises(config.ConfigurationError):
+                config.configure(dict(self.value,fixture_actor_allowlist=values))
+
     def test_subject_write_binding_snapshots_only_declared_overwrite_targets_and_temps(self):
         binding={'inspectKind':'any_state','settingsDestination':'SKSE/Plugins/any.json',
                  'handednessProfileIni':'skyrimprefs.ini','bodySlotsDestination':'SKSE/Plugins/slots.ini',

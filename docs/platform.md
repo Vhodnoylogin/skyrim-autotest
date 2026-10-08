@@ -1,5 +1,9 @@
 # Semantic platform backend
 
+Generic actor fixture, scene/node and bounded contact-capture candidates are
+documented in [actor scenes](actor-scenes.md). Their new mapping fields require
+separate live qualification; they do not change already frozen platforms.
+
 `world.read reference.state` separates loaded presence from stack quantity.
 Exact `inspect refs` and Observer's main-thread exact-reference result are read
 once, bracketed by the current world lifecycle. Loaded references still require

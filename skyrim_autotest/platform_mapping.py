@@ -10,6 +10,9 @@ def operations():
                        'lifecycle.worldReady', 'lifecycle.pidChanged', 'lifecycle.generationChanged',
                        'lifecycle.oldReferenceTagsInvalidated', 'alchemy.effects.0.runtimeId', 'alchemy.runtimeId', 'alchemy.poison', 'alchemy.hostile', 'alchemy.food',
                        'alchemy.effectCount', 'alchemy.effects', 'alchemy.hasDetrimentalEffect',
+                       'actor.identity.plugin','actor.identity.localId','scene.node.available','scene.node.worldBound.radius.gameUnits',
+                       'skeleton.leftThigh.node.available','skeleton.rightThigh.node.available','physics.capture.available',
+                       'physics.contacts.sample.available','physics.contacts.sample.phase',
                        'form.runtimeId', 'hand.occupied', 'hand.reference.id',
                        'hand.quantity.items', 'hand.item.plugin', 'hand.item.localId', 'hand.matchesRequestedReference',
                        'hand.item.runtimeCreated','hand.item.runtimeId','hand.item.sourceFilePolicy','hand.matchesRequestedItem',
@@ -26,7 +29,7 @@ def operations():
                        'speech.broker.interfaceVersion', 'speech.broker.adapters', 'speech.broker.asrSource',
                        'speech.subscribers.namespaces', 'speech.vocabulary.phrase', 'speech.events.roundtripCompleted',
                        'speech.recognition.doorTextCount', 'speech.auction.doorGreedyAwardCount', 'speech.utterances.records'],
-        'controller.perform': [], 'object.perform': ['action.completed'], 'input.perform': [], 'menu.read': []
+        'controller.perform': [], 'object.perform': ['action.completed','fixture.actor.prepared','fixture.actor.movementEnabled','fixture.actor.pushCompleted'], 'input.perform': [], 'menu.read': []
     }
     result = {}
     for op, names in fields.items():

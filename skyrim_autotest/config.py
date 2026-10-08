@@ -37,11 +37,20 @@ def configure(value, base=None):
     missing = sorted(k for k in REQUIRED if not value.get(k))
     if missing:
         raise ConfigurationError("Missing configuration fields: " + ", ".join(missing))
-    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings", "allow_steam_client_restart", "boundary_collection"}
+    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings", "allow_steam_client_restart", "boundary_collection", "fixture_actor_allowlist"}
     if unknown:
         raise ConfigurationError("Unknown configuration fields: " + ", ".join(sorted(unknown)))
     base = Path(base or Path.cwd()).resolve()
     result = dict(value)
+    if 'fixture_actor_allowlist' in result:
+        from .actor_scene import selector
+        allowed=result['fixture_actor_allowlist']
+        try:
+            if not isinstance(allowed,list) or len(allowed)>16:raise ValueError('At most16 explicit fixture actors required')
+            keys=[selector(v) for v in allowed]
+            if len(set(keys))!=len(keys):raise ValueError('Duplicate fixture actors')
+        except (ValueError,TypeError,AttributeError) as error:
+            raise ConfigurationError('Invalid fixture actor allowlist: '+str(error)) from error
     if 'boundary_collection' in result:
         from .boundary_collection import validate as validate_collection
         try:
