@@ -75,5 +75,35 @@ class BodySceneTests(unittest.TestCase):
         for change in ({'slot':0},{'avoidMouth':False},{'targetBasis':'requested coordinate'},{'offset':{'xyz':[0,0,0]}}):
             with self.assertRaises(ValueError):platform.validate({'operation':'controller.perform','request':dict(req,**change)})
 
+    def test_held_carry_uses_tp_workspace_and_actual_fp_hand_without_fp_arm_fallback(self):
+        from skyrim_autotest import hardware
+        class PoseBackend:
+            def __init__(self):
+                self.s=self;self.end=100;self.frames=[];self.raw=hardware.neutral()
+                self.raw['right']['controller']['pressed']=4
+            def frame(self):return copy.deepcopy(self.raw)
+            def publish(self,frame,duration):self.frames.append(copy.deepcopy(frame));return {}
+            def pause(self,n):pass
+            def call(self,*args):return {}
+            def recover_input_gate(self,*args):pass
+            def log(self,*args,**kw):pass
+        b=PoseBackend();current=[40,0,30]
+        def centres(backend,slots,extra):
+            self.assertEqual(extra,[('NPC R UpperArm [RUar]',False),('NPC R Forearm [RLar]',False),
+                                    ('NPC R Hand [RHnd]',False),('NPC R Hand [RHnd]',True)])
+            return {13:current},{
+                ('NPC R UpperArm [RUar]',False):{'translation':[0,0,60]},
+                ('NPC R Forearm [RLar]',False):{'translation':[0,0,40]},
+                ('NPC R Hand [RHnd]',False):{'translation':[0,0,20]},
+                ('NPC R Hand [RHnd]',True):{'translation':current},
+                (domain.HEAD,False):{'translation':[0,0,100]}}
+        req={'action':'pose_hand_at_body_slot','hand':'right','slot':13,'grip':'closed',
+             'offset':{'xyz':[0,0,0]},'durationSeconds':.25}
+        with patch('skyrim_autotest.vr_probe.ensure_owned_focus'),patch('skyrim_autotest.tracking_basis.calibrate',return_value=([[70,0,0],[0,70,0],[0,0,70]],current)),patch.object(domain,'centres',side_effect=centres):
+            self.assertTrue(domain.pose(b,req)['inputIssued'])
+        self.assertEqual(len(b.frames),1)
+        self.assertEqual(b.frames[0]['right']['controller']['pressed'],4)
+        self.assertEqual(b.frames[0]['hmd'],b.raw['hmd']);self.assertEqual(b.frames[0]['left'],b.raw['left'])
+
 
 if __name__=='__main__':unittest.main()

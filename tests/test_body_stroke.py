@@ -22,7 +22,7 @@ class StrokeTests(unittest.TestCase):
         b=Backend();start=hardware.neutral();start['left']['controller']['pressed']=4
         with patch.object(body_stroke.time,'monotonic',side_effect=lambda:b.clock):
             body_stroke.withdraw(b,req or self.request(),start,[[70,0,0],[0,70,0],[0,0,70]],
-                                 [0,0,30],[0,0,15],[0,0,0],head or [0,0,40])
+                                 [0,0,30],[0,0,15],[0,0,0],head or [0,0,40],[0,0,0])
         return b,start
 
     def test_incremental_stroke_keeps_other_hand_head_and_closed_grip(self):
@@ -48,6 +48,13 @@ class StrokeTests(unittest.TestCase):
 
     def test_no_time_for_whole_stroke_rejected(self):
         with self.assertRaisesRegex(TimeoutError,'Insufficient'):self.run_stroke(budget=1)
+
+    def test_withdrawal_workspace_uses_tp_hand_independent_of_fp_servo_hand(self):
+        # A distant physical hand cannot lengthen the actual body arm chain.
+        b=type('Backend',(),{'remaining':lambda self:10})()
+        with self.assertRaisesRegex(ValueError,'body reach envelope'):
+            body_stroke.withdraw(b,self.request(),hardware.neutral(),[[70,0,0],[0,70,0],[0,0,70]],
+                                 [0,0,30],[0,0,15],[0,0,-300],[0,0,40],[0,0,0])
 
     def test_public_contract_rejects_unsafe_or_ambiguous_requests(self):
         req=self.request();platform.validate({'operation':'controller.perform','request':req})
@@ -76,15 +83,16 @@ class StrokeTests(unittest.TestCase):
         def centres(backend,*args):
             self.assertEqual(backend.pose['right']['controller']['pressed'],0)
             point=backend.hand_xyz('right');nodes={
-                ('NPC R UpperArm [RUar]',True):{'translation':[point[0],point[1]+.3,point[2]]},
-                ('NPC R Forearm [RLar]',True):{'translation':[point[0],point[1]+.15,point[2]]},
+                ('NPC R UpperArm [RUar]',False):{'translation':[point[0],point[1]+.3,point[2]]},
+                ('NPC R Forearm [RLar]',False):{'translation':[point[0],point[1]+.15,point[2]]},
+                ('NPC R Hand [RHnd]',False):{'translation':point},
                 ('NPC R Hand [RHnd]',True):{'translation':point},
                 (body_scene.HEAD,False):{'translation':[point[0],point[1]+.5,point[2]]}}
             return {13:point},nodes
         def withdraw(*args):
             self.assertEqual(b.pose['right']['controller']['pressed'],0)
             b.events.append(('stroke',4));return {'inputIssued':True}
-        with patch('skyrim_autotest.vr_probe.ensure_owned_focus'),patch.object(body_scene,'centres',side_effect=centres),patch.object(body_stroke,'withdraw',side_effect=withdraw):
+        with patch('skyrim_autotest.vr_probe.ensure_owned_focus'),patch('skyrim_autotest.tracking_basis.calibrate',return_value=([[1,0,0],[0,1,0],[0,0,1]],b.hand_xyz('right'))),patch.object(body_scene,'centres',side_effect=centres),patch.object(body_stroke,'withdraw',side_effect=withdraw):
             self.assertTrue(body_scene.pose(b,req)['inputIssued'])
         stroke=next(i for i,x in enumerate(b.events) if x[0]=='stroke')
         self.assertTrue(any(x[0]=='read' for x in b.events[:stroke]))

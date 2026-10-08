@@ -1,5 +1,4 @@
 """Observed VRIK slot centres and bounded physical approaches; no subject routing."""
-import copy
 import math
 from .platform_math import world_bounds_center,world_translation,fixture_offset,solve3,body_reach_envelope
 
@@ -42,6 +41,7 @@ def transforms(b, nodes):
     if hasattr(b,'_body_scene_identity') and b._body_scene_identity!=key:
         raise ValueError('Body scene incarnation changed during action')
     b._body_scene_identity=key
+    b._body_scene_snapshot=raw
     b.guard_world();b.s.log('platform-body-scene',snapshot=raw,atomicWithSettings=False,
                           validationBasis='exact native incarnation/units and finite world origins; local-offset consumers separately require rigid rotation/scale')
     return result
@@ -98,33 +98,30 @@ def pose(b, req):
     from .vr_probe import ensure_owned_focus
     ensure_owned_focus(b.s,{},'platform-body-slot-owned-focus',deadline=b.end)
     menus=b.call('menu',{'action':'list','includeFlags':True});b.recover_input_gate(menus)
-    hand=req['hand'];frame=b.frame();baseline=b.hand_xyz(hand);columns=[]
+    hand=req['hand'];frame=b.frame()
     if req['action']=='grip_and_withdraw_from_body_slot':
         # Approach/calibrate with an empty open grip; the timed edge comes only
         # after all potentially slow geometry/readiness requests have ended.
         frame[hand]['controller'].update(pressed=0,touched=0,axes=[[0,0] for _ in range(5)])
-        b.publish(frame,10);b.pause(.1);baseline=b.hand_xyz(hand)
-    # Small physical probes preserve the existing grip and measure the current
-    # avatar/world scale rather than assuming70engine units per metre.
-    for index in (3,7,11):
-        probe=copy.deepcopy(frame);probe[hand]['matrix'][index]+=.025
-        b.publish(probe,10);b.pause(.15);measured=b.hand_xyz(hand)
-        columns.append([(v-a)/.025 for v,a in zip(measured,baseline)])
         b.publish(frame,10);b.pause(.1)
+    from .tracking_basis import calibrate
+    columns,baseline=calibrate(b,frame,hand)
     side='L' if hand=='left' else 'R'
     names=[f'NPC {side} UpperArm [{side}Uar]',f'NPC {side} Forearm [{side}Lar]',f'NPC {side} Hand [{side}Hnd]']
+    extra=[(name,False) for name in names]+[(names[-1],True)]
     origin=[frame[hand]['matrix'][i] for i in (3,7,11)]
     from .platform_math import feedback_increment,TargetProgress
     progress=TargetProgress()
     import time
     for _ in range(256):
-        points,nodes=centres(b,[req['slot']],[(name,True) for name in names])
-        shoulder,elbow,current=[nodes[(name,True)]['translation'] for name in names]
+        points,nodes=centres(b,[req['slot']],extra)
+        shoulder,elbow,arm_hand=[nodes[(name,False)]['translation'] for name in names]
+        current=nodes[(names[-1],True)]['translation']
         target=[points[req['slot']][i]+sum(columns[j][i]*req['offset']['xyz'][j] for j in range(3)) for i in range(3)]
         head=nodes[(HEAD,False)]['translation']
         mouth_distance=math.sqrt(sum(v*v for v in solve3(columns,[a-c for a,c in zip(target,head)])))
         if mouth_distance<.18:raise ValueError('Body-slot target approaches observed head/mouth exclusion')
-        envelope=body_reach_envelope(columns,shoulder,elbow,current,target)
+        envelope=body_reach_envelope(columns,shoulder,elbow,arm_hand,target)
         delta=solve3(columns,[a-c for a,c in zip(target,current)]);distance=math.sqrt(sum(v*v for v in delta))
         if distance<=.025:break
         now=time.monotonic()
@@ -150,15 +147,16 @@ def pose(b, req):
         from .body_stroke import withdraw
         # Re-observe after the input gate; a recovered menu may have moved the
         # avatar. Never start a closed-grip stroke using the earlier geometry.
-        points,nodes=centres(b,[req['slot']],[(name,True) for name in names])
-        shoulder,elbow,current=[nodes[(name,True)]['translation'] for name in names]
+        points,nodes=centres(b,[req['slot']],extra)
+        shoulder,elbow,arm_hand=[nodes[(name,False)]['translation'] for name in names]
+        current=nodes[(names[-1],True)]['translation']
         target=[points[req['slot']][i]+sum(columns[j][i]*req['offset']['xyz'][j] for j in range(3)) for i in range(3)]
         if math.sqrt(sum(v*v for v in solve3(columns,[a-c for a,c in zip(target,current)])))>.025:
             raise ValueError('Body-slot centre moved before withdrawal edge')
-        result=withdraw(b,req,frame,columns,shoulder,elbow,current,nodes[(HEAD,False)]['translation'])
+        result=withdraw(b,req,frame,columns,shoulder,elbow,current,nodes[(HEAD,False)]['translation'],arm_hand)
         # This is endpoint evidence only: no claim of an atomic path/contact or
         # native holster callback. Subject checks must inspect the actual item.
-        points,after=centres(b,[req['slot']],[(name,True) for name in names])
+        points,after=centres(b,[req['slot']],extra)
         b.s.log('platform-body-withdrawal-observed',slot=req['slot'],hand=hand,
                 handGameUnits=after[(names[-1],True)]['translation'],slotGameUnits=points[req['slot']],
                 publication=b.call('driver',{'action':'status'}),observedGameplaySuccess=None)

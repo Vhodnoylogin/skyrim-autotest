@@ -63,8 +63,17 @@ truncation, replacement and read failures remain errors. Restart projection reta
 the source snapshot metadata. Declared outputs/settings still require stable full
 bytes; a live-log policy never relaxes their consistency checks.
 
-Body-slot approaches correct the current observed target error using local
-calibration. They do not assume a rigid absolute controller-to-skeleton mapping:
+Body-slot approaches correct the current observed FP hand target error using a
+native wand tracking/world calibration, independently of hand IK or held-item
+physics. Three bounded0.025m probes preserve all controller inputs, the HMD and
+the other controller. Each native probe and return must be consumed before the
+next publication; exact Observer session/generation/player identity, unchanged
+rig devices and sampled HIGGS ownership are checked. Missing input, a changed
+held reference or a nonrigid/extreme metric stops without replay. Raw nonlinear
+FP hand feedback cannot supply world scale or arm lengths. The same snapshot's
+TP shoulder/elbow/hand defines the workspace; the actual FP hand supplies servo
+feedback. There is no fallback to a floating FP arm. These candidate changes
+require native qualification. They do not assume a rigid absolute controller-to-skeleton mapping:
 the avatar's response can change with pose and grip. Each update remains at most .01m; five seconds
 without at least .005m reduction of target distance stops with a logged feedback
 stall. Sideways motion alone cannot renew progress. A physical obstruction is
@@ -316,8 +325,9 @@ arm origins follow the controller and cannot anchor a body workspace. Missing
 third-person nodes stop; there is no fallback to the floating first-person arm.
 The reach repair retains the existing radius formula and needs separate native
 qualification, including a return from a high hand pose to a second floor item.
-This change is limited to reference reach; body-slot pose/withdrawal retains its
-previous separately qualified behavior. Native local model bounds are
+The body-slot carry/withdrawal candidate now applies the same TP workspace
+separation, with its own native wand metric qualification described above.
+Native local model bounds are
 transformed by observed row-major rotation/scale/translation, consistently for
 approach and final pregrip validation. Missing nodes, units, handles, generations
 or transforms stop before Grip; no fallback to guessed Euler angles or origin.
@@ -329,7 +339,8 @@ motion increment is at most0.01m; unchanged absolute deadline,256increment hard
 limit,5seconds without actual hand movement, native menus and exact HIGGS held
 reference checks remain. Body workspace and incremental motion are candidate
 observations until actual game qualification; input publication is never Grip
-consumption proof. Initial calibration still uses three0.05m tracking probes.
+consumption proof. Reference reach calibration still uses three0.05m tracking probes;
+the body-slot candidate uses the independently observed0.025m native wand probes.
 
 Low reference reach may physically lower the HMD in1cm vertical increments when
 the actual body workspace rejects a target below the shoulder. This requires

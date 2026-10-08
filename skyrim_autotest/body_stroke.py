@@ -5,11 +5,11 @@ import time
 from .platform_math import solve3, body_reach_envelope
 
 
-def withdraw(b, req, frame, columns, shoulder, elbow, current, head):
+def withdraw(b, req, frame, columns, shoulder, elbow, current, head, arm_hand):
     displacement=req['withdrawal']['xyz'];duration=req['motionSeconds'];hand=req['hand']
     delta=[sum(columns[j][i]*displacement[j] for j in range(3)) for i in range(3)]
     target=[a+c for a,c in zip(current,delta)]
-    envelope=body_reach_envelope(columns,shoulder,elbow,current,target)
+    envelope=body_reach_envelope(columns,shoulder,elbow,arm_hand,target)
     head_delta=solve3(columns,[h-c for h,c in zip(head,current)])
     length2=sum(v*v for v in displacement)
     closest=max(0.,min(1.,sum(a*c for a,c in zip(head_delta,displacement))/length2))
