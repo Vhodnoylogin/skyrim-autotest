@@ -108,6 +108,21 @@ def collect(session, segment=None):
     except (OSError, ValueError, KeyError, IndexError) as exception:
         error('SteamVR log metadata', exception)
     copy(P.mo2/'plugins/mo2aibridge/mo2aibridge.log', 'mo2aibridge.log', 'bridge-log')
+    if segment is None and 'boundaryCollection' in session.state:
+        from .boundary_collection import finalize
+        finalize(session)
+        copy(session.dir/'boundary-collection-plan.json', 'boundary-collection-plan.json', 'boundary-plan', required=True)
+        copy(session.dir/'boundary-collection.json', 'boundary-collection.json', 'boundary-accounting', required=True)
+        for record in session.state['boundaryCollection']['requests']:
+            entry = record.get('evidence')
+            if entry:
+                name = entry.get('name', '')
+                if name != 'boundary-' + record['id'] + '.json':
+                    error(name, 'Boundary evidence name mismatch')
+                    continue
+                artifact = copy(session.dir/name, name, 'boundary-response', required=True)
+                if artifact is not None and artifact['sha256'] != entry.get('sha256'):
+                    error(name, 'Boundary evidence digest mismatch')
     capture = P.overwrite/'SKSE/Plugins/devbench/captures'
     if capture.exists():
         for path in capture.rglob(session.state['id']+'-*.png'):

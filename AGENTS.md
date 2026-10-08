@@ -87,3 +87,9 @@ source/programs/SDKs belong outside Git; retain acquisition pins and build recip
 Run meaningful recovery and portability tests for ownership, configuration or
 packaging changes. Do not claim fresh portable live acceptance from historical
 support-tool runs; record the independently tested build and session.
+
+Supplementary diagnostics: see docs/boundary-collection.md. Only Polygon's
+separately qualified configuration can opt into boundary_collection. It records
+raw reads between exact adjacent settled checkpoints without changing mod orders
+or subject counts. Never insert it into a motion/race/first-frame interval or
+call response_recorded a passed subject gate. Keep all missed reads explicit.

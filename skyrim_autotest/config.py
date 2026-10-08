@@ -37,11 +37,17 @@ def configure(value, base=None):
     missing = sorted(k for k in REQUIRED if not value.get(k))
     if missing:
         raise ConfigurationError("Missing configuration fields: " + ", ".join(missing))
-    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings", "allow_steam_client_restart"}
+    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings", "allow_steam_client_restart", "boundary_collection"}
     if unknown:
         raise ConfigurationError("Unknown configuration fields: " + ", ".join(sorted(unknown)))
     base = Path(base or Path.cwd()).resolve()
     result = dict(value)
+    if 'boundary_collection' in result:
+        from .boundary_collection import validate as validate_collection
+        try:
+            validate_collection(result['boundary_collection'])
+        except (ValueError, TypeError, AttributeError, KeyError) as error:
+            raise ConfigurationError('Invalid boundary collection: ' + str(error)) from error
     if 'allow_steam_client_restart' in result and type(result['allow_steam_client_restart']) is not bool:
         raise ConfigurationError('allow_steam_client_restart must be boolean')
     if result.get('allow_steam_client_restart') and (not isinstance(result.get('steam_exe'), str) or not result['steam_exe'] or Path(result['steam_exe']).name.lower() != 'steam.exe'):

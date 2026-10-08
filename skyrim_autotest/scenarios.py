@@ -211,6 +211,9 @@ def execute(session, scenario):
         session.state['checks'].append({'name': name, 'result': 'passed' if step.get('assert') else 'observed', 'observation': result})
         session.save()
         (session.dir / f'step-{index:03d}.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
+        if section == 'steps':
+            from .boundary_collection import after_step
+            after_step(session, index, step)
 
 
 def resolve_args(value, state):

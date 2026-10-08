@@ -1237,9 +1237,14 @@ def guardian_command(directory):
 
 
 def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, driver_backend='file', input_backend=None):
-    scenario = read_json(scenario_file)
+    scenario_bytes = Path(scenario_file).read_bytes()
+    scenario = json.loads(scenario_bytes.decode('utf-8-sig'))
+    scenario_hash = hashlib.sha256(scenario_bytes).hexdigest()
     from .scenarios import validate
     validate(scenario)
+    from . import boundary_collection
+    if 'boundary_collection' in P.value:
+        boundary_collection.validate(P.value['boundary_collection'], scenario, scenario_hash)
     from .restart_budget import plan as restart_plan
     restart_budget = restart_plan(scenario)
     fixture = scenario.get('fixture')
@@ -1263,7 +1268,7 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
         state = {'id': run_id, 'runner': native.identity(os.getpid()), 'heartbeat': time.time(),
                  'deadline': time.time() + 180, 'snapshots': [], 'owned': [], 'launchIntents': {},
                  'preflight': info, 'checks': [], 'done': False, 'restored': False,
-                 'configuration': P.snapshot(), 'scenario': scenario, 'scenarioHash': sha(scenario_file)}
+                 'configuration': P.snapshot(), 'scenario': scenario, 'scenarioHash': scenario_hash}
         state['fault'] = fault
         state['ownedGameRestartBudget'] = restart_budget
         source = directory / 'executor-source'
@@ -1278,7 +1283,8 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
             state['order'] = order
         session = Session(directory, state)
         session.save()
-        shutil.copy2(scenario_file, directory / 'scenario.json')
+        (directory / 'scenario.json').write_bytes(scenario_bytes)
+        boundary_collection.initialize(session, P.value.get('boundary_collection'))
         subprocess.Popen(guardian_command(directory),
                          creationflags=subprocess.CREATE_NO_WINDOW, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         heartbeat = threading.Thread(target=session.heartbeat, daemon=True)

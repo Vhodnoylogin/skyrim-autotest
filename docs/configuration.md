@@ -1,5 +1,10 @@
 # Configuration contract (schemaVersion 1)
 
+The optional tool-owned `boundary_collection` plan records supplementary semantic
+reads at exact, reviewed settled main-scenario boundaries. It defaults to absent
+and needs its own live qualification. See [boundary collection](boundary-collection.md)
+for the strict pin/anchor schema, deadlines, raw evidence and availability limits.
+
 The executor records an identity-bound `heartbeat.json` separately from the
 main run state, including only health and locked process/input recovery data.
 The guardian validates that pulse against the exact run and runner identity;
