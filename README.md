@@ -6,7 +6,9 @@ independent recovery process. No project journal, AI client, shell toolkit, or
 Python third-party package is needed at runtime.
 
 For headset-assisted chat sessions, the optional [voice delivery companion](docs/assisted-voice.md)
-provides a private durable ASR inbox with explicit processing acknowledgments.
+provides whole-utterance audio capture and a buffered private ASR inbox with
+separate receipt, host delivery, first reply and completion records. Version0.2.0
+keeps the legacy inbox explicit; see [voice v2 setup and qualification](docs/voice-v2.md).
 The AI host must wake the operator chat; microphone health alone does not provide
 continuous responses. This companion does not change automatic game execution.
 
@@ -31,7 +33,7 @@ frontend is optional and is not a serial prerequisite for this executor.
 Requires Windows and Python 3.11+. For a wheel:
 
 ```powershell
-python -m pip install --no-deps ./skyrim_autotest-0.1.0-py3-none-any.whl
+python -m pip install --no-deps ./skyrim_autotest-0.2.0-py3-none-any.whl
 python -m skyrim_autotest init --directory C:/TestBench/config
 ```
 

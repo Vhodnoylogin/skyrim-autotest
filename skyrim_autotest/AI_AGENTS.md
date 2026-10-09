@@ -5,6 +5,15 @@ supported heartbeat plus skyrim_autotest.voice_inbox, an exact operator thread a
 a private cursor. Do not claim continuous accompaniment from listener health or
 queued speech. A pending delivery requires prior-response/action reconciliation;
 never repeat uncertain game mutations. Keep transcripts/receipts outside Git.
+For new sessions use docs/voice-v2.md: buffered admission/dispatch, actual first
+reply, then final completion. New input must not wait for an earlier ACK. The
+active host adapter requires an explicitly initialized/upgraded v2 inbox; never
+change an existing inbox's source queue or replay old requests. Whole-utterance
+voice_listener captures independently of ASR and stores raw audio externally.
+Only final complete speech supplies requests, still requiring intent review.
+Preserve the live singleton until the owner's explicit stop/replacement transition;
+offline replay does not qualify live latency or perfect recognition. Quick status
+and screenshot replies precede lengthy analysis while game mutations retain order.
 "Give me items" means inventory by default; world spawning requires explicit
 wording/scenario. Screenshot requests use assisted_capture with spoken countdown,
 exact manual-game identity and headset output, one capture and verified actual
@@ -12,6 +21,9 @@ file. No focus takeover, keyboard shortcut or automatic retry. Read the voice
 guide; file verification still requires viewing the actual picture.
 
 Optional companion commands (no executor --config needed):
+For buffered sessions use `voice_inbox ... admit --wait 2`, host `dispatch`, actual
+first-reply `reply`, and completion `ack`; see the v2 guide for exact arguments.
+The following `claim` example is retained for explicitly legacy v1 inboxes:
 `python -m skyrim_autotest.voice_inbox --inbox <EXTERNAL> --thread <UUID> claim --wait 30`
 returns immediately on new speech. After processing use the same module's `ack`
 with --id, --sha256 and --response-ref. For one owner-requested screenshot:

@@ -88,6 +88,12 @@ Run meaningful recovery and portability tests for ownership, configuration or
 packaging changes. Do not claim fresh portable live acceptance from historical
 support-tool runs; record the independently tested build and session.
 
+Headset-assisted voice sessions use docs/voice-v2.md. Preserve ongoing live
+listener ownership; new version preparation does not stop/restart it. Buffered
+receipt/dispatch, first actual text reply and completion are distinct. Never
+execute provisional or interrupted audio, resend uncertain deliveries, or call
+an offline replay a qualified live voice session. Keep audio/models outside Git.
+
 Supplementary diagnostics: see docs/boundary-collection.md. Only Polygon's
 separately qualified configuration can opt into boundary_collection. It records
 raw reads between exact adjacent settled checkpoints without changing mod orders

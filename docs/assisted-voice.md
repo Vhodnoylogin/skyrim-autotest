@@ -1,22 +1,28 @@
 # Assisted chat voice delivery
 
-The external ASR listener and model remain separately acquired dependencies.
+The external ASR backend and model remain separately acquired dependencies.
 Do not bundle executables, models, recordings or transcripts in this repository.
 An alive listener and a transcript do not prove the chat answered. The original
 `voice-next.py` is pull-only: an idle AI chat must be woken by its host.
+
+Version0.2.0 supplies a whole-utterance capture companion and buffered delivery.
+Use [voice v2](voice-v2.md) for new setup, acquisition, migration and qualification.
+The existing running listener/inbox is never replaced or upgraded automatically.
 
 `skyrim_autotest.voice_inbox` is an optional stdlib-only companion. It never
 touches the game, MO2, VR driver, listener process or shared voice cursor.
 Use the existing listener; do not start a second one or force ownership.
 
 For the current real-time session, an explicitly authorized **active chat bridge**
-can keep a turn open and run `claim --wait 30` repeatedly. It returns immediately
-on speech (poll interval 250 ms), then the active agent uses its supported host
+can keep a turn open and run v2 `admit --wait 2` repeatedly. It returns immediately
+on speech (poll interval250ms), then the active agent uses its supported host
 message tool to deliver that claim to the exact operator thread. Send only the
 claim reference/hash; speech stays in the external inbox. Persist successful
-host message receipts by claim ID before considering another delivery. Pending
-delivery is not a request to send again. The operator processes/answers and
-acknowledges the same claim. Measure actual latency; model scheduling and ASR
+host message receipts by claim ID. Dispatch reservation precedes sending;
+uncertain delivery is not a request to send again. New speech is admitted while
+earlier requests await completion. The operator records its first actual reply,
+then processes/answers and acknowledges completion of the same claim. Measure
+actual latency; model scheduling and ASR
 still add time. This bridge only works **while its agent turn is active**. Ending
 that turn, application exit, context errors or sleeping the machine suspends
 real-time delivery. Keep microphone and unacknowledged records intact. Do not
@@ -38,6 +44,9 @@ API client may use the documented turn/start or turn/steer protocol only with an
 explicit supported endpoint and its own verified ownership/configuration.
 
 Initialize an external private inbox with an explicitly reviewed baseline:
+
+The following commands describe the retained **legacy serialized v1 inbox**.
+The published active adapter now requires v2; use voice-v2.md for its commands.
 
 ```text
 python -m skyrim_autotest.voice_inbox --inbox C:/TestBench/voice/polygon --thread <UUID> init --heard C:/TestBench/voice/heard.jsonl --after <SEQ>

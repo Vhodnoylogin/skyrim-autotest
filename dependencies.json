@@ -97,6 +97,14 @@
   },
   "optional": [
     {
+      "id": "assisted-voice-asr",
+      "source": "https://github.com/ggml-org/whisper.cpp/tree/b5130",
+      "requiredComponent": "external Windows whisper-cli with JSON output",
+      "modelRecipe": "https://github.com/Vhodnoylogin/speechbroker/tree/main/model-whisper-ru/weights",
+      "configuration": "External asr.json containing absolute cli/model paths and language",
+      "note": "Reuse the existing Speech Broker model store; record actual binary/model hashes in external deployment evidence. No executables, model weights, transcripts or recordings bundled."
+    },
+    {
       "id": "world-observer",
       "source": "https://github.com/Vhodnoylogin/skyrim-world-observer",
       "rebuild": "Follow its tools/build.py and hash-pinned dependencies.json, output externally, stage own DLL via staged_plugins."

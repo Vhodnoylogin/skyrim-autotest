@@ -9,7 +9,7 @@ from pathlib import Path
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.1.0'
+VERSION = '0.2.0'
 INFO = 'skyrim_autotest-' + VERSION + '.dist-info'
 
 def package_files():
@@ -34,7 +34,7 @@ def main():
     entries = {str(p.relative_to(ROOT)).replace('\\','/'): p.read_bytes() for p in package_files()}
     for name in ('README.md', 'AGENTS.md', 'CLAUDE.md', 'LICENSE', 'dependencies.json', 'run.py', 'skyrim-autotest.cmd', 'pyproject.toml'):
         entries[name] = (ROOT / name).read_bytes()
-    for folder in ('docs','tests','tools','native'):
+    for folder in ('docs','tests','tools','native','integrations'):
         for p in (ROOT/folder).rglob('*'):
             if p.is_file() and '__pycache__' not in p.parts:
                 entries[str(p.relative_to(ROOT)).replace('\\','/')] = p.read_bytes()
@@ -47,6 +47,8 @@ def main():
     wheel_entries[INFO+'/licenses/LICENSE'] = (ROOT/'LICENSE').read_bytes()
     for p in (ROOT/'docs').glob('*.md'):
         wheel_entries['skyrim_autotest/docs/' + p.name] = p.read_bytes()
+    for p in (ROOT/'integrations').glob('*.js'):
+        wheel_entries['skyrim_autotest/integrations/' + p.name] = p.read_bytes()
     wheel_entries['skyrim_autotest/dependencies.json'] = (ROOT/'dependencies.json').read_bytes()
     record = io.StringIO(newline='')
     writer = csv.writer(record)

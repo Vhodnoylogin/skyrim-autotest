@@ -50,6 +50,10 @@ def main():
         if hashlib.sha256((portable/relative).read_bytes()).hexdigest()!=manifest['sourceFiles'][relative]:
             raise RuntimeError('Native integration input missing or changed: '+relative)
     checks.append('portable-owned-native-integration-inputs')
+    adapter = 'integrations/codex-voice-bridge.js'
+    if hashlib.sha256((portable/adapter).read_bytes()).hexdigest() != manifest['sourceFiles'][adapter]:
+        raise RuntimeError('Portable voice host adapter missing or changed')
+    checks.append('portable-buffered-voice-host-adapter')
     verify('portable-native-recipe-unrelated-cwd',[sys.executable,str(portable/'tools/apply_devbench_fixture_provider.py'),'--help'])
     verify('portable-version-unrelated-cwd',[sys.executable,str(portable/'run.py'),'--version'])
     verify('portable-agent-guide',[sys.executable,str(portable/'run.py'),'guide'])
@@ -74,6 +78,11 @@ def main():
     verify('wheel-isolated-init',[sys.executable,'-I','-c',bootstrap,str(installed),'init','--directory',str(work/'wheelconfig')])
     verify('wheel-isolated-config',[sys.executable,'-I','-c',bootstrap,str(installed),'--config',str(config),'config-check'])
     verify('wheel-isolated-status',[sys.executable,'-I','-c',bootstrap,str(installed),'--config',str(config),'status'])
+    if hashlib.sha256((installed/'skyrim_autotest'/adapter).read_bytes()).hexdigest() != manifest['sourceFiles'][adapter]:
+        raise RuntimeError('Wheel voice host adapter missing or changed')
+    for module in ('voice_listener', 'voice_inbox'):
+        companion='import sys;sys.path.insert(0,sys.argv[1]);from skyrim_autotest.'+module+' import main;raise SystemExit(main(["--help"]))'
+        verify('wheel-isolated-'+module,[sys.executable,'-I','-c',companion,str(installed)])
     # Execute tests from the freshly extracted source, never the checkout.
     test='import sys,unittest;sys.path.insert(0,sys.argv[1]);suite=unittest.defaultTestLoader.discover(sys.argv[1]+"/tests");r=unittest.TextTestRunner(verbosity=1).run(suite);raise SystemExit(not r.wasSuccessful())'
     verify('fresh-portable-regression-suite',[sys.executable,'-I','-c',test,str(portable)])
