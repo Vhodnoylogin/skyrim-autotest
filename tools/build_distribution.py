@@ -9,7 +9,7 @@ from pathlib import Path
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.2.0'
+VERSION = '0.2.1'
 INFO = 'skyrim_autotest-' + VERSION + '.dist-info'
 
 def package_files():

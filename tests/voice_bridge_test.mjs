@@ -16,6 +16,10 @@ async function trial(mode) {
     exec_command: async ({cmd}) => {
       log.push(cmd);
       if (cmd.includes(' admit ')) {
+        if (mode === 'alwaysbusy' || mode === 'busy' && log.length === 1) {
+          return {exit_code: 3, output: JSON.stringify({status: 'busy', retryable: true,
+            phase: 'before_inbox_access'})};
+        }
         if (next <= 2) {
           const id = String(next++).repeat(32);
           return result({status: 'received', id, recordsSha256: 'a'.repeat(64),
@@ -25,6 +29,8 @@ async function trial(mode) {
       }
       if (cmd.includes('--receipt-ref')) return result({status: 'delivered'});
       if (cmd.includes(' dispatch ')) {
+        if (mode === 'writepermission') return {exit_code: 2,
+          output: JSON.stringify({status: 'blocked', error: 'Permission denied after inbox access'})};
         const id = /--id '([^']+)'/.exec(cmd)[1];
         assert(!pending.has(id), 'must not reserve a dispatch twice');
         pending.add(id);
@@ -54,4 +60,12 @@ for (const mode of ['throw', 'rejected', 'writefail']) {
   assert.equal(result.sent, 1, 'uncertain/failed host operation must stop without a retry');
   assert(!result.log.some(command => command.includes('--receipt-ref')));
 }
-console.log('4 voice bridge host cases passed');
+result = await trial('busy');
+assert.equal(result.sent, 2, 'known pre-access contention must settle without duplicate sends');
+result = await trial('alwaysbusy');
+assert.equal(result.sent, 0);
+assert.equal(result.log.filter(cmd => cmd.includes(' admit ')).length, 4, 'busy retry must be bounded');
+result = await trial('writepermission');
+assert.equal(result.sent, 0);
+assert.equal(result.log.filter(cmd => cmd.includes(' dispatch ')).length, 1, 'unknown mutation failure must never retry');
+console.log('7 voice bridge host cases passed');

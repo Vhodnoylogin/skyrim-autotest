@@ -1,5 +1,14 @@
 # Assisted voice v2 (executor0.2.0)
 
+Patch0.2.1 fixes live Windows reader/ACK contention: initialization checks lock
+file size without reading the locked byte. CLI operations wait up to250ms for
+the consumer lock, then return `busy`, retryable, `before_inbox_access` (exit3).
+The host adapter retries only that known pre-access result up to four calls.
+Post-access write failures and uncertain host sends remain terminal/reconciled;
+neither is retried as busy. This changes no queue schema or action acknowledgment.
+The patch was prepared after the owner's manual game closed; the healthy live
+listener was not restarted. Source concurrency tests do not replace live acceptance.
+
 This external companion fixes two independently observed mechanisms: the old
 private inbox withheld new dispatch until prior processing finished, and the
 old stream wrapper discarded audio timing while trimming overlapping text.

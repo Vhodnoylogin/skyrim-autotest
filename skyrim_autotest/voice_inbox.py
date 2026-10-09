@@ -6,8 +6,10 @@ is delivery evidence, not proof of a reply or permission to repeat an action.
 """
 import argparse
 from contextlib import contextmanager
+import errno
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import time
@@ -31,21 +33,40 @@ def atomic(path, value):
         temporary.unlink(missing_ok=True)
 
 
+class InboxBusy(OSError):
+    """Known contention before reading or mutating any inbox state."""
+
+
 @contextmanager
-def locked(folder):
+def locked(folder, wait=0):
+    if not math.isfinite(wait) or not 0 <= wait <= 2:
+        raise ValueError('Inbox lock wait must be finite and between0 and2seconds')
     folder.mkdir(parents=True, exist_ok=True)
     with (folder / "consumer.lock").open("a+b") as stream:
-        stream.seek(0)
-        if not stream.read(1):
+        # Windows denies reading a byte another process locked. File size does
+        # not read that byte and lets us classify actual lock acquisition busy.
+        if stream.seek(0, os.SEEK_END) == 0:
             stream.write(b"0")
             stream.flush()
         stream.seek(0)
         if os.name == "nt":
             import msvcrt
-            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
         else:
             import fcntl
-            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                if os.name == 'nt':
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as error:
+                if error.errno not in (errno.EACCES, errno.EAGAIN):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise InboxBusy('Consumer lock busy before inbox access') from error
+                time.sleep(min(.01, max(0, deadline - time.monotonic())))
         try:
             yield
         finally:
@@ -76,10 +97,11 @@ def records(path):
 
 
 class Inbox:
-    def __init__(self, folder, thread):
+    def __init__(self, folder, thread, lock_wait=0):
         self.folder = Path(folder).resolve()
         self.thread = str(uuid.UUID(thread))
         self.path = self.folder / "state.json"
+        self.lock_wait = lock_wait
 
     def state(self):
         state = json.loads(self.path.read_text(encoding="utf-8"))
@@ -91,7 +113,7 @@ class Inbox:
         if after < 0:
             raise ValueError("Baseline cannot be negative")
         heard = Path(heard).resolve()
-        with locked(self.folder):
+        with locked(self.folder, self.lock_wait):
             if self.path.exists():
                 state = self.state()
                 if state["heard"] != str(heard):
@@ -114,7 +136,7 @@ class Inbox:
 
     def upgrade(self):
         """Explicit opt-in after reconciling the old pending claim; no cursor reset."""
-        with locked(self.folder):
+        with locked(self.folder, self.lock_wait):
             state = self.state()
             if state['schemaVersion'] == 2:
                 return {'status': 'already_upgraded'}
@@ -151,7 +173,7 @@ class Inbox:
 
     def admit(self):
         """Receive new records even while earlier requests await processing."""
-        with locked(self.folder):
+        with locked(self.folder, self.lock_wait):
             state = self.state()
             self._buffered(state)
             rows = self._verified_rows(state)
@@ -177,7 +199,7 @@ class Inbox:
 
     def dispatch(self, claim_id, records_hash, receipt_ref=None):
         """Persist intent before host send. Uncertain sends are never retried."""
-        with locked(self.folder):
+        with locked(self.folder, self.lock_wait):
             state = self.state()
             self._buffered(state)
             self._verified_rows(state)
@@ -203,7 +225,7 @@ class Inbox:
             return {'status': item['phase'], 'id': claim_id}
 
     def status(self):
-        with locked(self.folder):
+        with locked(self.folder, self.lock_wait):
             state = self.state()
             self._verified_rows(state)
             return state
@@ -212,7 +234,7 @@ class Inbox:
         """First actual text-reply reference, separately from command completion."""
         if not response_ref.strip():
             raise ValueError('Actual first reply reference required')
-        with locked(self.folder):
+        with locked(self.folder, self.lock_wait):
             state = self.state()
             self._buffered(state)
             self._verified_rows(state)
@@ -229,7 +251,7 @@ class Inbox:
             return {'status': 'replied', 'id': claim_id}
 
     def claim(self):
-        with locked(self.folder):
+        with locked(self.folder, self.lock_wait):
             state = self.state()
             if state.get('schemaVersion') == 2:
                 raise ValueError('Buffered inbox uses admit, not serialized claim')
@@ -261,7 +283,7 @@ class Inbox:
     def ack(self, claim_id, records_hash, response_ref):
         if not response_ref.strip():
             raise ValueError("Processing/reply reference required")
-        with locked(self.folder):
+        with locked(self.folder, self.lock_wait):
             state = self.state()
             previous = next((r for r in state["acks"] if r["id"] == claim_id), None)
             if previous:
@@ -332,7 +354,7 @@ def main(argv=None):
     reply.add_argument('--response-ref', required=True)
     args = parser.parse_args(argv)
     try:
-        box = Inbox(args.inbox, args.thread)
+        box = Inbox(args.inbox, args.thread, lock_wait=.25)
         if args.command == "init":
             result = box.init(args.heard, args.after, args.buffered)
         elif args.command in ("claim", 'admit'):
@@ -356,6 +378,10 @@ def main(argv=None):
             result = box.ack(args.id, args.sha256, args.response_ref)
         print(json.dumps(result, ensure_ascii=False))
         return 0
+    except InboxBusy as error:
+        print(json.dumps({'status': 'busy', 'error': str(error),
+                          'retryable': True, 'phase': 'before_inbox_access'}))
+        return 3
     except (OSError, ValueError, KeyError) as error:
         print(json.dumps({"status": "blocked", "error": str(error)}, ensure_ascii=False))
         return 2

@@ -11,6 +11,7 @@ if (!/^[a-f0-9-]{36}$/.test(c.threadId) || !Number.isFinite(c.durationSeconds)
 const quote = value => "'" + String(value).replaceAll("'", "''") + "'";
 const started = Date.now();
 const inboxCommand = async command => {
+  for (let attempt = 0; attempt < 4; attempt++) {
   let result = await tools.exec_command({
     cmd: `python -X utf8 -m skyrim_autotest.voice_inbox --inbox ${quote(c.inbox)} --thread ${quote(c.threadId)} ${command}`,
     workdir: c.repository, yield_time_ms: 1000, max_output_tokens: 12000
@@ -20,10 +21,19 @@ const inboxCommand = async command => {
       chars: '', yield_time_ms: 1000, max_output_tokens: 12000});
   }
   const value = JSON.parse(result.output.trim().split(/\r?\n/).at(-1));
+  if (value.status === 'busy' && value.retryable === true
+      && value.phase === 'before_inbox_access') {
+    if (attempt === 3 || Date.now() - started >= c.durationSeconds * 1000) {
+      throw Error('Consumer lock remained busy before inbox access; reconcile later');
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+    continue;
+  }
   if (result.exit_code !== 0 || value.status === 'blocked') {
     throw Error(value.error || 'Inbox command failed');
   }
   return value;
+  }
 };
 let delivered = 0;
 while (Date.now() - started < c.durationSeconds * 1000) {

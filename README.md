@@ -33,7 +33,7 @@ frontend is optional and is not a serial prerequisite for this executor.
 Requires Windows and Python 3.11+. For a wheel:
 
 ```powershell
-python -m pip install --no-deps ./skyrim_autotest-0.2.0-py3-none-any.whl
+python -m pip install --no-deps ./skyrim_autotest-0.2.1-py3-none-any.whl
 python -m skyrim_autotest init --directory C:/TestBench/config
 ```
 

@@ -1,10 +1,15 @@
 import json
+import contextlib
+import io
 from pathlib import Path
 import tempfile
+import threading
+import time
 import unittest
 import uuid
+from unittest.mock import patch
 
-from skyrim_autotest.voice_inbox import Inbox
+from skyrim_autotest.voice_inbox import Inbox, InboxBusy, locked, main
 
 
 class BufferedVoiceTests(unittest.TestCase):
@@ -116,3 +121,49 @@ class BufferedVoiceTests(unittest.TestCase):
         self.heard.write_text('')
         self.append(1, final=True, audioComplete=True, executable=True)
         self.assertEqual(self.box.admit()['status'], 'received')
+
+    def test_busy_lock_is_before_state_access_and_does_not_change_cursor(self):
+        self.append(1)
+        before = self.box.path.read_bytes()
+        with locked(self.box.folder):
+            with self.assertRaises(InboxBusy):
+                self.box.admit()
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = main(['--inbox', str(self.box.folder), '--thread', self.box.thread, 'admit'])
+        result = json.loads(output.getvalue())
+        self.assertEqual(code, 3)
+        self.assertEqual(result['status'], 'busy')
+        self.assertTrue(result['retryable'])
+        self.assertEqual(result['phase'], 'before_inbox_access')
+        self.assertEqual(self.box.path.read_bytes(), before)
+        self.assertEqual(self.box.admit()['firstSeq'], 1)
+
+    def test_short_ack_lock_can_settle_without_restarting_admission(self):
+        self.append(1)
+        held = threading.Event()
+        def hold_briefly():
+            with locked(self.box.folder):
+                held.set()
+                time.sleep(.1)
+        thread = threading.Thread(target=hold_briefly)
+        thread.start()
+        self.addCleanup(thread.join)
+        self.assertTrue(held.wait(1))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = main(['--inbox', str(self.box.folder), '--thread', self.box.thread, 'admit'])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue())['firstSeq'], 1)
+
+    def test_permission_failure_after_lock_is_terminal_not_retryable_busy(self):
+        self.append(1)
+        output = io.StringIO()
+        with patch('skyrim_autotest.voice_inbox.atomic', side_effect=PermissionError('write denied')):
+            with contextlib.redirect_stdout(output):
+                code = main(['--inbox', str(self.box.folder), '--thread', self.box.thread, 'admit'])
+        self.assertEqual(code, 2)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result['status'], 'blocked')
+        self.assertNotIn('retryable', result)
+        self.assertEqual(self.box.status()['admittedCursor'], 0)
