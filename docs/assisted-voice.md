@@ -102,3 +102,33 @@ game may fail even though foreground is not a prerequisite. Do not steal focus
 to conceal that limitation. Live background-frame qualification is pending;
 unit tests only verify countdown/capture/file guards. If no game is running,
 report capture unavailable rather than launch one.
+
+## Microphone input diagnosis
+
+The shared WinMM companion measures actual input without restarting the existing
+ASR singleton, changing system defaults/mute/gain, or silently choosing another
+microphone:
+
+```text
+python -m skyrim_autotest.microphone_probe
+python -m skyrim_autotest.microphone_probe --device "Steam Streaming" --seconds 6 --output C:/TestBench/voice/levels.json
+```
+
+Use a unique enumerated name fragment (WinMM names are truncated), with a bounded
+1..30-second sample. No raw audio is saved by default. For explicit offline ASR
+diagnosis, add `--wav <NEW-EXTERNAL-WAV>`; existing recordings never overwrite.
+Outputs include received bytes, measured peak/RMS/dBFS and per-second buckets.
+Enumeration and capture/level checks need no spoken phrase. Recognition can use
+any fresh owner speech recorded during the sample; a prescribed phrase is only
+an optional aid for identifying and comparing transcripts. A prerecorded test
+file exercises the recognizer, not the live headset microphone or chat delivery.
+Silence/noise/game sound is not recognition of human speech. Near-silent input
+while the owner actually speaks suggests upstream routing/mute/transport trouble;
+a quiet sample while they do not speak establishes no microphone defect.
+
+Report the exact current listener/device, capture quality and actual accepted
+owner transcript separately. The headset/streaming application's permission,
+mute and microphone slider may require the owner's in-headset inspection. Do not
+reinstall drivers, restart their game/headset, increase gain blindly or mask this
+with a desktop microphone. A speech input path needs a fresh real owner utterance;
+then qualify delivery/response latency independently.

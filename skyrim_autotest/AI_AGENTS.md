@@ -19,6 +19,12 @@ with --id, --sha256 and --response-ref. For one owner-requested screenshot:
 The identity file contains the existing game's {pid,birth,path}. A missing game
 is capture unavailable; neither companion starts it. Detailed voice docs and
 the Codex host adapter live in the source repository.
+For missing speech despite ASR health, use `python -m skyrim_autotest.microphone_probe`
+to enumerate shared Windows inputs, then --device <UNIQUE-FRAGMENT> --seconds 6
+--output <EXTERNAL-JSON>. It saves no audio unless --wav is explicitly supplied.
+Measured signal is not human-speech qualification; coordinate actual owner speech
+with the sample, inspect headset/streaming mute/permissions, and never silently
+switch to a desktop microphone or restart the manual game.
 
 Use this tool for autonomous, bounded Skyrim VR tests after the owner has
 requested/authorized testing. Existing authorization persists; do not ask again
