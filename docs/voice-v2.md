@@ -1,5 +1,9 @@
 # Assisted voice v2 (executor0.2.0)
 
+For current Polygon sessions use [voice_operator ensure/poll](voice-operator.md)
+introduced in0.2.2. The cross-chat host bridge below is retained history, not the
+current runtime path. Old pending deliveries/cursors stay unchanged.
+
 Patch0.2.1 fixes live Windows reader/ACK contention: initialization checks lock
 file size without reading the locked byte. CLI operations wait up to250ms for
 the consumer lock, then return `busy`, retryable, `before_inbox_access` (exit3).

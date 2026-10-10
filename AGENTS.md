@@ -94,6 +94,12 @@ receipt/dispatch, first actual text reply and completion are distinct. Never
 execute provisional or interrupted audio, resend uncertain deliveries, or call
 an offline replay a qualified live voice session. Keep audio/models outside Git.
 
+For Polygon-owned runtime use docs/voice-operator.md and voice_operator ensure/poll.
+The development chat is not a runtime intermediary. Never message another chat
+per utterance or use the historical cross-chat adapter for this owner's sessions.
+Consume final speech directly in the operator turn; unchanged pending/quiet
+records require no status chatter and never authorize action replay.
+
 Supplementary diagnostics: see docs/boundary-collection.md. Only Polygon's
 separately qualified configuration can opt into boundary_collection. It records
 raw reads between exact adjacent settled checkpoints without changing mod orders

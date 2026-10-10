@@ -1,5 +1,9 @@
 # Assisted chat voice delivery
 
+Current Polygon runtime uses [operator-owned setup/direct polling](voice-operator.md).
+The cross-chat bridge described below is historical and must not be used for
+this owner's manual sessions. No development-chat relay or per-utterance app message.
+
 The external ASR backend and model remain separately acquired dependencies.
 Do not bundle executables, models, recordings or transcripts in this repository.
 An alive listener and a transcript do not prove the chat answered. The original

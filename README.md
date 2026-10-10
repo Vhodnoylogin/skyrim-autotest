@@ -12,6 +12,12 @@ keeps the legacy inbox explicit; see [voice v2 setup and qualification](docs/voi
 The AI host must wake the operator chat; microphone health alone does not provide
 continuous responses. This companion does not change automatic game execution.
 
+Version0.2.2 provides [operator-owned voice setup and polling](docs/voice-operator.md):
+Polygon uses the channel directly without an intermediary chat or per-phrase app
+messages. Healthy existing listeners/cursors are preserved; new listener controls
+open a bounded dialog after the owner's typed game-start statement. Fresh live
+qualification of this new setup remains pending.
+
 The independently extracted build passed a complete physical-input/world/physics
 scenario and restoration verification on 2026-10-04. See [validation](docs/validation.md)
 for the exact build, measured scope, retained failures and prototype limits.
@@ -33,7 +39,7 @@ frontend is optional and is not a serial prerequisite for this executor.
 Requires Windows and Python 3.11+. For a wheel:
 
 ```powershell
-python -m pip install --no-deps ./skyrim_autotest-0.2.1-py3-none-any.whl
+python -m pip install --no-deps ./skyrim_autotest-0.2.2-py3-none-any.whl
 python -m skyrim_autotest init --directory C:/TestBench/config
 ```
 

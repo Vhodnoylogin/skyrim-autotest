@@ -1,4 +1,6 @@
 // Codex functions.exec host adapter, NOT a Node/browser background service.
+// Historical cross-chat transport. The owner now requires Polygon-owned direct
+// voice_operator ensure/poll; do NOT run this adapter for their manual sessions.
 // Before running, the human must have authorized delivering their voice to the
 // exact operator thread. The caller defines VOICE_BRIDGE_CONFIG with absolute
 // repository/inbox paths, threadId and a bounded durationSeconds (<=300).

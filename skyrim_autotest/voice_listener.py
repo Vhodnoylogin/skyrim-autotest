@@ -4,6 +4,7 @@ import datetime
 import hashlib
 import http.server
 import json
+import math
 import os
 from pathlib import Path
 import queue
@@ -12,6 +13,7 @@ import subprocess
 import threading
 import time
 import urllib.parse
+import uuid
 
 from .voice_audio import Utterances, capture, wav_blocks
 from .voice_inbox import atomic, locked, records
@@ -27,7 +29,7 @@ def external(path):
 
 class Session:
     def __init__(self, folder, config, wake='полигон', window=1800, conversation=14400,
-                 timeout=180, threads=4, maximum_pending=32):
+                 timeout=180, threads=4, maximum_pending=32, operator_thread=None):
         if not 1 <= timeout <= 600 or not 1 <= threads <= 32 or not 1 <= maximum_pending <= 256:
             raise ValueError('Invalid ASR timeout, threads or pending limit')
         if not 1 <= window <= conversation <= 86400:
@@ -36,6 +38,12 @@ class Session:
         self.folder.mkdir(parents=True, exist_ok=False)
         self.config, self.wake = config, wake.casefold()
         self.window, self.conversation = window, conversation
+        self.operator_thread = str(uuid.UUID(operator_thread)) if operator_thread else None
+        self.control_id = None
+        self.control_fingerprint = None
+        self.gate_mutex = threading.Lock()
+        self.control_deadline = None
+        self.control_started_at = 0
         self.timeout, self.threads = timeout, threads
         self.heard = self.folder / 'heard.jsonl'
         self.heard.touch()
@@ -49,7 +57,48 @@ class Session:
         self.worker.start()
         self.health = {'ok': True, 'pid': os.getpid(), 'protocol': 'whole-utterance-v2',
                        'liveQualified': False, 'heard': str(self.heard)}
+        self.health.update(operatorThread=self.operator_thread, wake=self.wake)
         self.update_health()
+
+    def apply_control(self):
+        """Owner chat may open/close a bounded dialog without stopping capture."""
+        path = self.folder / 'conversation-request.json'
+        if not self.operator_thread or not path.exists():
+            return
+        raw = path.read_bytes()
+        fingerprint = hashlib.sha256(raw).hexdigest()
+        if fingerprint == self.control_fingerprint:
+            return
+        self.control_fingerprint = fingerprint
+        try:
+            request = json.loads(raw)
+        except (ValueError, UnicodeError):
+            request = None
+        if not isinstance(request, dict):
+            self.event({'event': 'conversation.rejected', 'reason': 'Malformed control', 'executable': False})
+            return
+        if request.get('id') == self.control_id and self.control_id is not None:
+            return
+        if (request.get('threadId') != self.operator_thread
+                or not isinstance(request.get('ownerRef'), str) or not request['ownerRef'].strip()
+                or not isinstance(request.get('id'), str)
+                or type(request.get('at')) not in (int, float) or not math.isfinite(request['at'])
+                or not 0 <= time.time() - request.get('at', 0) <= 10
+                or type(request.get('seconds')) is not int or not 0 <= request['seconds'] <= 14400
+                or set(request) != {'id', 'threadId', 'ownerRef', 'at', 'seconds'}):
+            # Invalid controls must not kill the independent microphone.
+            self.event({'event': 'conversation.rejected', 'id': request.get('id'),
+                        'reason': 'Invalid, stale or foreign control', 'executable': False})
+            return
+        with self.gate_mutex:
+            now = time.monotonic()
+            self.woke = now
+            self.until = now + request['seconds']
+            self.control_deadline = self.until
+            self.control_started_at = time.time()
+            self.control_id = request['id']
+        self.event({'event': 'conversation.control', **request, 'executable': False})
+        self.health.update(conversationControlId=self.control_id)
 
     def update_health(self, **fields):
         self.health.update(fields, error=self.error, pending=self.pending.qsize(),
@@ -112,10 +161,18 @@ class Session:
             raise ValueError('Whisper JSON lacks transcription segments')
         text = ' '.join(s['text'].strip() for s in segments).strip()
         now = time.monotonic()
-        if self.wake and self.wake in text.casefold():
-            self.woke, self.until = now, now + self.window
-        accepted = (bool(text) and not re.fullmatch(r'[\s\[(].*[\])\s]', text)
-                    and (not self.wake or now < self.until and now - self.woke < self.conversation))
+        with self.gate_mutex:
+            fresh = audio.get('captureStartedAt', 0) >= self.control_started_at
+            if self.wake and self.wake in text.casefold() and fresh:
+                self.woke, self.until = now, now + self.window
+                if self.control_deadline is not None and now >= self.control_deadline:
+                    self.control_deadline = None
+            controlled = self.control_deadline is not None and now < self.control_deadline
+            accepted = (bool(text) and not re.fullmatch(r'[\s\[(].*[\])\s]', text)
+                        and fresh and (not self.wake or controlled
+                            or now < self.until and now - self.woke < self.conversation))
+            if accepted and not controlled:
+                self.until = now + self.window
         ended = time.time()
         final = {**audio, 'event': 'speech.final', 'revision': 2, 'text': text,
                  'segments': segments, 'asrStartedAt': started, 'asrEndedAt': ended,
@@ -132,7 +189,6 @@ class Session:
                 stream.write(json.dumps(row, ensure_ascii=False) + '\n')
                 stream.flush()
                 os.fsync(stream.fileno())
-            self.until = now + self.window
 
     def close(self):
         self.pending.join()
@@ -184,6 +240,7 @@ def main(argv=None):
     source.add_argument('--device', help='Explicit unique WinMM input name fragment')
     parser.add_argument('--listen-lock', type=Path, help='REQUIRED live: existing shared singleton lock path')
     parser.add_argument('--wake', default='полигон')
+    parser.add_argument('--operator-thread', help='Exact owning chat for bounded conversation control')
     parser.add_argument('--pause', type=float, default=1.6,
                         help='Endpoint silence seconds; allow slow speech, tune with retained audio')
     parser.add_argument('--threshold', type=float, default=100)
@@ -205,7 +262,8 @@ def main(argv=None):
         Utterances.validate(args.threshold, args.pause, args.maximum)
         def run():
             session = Session(args.session, config, args.wake, timeout=args.timeout,
-                              threads=args.threads, maximum_pending=args.maximum_pending)
+                              threads=args.threads, maximum_pending=args.maximum_pending,
+                              operator_thread=args.operator_thread)
             collector = Utterances(session.folder / 'audio', session.event,
                                    args.threshold, args.pause, args.maximum)
             audio = None
@@ -225,6 +283,7 @@ def main(argv=None):
                 for pcm in audio:
                     if session.error:
                         raise ValueError(session.error)
+                    session.apply_control()
                     collector.feed(pcm)
                     if time.monotonic() - updated >= 1:
                         session.update_health(captureActive=True, capturedSamples=collector.sample)
@@ -256,6 +315,8 @@ def main(argv=None):
             with locked(lock.parent / 'whole-utterance-listener'):
                 with lock.open('x', encoding='utf-8') as stream:
                     owned = {'pid': os.getpid(), 'protocol': 'whole-utterance-v2', 'at': time.time()}
+                    from .native import identity
+                    owned['identity'] = identity(os.getpid())
                     json.dump(owned, stream)
                 try:
                     run()

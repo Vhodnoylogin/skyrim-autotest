@@ -80,7 +80,7 @@ def main():
     verify('wheel-isolated-status',[sys.executable,'-I','-c',bootstrap,str(installed),'--config',str(config),'status'])
     if hashlib.sha256((installed/'skyrim_autotest'/adapter).read_bytes()).hexdigest() != manifest['sourceFiles'][adapter]:
         raise RuntimeError('Wheel voice host adapter missing or changed')
-    for module in ('voice_listener', 'voice_inbox'):
+    for module in ('voice_listener', 'voice_inbox', 'voice_operator'):
         companion='import sys;sys.path.insert(0,sys.argv[1]);from skyrim_autotest.'+module+' import main;raise SystemExit(main(["--help"]))'
         verify('wheel-isolated-'+module,[sys.executable,'-I','-c',companion,str(installed)])
     # Execute tests from the freshly extracted source, never the checkout.

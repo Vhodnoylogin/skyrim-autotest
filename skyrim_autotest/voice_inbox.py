@@ -171,28 +171,31 @@ class Inbox:
         if state.get('schemaVersion') != 2:
             raise ValueError('Buffered mode requires explicit init --buffered or upgrade')
 
+    def _admit_locked(self, state):
+        self._buffered(state)
+        rows = self._verified_rows(state)
+        fresh = [r for r in rows if r['seq'] > state['admittedCursor']][:64]
+        if fresh:
+            if fresh[0]['seq'] != state['admittedCursor'] + 1:
+                raise ValueError('Next speech sequence missing')
+            if any(r.get('final') is False or r.get('audioComplete') is False
+                   or r.get('executable') is False for r in fresh):
+                raise ValueError('Incomplete/provisional speech cannot enter command inbox')
+            item = {'id': uuid.uuid4().hex, 'threadId': self.thread,
+                    'firstSeq': fresh[0]['seq'], 'lastSeq': fresh[-1]['seq'],
+                    'recordsSha256': digest(fresh), 'records': fresh,
+                    'receivedAt': time.time(), 'phase': 'received'}
+            state['deliveries'].append(item)
+            state['admittedCursor'] = fresh[-1]['seq']
+            state['admittedAnchor'] = digest(fresh[-1])
+            atomic(self.path, state)
+        return next((r for r in state['deliveries'] if r['phase'] == 'received'), None)
+
     def admit(self):
         """Receive new records even while earlier requests await processing."""
         with locked(self.folder, self.lock_wait):
             state = self.state()
-            self._buffered(state)
-            rows = self._verified_rows(state)
-            fresh = [r for r in rows if r['seq'] > state['admittedCursor']][:64]
-            if fresh:
-                if fresh[0]['seq'] != state['admittedCursor'] + 1:
-                    raise ValueError('Next speech sequence missing')
-                if any(r.get('final') is False or r.get('audioComplete') is False
-                       or r.get('executable') is False for r in fresh):
-                    raise ValueError('Incomplete/provisional speech cannot enter command inbox')
-                item = {'id': uuid.uuid4().hex, 'threadId': self.thread,
-                        'firstSeq': fresh[0]['seq'], 'lastSeq': fresh[-1]['seq'],
-                        'recordsSha256': digest(fresh), 'records': fresh,
-                        'receivedAt': time.time(), 'phase': 'received'}
-                state['deliveries'].append(item)
-                state['admittedCursor'] = fresh[-1]['seq']
-                state['admittedAnchor'] = digest(fresh[-1])
-                atomic(self.path, state)
-            ready = next((r for r in state['deliveries'] if r['phase'] == 'received'), None)
+            ready = self._admit_locked(state)
             return {'status': 'received' if ready else 'quiet',
                     'admittedCursor': state['admittedCursor'], 'cursor': state['cursor'],
                     **(ready or {})}
@@ -230,7 +233,29 @@ class Inbox:
             self._verified_rows(state)
             return state
 
-    def reply(self, claim_id, records_hash, response_ref):
+    def receive_local(self):
+        """Return fresh speech to the owning operator, without an app message.
+
+        Commit receipt before stdout; an interrupted return becomes pending_review,
+        never an automatically repeated action. Earlier unfinished work does not
+        prevent receiving fresh speech. Existing host dispatches stay unchanged.
+        """
+        with locked(self.folder, self.lock_wait):
+            state = self.state()
+            ready = self._admit_locked(state)
+            if ready:
+                now = time.time()
+                ready.update(phase='delivered', deliveryTransport='operator-poll',
+                             dispatchStartedAt=now, dispatchedAt=now,
+                             hostReceiptRef='operator-poll:' + ready['id'])
+                atomic(self.path, state)
+                return {**ready, 'status': 'delivered', 'cursor': state['cursor']}
+            pending = [{k: x[k] for k in ('id', 'firstSeq', 'lastSeq', 'phase', 'recordsSha256')}
+                       for x in state['deliveries'] if x['phase'] != 'completed']
+            return {'status': 'pending_review' if pending else 'quiet',
+                    'cursor': state['cursor'], 'pending': pending}
+
+    def reply(self, claim_id, records_hash, response_ref, visible_at=None):
         """First actual text-reply reference, separately from command completion."""
         if not response_ref.strip():
             raise ValueError('Actual first reply reference required')
@@ -243,10 +268,18 @@ class Inbox:
                     or item['phase'] not in ('dispatching', 'delivered', 'completed')):
                 raise ValueError('Reply does not match attempted host delivery')
             if item.get('firstReplyRef'):
-                if item['firstReplyRef'] != response_ref:
+                if item['firstReplyRef'] != response_ref or (visible_at is not None
+                        and item.get('firstVisibleReplyAt') != visible_at):
                     raise ValueError('Conflicting first reply reference')
                 return {'status': 'already_replied'}
-            item.update(firstReplyRef=response_ref, firstReplyAt=time.time())
+            recorded = time.time()
+            if visible_at is not None and (type(visible_at) not in (int, float)
+                    or not math.isfinite(visible_at)
+                    or not item['dispatchStartedAt'] <= visible_at <= recorded):
+                raise ValueError('Visible reply time requires an actual message timestamp after dispatch')
+            item.update(firstReplyRef=response_ref, firstReplyAt=recorded,
+                        replyRecordedAt=recorded, firstVisibleReplyAt=visible_at,
+                        firstReplyAtMeaning='receipt_bookkeeping_not_visible_reply')
             atomic(self.path, state)
             return {'status': 'replied', 'id': claim_id}
 
@@ -344,6 +377,8 @@ def main(argv=None):
     commands.add_parser('status')
     admit = commands.add_parser('admit')
     admit.add_argument('--wait', type=float, default=0)
+    receive = commands.add_parser('receive')
+    receive.add_argument('--wait', type=float, default=0)
     dispatch = commands.add_parser('dispatch')
     dispatch.add_argument('--id', required=True)
     dispatch.add_argument('--sha256', required=True)
@@ -352,17 +387,19 @@ def main(argv=None):
     reply.add_argument('--id', required=True)
     reply.add_argument('--sha256', required=True)
     reply.add_argument('--response-ref', required=True)
+    reply.add_argument('--visible-at', type=float, help='Actual message Unix timestamp; omit if unknown')
     args = parser.parse_args(argv)
     try:
         box = Inbox(args.inbox, args.thread, lock_wait=.25)
         if args.command == "init":
             result = box.init(args.heard, args.after, args.buffered)
-        elif args.command in ("claim", 'admit'):
+        elif args.command in ("claim", 'admit', 'receive'):
             if not 0 <= args.wait <= 30:
                 raise ValueError("Wait must be between 0 and 30 seconds")
             deadline = time.monotonic() + args.wait
             while True:
-                result = box.claim() if args.command == 'claim' else box.admit()
+                result = (box.claim() if args.command == 'claim' else
+                          box.receive_local() if args.command == 'receive' else box.admit())
                 if result["status"] != "quiet" or time.monotonic() >= deadline:
                     break
                 time.sleep(min(.25, max(0, deadline - time.monotonic())))
@@ -373,7 +410,7 @@ def main(argv=None):
         elif args.command == 'dispatch':
             result = box.dispatch(args.id, args.sha256, args.receipt_ref)
         elif args.command == 'reply':
-            result = box.reply(args.id, args.sha256, args.response_ref)
+            result = box.reply(args.id, args.sha256, args.response_ref, args.visible_at)
         else:
             result = box.ack(args.id, args.sha256, args.response_ref)
         print(json.dumps(result, ensure_ascii=False))
