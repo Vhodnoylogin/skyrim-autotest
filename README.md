@@ -217,3 +217,7 @@ Reliable visual capture requires a registered DevBench capture provider. An
 unavailable/black capture must never pass a visual test. Physics assertions need
 an actual physics data provider and available quality/phase metadata; reference
 or bone position alone does not prove a contact or a solver result.
+
+## Development assistance
+
+Developed with assistance from [Codex (OpenAI)](https://github.com/codex).
