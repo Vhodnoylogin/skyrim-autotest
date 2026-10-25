@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "budgetMinutes": 20,
+  "cases": [
+    {"id":"core-use","behavior":"Perform the mod's main user action","weight":70,"core":true,"critical":false,"rationale":"Replace with actual main user flow and usage rationale"},
+    {"id":"main-variant","behavior":"Repeat with an independent supported variant","weight":20,"core":true,"critical":false,"rationale":"E.g. other hand, supported sex, actor class; justify from design"},
+    {"id":"persistence","behavior":"State survives save/load without corrupting external inputs","weight":10,"core":false,"critical":true,"rationale":"Saved data or user-preset loss is high impact even if rare"}
+  ],
+  "scenarios": [
+    {"id":"core","role":"subject","available":true,"estimatedMinutes":3,"covers":["core-use"],"oracle":"Replace with exact game-observed outcome, not a setter ACK"},
+    {"id":"variant","role":"subject","available":true,"estimatedMinutes":3,"covers":["main-variant"],"oracle":"Replace with independent state/physical result"},
+    {"id":"save-reload","role":"subject","available":true,"estimatedMinutes":5,"covers":["persistence"],"oracle":"Reinspect exact values after load; verify original input hashes"},
+    {"id":"tool-health","role":"tooling","available":true,"estimatedMinutes":1,"covers":[]}
+  ],
+  "selected":["core","variant","save-reload","tool-health"]
+}

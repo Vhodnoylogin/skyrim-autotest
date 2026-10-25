@@ -64,7 +64,7 @@ def advance_calibration(session):
                     attempt=attempt, hand=hand, button=button)
         frame = hardware.neutral()
         mask = 1 << (33 if button == 'trigger' else 2)
-        frame[hand]['controller'].update(pressed=mask, touched=mask,
+        frame[hand]['controller'].update(pressed=mask, touched=0,
             axes=[[0,0], [1 if button == 'trigger' else 0,0], [0,0], [0,0], [0,0]])
         try:
             publication = session.tool('driver', {'action':'publish','holdSeconds':2,'frame':frame})

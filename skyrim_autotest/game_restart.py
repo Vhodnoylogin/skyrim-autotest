@@ -23,6 +23,8 @@ def settle_owned_loaders(backend):
     from . import native
     from .runner import GAME_NAMES
     b, s = backend, backend.s
+    from .editions import target
+    loader = target(s.state.get('configuration', {}))['loader'].lower()
     allowed = [p['identity'] for p in s.state['owned'] if p['role'] in ('game', 'loader')]
     def residuals():
         rows = []
@@ -32,8 +34,8 @@ def settle_owned_loaders(backend):
             rows.append(dict(process, identity=ident, owned=ident is not None and ident in allowed))
         s.log('owned-game-restart-residuals', processes=rows)
         if any(row['identity'] is not None and
-               (not row['owned'] or row['name'].lower() != 'sksevr_loader.exe' or
-                Path(row['identity']['path']).name.lower() != 'sksevr_loader.exe') for row in rows):
+               (not row['owned'] or row['name'].lower() != loader or
+                Path(row['identity']['path']).name.lower() != loader) for row in rows):
             raise ValueError('Foreign or unexpected game/loader blocks restart launch')
         return rows
     rows = residuals()
@@ -87,7 +89,8 @@ def start(backend,before_launch=None):
     port=state['configuration'].get('bridge_port',8930)
     def bridge_ready():
         ping=request(port,'ping',token=token,timeout=min(3,b.remaining()))
-        if (ping.get('profile')!=state['testProfileName'] or ping.get('game')!='SkyrimVR' or
+        from .editions import target
+        if (ping.get('profile')!=state['testProfileName'] or ping.get('game')!=target(state['configuration'])['bridgeGame'] or
                 Path(ping.get('modsPath','')).resolve()!=Path(state['configuration']['mods']).resolve()):
             raise ValueError('MO2 instance/profile changed before game restart')
         return ping

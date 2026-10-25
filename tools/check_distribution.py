@@ -45,7 +45,7 @@ def main():
     def verify(label,command):
         call(command,empty,env)
         checks.append(label)
-    for name in ('RuntimeFixtures.cpp','RuntimeFixtures.h'):
+    for name in ('RuntimeFixtures.cpp','RuntimeFixtures.h','PhotographyReadback.cpp','PhotographyReadback.h'):
         relative='native/devbench/'+name
         if hashlib.sha256((portable/relative).read_bytes()).hexdigest()!=manifest['sourceFiles'][relative]:
             raise RuntimeError('Native integration input missing or changed: '+relative)
@@ -66,6 +66,15 @@ def main():
     config.write_text(json.dumps(value),encoding='utf-8')
     verify('portable-config-check',[sys.executable,str(portable/'run.py'),'--config',str(config),'config-check'])
     verify('portable-empty-status',[sys.executable,str(portable/'run.py'),'--config',str(config),'status'])
+    verify('portable-se-init',[sys.executable,str(portable/'run.py'),'init','--edition','se','--directory',str(work/'seconfig')])
+    kit = work / 'agent-kit'
+    with zipfile.ZipFile(next(dist.glob('*-agent-kit.zip'))) as archive:
+        archive.extractall(kit)
+    for name in ('START-HERE.md', 'PROMPT.txt', 'test-plan.example.json'):
+        if (kit / name).read_bytes() != (portable / 'agent-kit' / name).read_bytes():
+            raise RuntimeError('Agent kit prompt/template differs from pinned portable source')
+    verify('agent-kit-unrelated-cwd',[sys.executable,str(kit/'run.py'),'--version'])
+    verify('agent-kit-plan-review',[sys.executable,str(kit/'run.py'),'review-plan','--plan',str(kit/'test-plan.example.json'),'--output',str(work/'plan-review.json')])
     child=subprocess.run([sys.executable,str(portable/'run.py'),'init','--directory',str(work/'config')],cwd=empty,env=env,capture_output=True,text=True,timeout=10)
     if child.returncode != 2:
         raise RuntimeError('Init must refuse overwriting existing config')
@@ -78,6 +87,8 @@ def main():
     verify('wheel-isolated-init',[sys.executable,'-I','-c',bootstrap,str(installed),'init','--directory',str(work/'wheelconfig')])
     verify('wheel-isolated-config',[sys.executable,'-I','-c',bootstrap,str(installed),'--config',str(config),'config-check'])
     verify('wheel-isolated-status',[sys.executable,'-I','-c',bootstrap,str(installed),'--config',str(config),'status'])
+    if not (installed/'skyrim_autotest/agent-kit/PROMPT.txt').is_file():
+        raise RuntimeError('Wheel is missing vendor-neutral agent instructions')
     if hashlib.sha256((installed/'skyrim_autotest'/adapter).read_bytes()).hexdigest() != manifest['sourceFiles'][adapter]:
         raise RuntimeError('Wheel voice host adapter missing or changed')
     for module in ('voice_listener', 'voice_inbox', 'voice_operator'):

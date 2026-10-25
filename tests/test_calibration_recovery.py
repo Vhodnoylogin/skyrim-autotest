@@ -41,6 +41,9 @@ class CalibrationRecoveryTests(unittest.TestCase):
         self.assertEqual(len(s.frames),2)
         self.assertEqual(s.frames[0]['right']['controller']['pressed'],1<<33)
         self.assertEqual(s.frames[1]['left']['controller']['pressed'],1<<33)
+        for frame in s.frames:
+            for hand in ('left', 'right'):
+                self.assertEqual(frame[hand]['controller']['touched'], 0)
         self.assertEqual(sum(a['action']=='release' for n,a in s.calls if n=='driver'),2)
         self.assertEqual([x[1]['attempt'] for x in s.logs if x[0]=='gameplay-startup-screen'],[1,2])
 
@@ -51,6 +54,10 @@ class CalibrationRecoveryTests(unittest.TestCase):
         self.assertEqual(len(s.frames),4)
         self.assertEqual(s.frames[2]['right']['controller']['pressed'],1<<2)
         self.assertEqual(s.frames[3]['left']['controller']['pressed'],1<<2)
+        # Protocol v2 exposes touch only for the trackpad (bit32), not grip or trigger.
+        for frame in s.frames:
+            for hand in ('left', 'right'):
+                self.assertEqual(frame[hand]['controller']['touched'] & ~(1 << 32), 0)
         self.assertLess(clock.now,20)
         self.assertEqual(s.phase_args,('gameplay-startup-calibration-button',25))
         self.assertFalse(any(n in ('console','game','papyrus') for n,a in s.calls))

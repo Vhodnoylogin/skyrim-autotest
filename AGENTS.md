@@ -1,9 +1,18 @@
 # AI-agent instructions: Skyrim Autotest
 
-Use this tool for autonomous, bounded Skyrim VR tests after the owner has
+Use this tool for autonomous, bounded Skyrim SE or VR tests after the owner has
 requested/authorized testing. Existing authorization persists; do not ask again
 for ordinary reversible launches within that scope. New fixture setup and mod
 installation must remain within the owner's requested scope.
+
+Choose `game_edition` explicitly for new configurations; absent means legacy VR.
+Read docs/toolchain-refresh.md and agent-kit/PROMPT.txt. Use review-plan to challenge
+the case inventory, relevance weights, core behavior, severe data-loss risks and
+actual-result oracles. Report planned declared-case coverage separately from
+executed coverage; never infer whole-mod coverage from a test or assertion count.
+SE uses no VR adapter and does not support unqualified Root Builder/borrowed-profile
+or New Game UI paths. A stock1.32 version string does not prove native menu flags,
+safe Papyrus metadata, physics/contact data or a capture provider are available.
 
 1. Read README, docs/configuration.md and docs/scenarios.md. Discover the explicit
    external config; do not guess the owner's game/MO2 profile paths. `init`
@@ -105,3 +114,12 @@ separately qualified configuration can opt into boundary_collection. It records
 raw reads between exact adjacent settled checkpoints without changing mod orders
 or subject counts. Never insert it into a motion/race/first-frame interval or
 call response_recorded a passed subject gate. Keep all missed reads explicit.
+
+For tagged NPC photography read docs/photography.md. Generic source/mapping
+support does not qualify a live capture provider or its primary-eye projection.
+Require original resolution/UI exclusion and inspected in-game camera/shape
+evidence before platform selection. Never upscale originals, waive native
+fallback degradation, reframe a changed comparison variant, replay uncertain
+spawn/capture/setters or change a queued subject order to pin tool revisions.
+Polygon owns all live qualification and photography; this developer chat is
+neither the subject executor nor a microphone/utterance relay.

@@ -20,6 +20,14 @@ int main(){
     if(autotest::SupportedComponents(unsupported))return 33;
     unsupported=supported;unsupported.axes[9]=.1;
     if(autotest::SupportedComponents(unsupported))return 34;
+    // Actual bootstrap candidates use button press and no unsupported touch.
+    for(auto button : {4ULL, 1ULL<<33}) {
+        autotest::Device calibration;
+        calibration.pressed=button;
+        calibration.touched=0;
+        calibration.axes[2]=button==(1ULL<<33)?1.:0.;
+        if(!autotest::SupportedComponents(calibration))return 35;
+    }
     autotest::State state;autotest::Frame f;
     f.owner=std::string(32,'a');f.command=std::string(32,'b');f.seq=77;f.tick=1000;f.lease=500;f.valid=true;
     f.devices[2].pressed=4;f.devices[2].touched=4;f.devices[2].axes[0]=.5;

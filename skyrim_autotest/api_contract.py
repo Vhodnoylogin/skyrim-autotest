@@ -1,4 +1,31 @@
-"""Read live Papyrus signatures before test fixture/input mutations."""
+"""Read live provider contracts before test fixture/input mutations."""
+
+
+def qualify_readiness(session):
+    """Require explicit native menu metadata before any world-changing bootstrap."""
+    from .runner import request, Blocked
+    descriptor = request(session.state['port'], 'api/tools', timeout=3)
+    tools = descriptor.get('tools') if isinstance(descriptor, dict) else None
+    menus = [row for row in tools or [] if isinstance(row, dict) and row.get('name') == 'menu']
+    schema = menus[0].get('inputSchema', {}) if len(menus) == 1 else {}
+    if schema.get('properties', {}).get('includeFlags', {}).get('type') != 'boolean':
+        raise Blocked('DevBench native menu flags unavailable; build/qualify tools/build_devbench_current.py compatibility candidate')
+    observation = session.tool('menu', {'action': 'list', 'includeFlags': True}, timeout=8)
+    rows = observation.get('menuStates')
+    names = observation.get('openMenus')
+    fields = ('alwaysOpen', 'pausesGame', 'modal', 'usesCursor', 'usesMenuContext', 'freezeFramePause')
+    if (type(observation.get('messageBoxOpen')) is not bool or not isinstance(rows, list)
+            or not isinstance(names, list) or any(not isinstance(n, str) for n in names)
+            or len(set(names)) != len(names) or len(rows) != len(names)
+            or any(not isinstance(r, dict) or not isinstance(r.get('name'), str) for r in rows)
+            or {r['name'] for r in rows} != set(names)
+            or any(type(r.get('available')) is not bool or (r['available'] and
+                       any(type(r.get(k)) is not bool for k in fields)) for r in rows)):
+        raise Blocked('DevBench native menu flag response is incomplete; gameplay readiness cannot be established')
+    session.log('readiness-api-contract', nativeMenuFlags=True, gameplayReady=False,
+                basis='Observed native metadata availability, not a playable-world assertion')
+    session.state['readinessApi'] = {'nativeMenuFlags': True}
+    session.save()
 
 def validate_observer_descriptor(result):
     entries = [entry for entry in result.get('extensions', []) if entry.get('kind') == 'world_observer']

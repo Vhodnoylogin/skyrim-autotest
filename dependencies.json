@@ -27,7 +27,8 @@
       "id": "mo2",
       "observedVersion": "2.5.2",
       "source": "https://github.com/ModOrganizer2/modorganizer/releases/tag/v2.5.2",
-      "sha256": null
+      "sha256": null,
+      "observedArchiveSha256": "e6376efd87fd5ddd95aee959405e8f067afa526ea6c2c0c5aa03c5108bf4a815"
     },
     {
       "id": "root-builder",
@@ -39,7 +40,9 @@
       "id": "mo2-api-bridge",
       "testedInstalledVersion": "2.1.0",
       "source": "https://github.com/Vhodnoylogin/MO2-ApI-Bridge",
-      "note": "Newer source revisions are not assumed live-qualified."
+      "note": "SE installation verified offline, no live Bridge qualification; retain independent per-target port/token.",
+      "seInstalledVersion": "2.3.2",
+      "seSourceCommit": "a0c76c1fd15adf0c6e2ea8a40b7630223823fed5"
     },
     {
       "id": "steamvr",
@@ -49,11 +52,15 @@
     },
     {
       "id": "devbench",
-      "observedVersion": "1.25.0",
-      "source": "https://github.com/alandtse/devbench/releases/tag/v1.25.0",
-      "observedDllSha256": "7807da9ac8403bfd665cf20662be0ba28294b8f83e0296a247540ff7684326ca",
-      "historicalPhysicalQualification": {"version": "1.22.0", "dllSha256": "45b741aca0ce5fcb8c6459958f8c41dbbb51d364c38806bf12132217eec407cb"},
-      "note": "Observed installation is not full acceptance. Stock1.25 object-array introspection crashed in minimal VR; see docs/devbench-compatibility.md for the pinned candidate source correction and live qualification requirement."
+      "observedVersion": "1.32.0",
+      "source": "https://github.com/alandtse/devbench/releases/tag/v1.32.0",
+      "observedDllSha256": "7b105e20ac82bccce8732aef05edfe7ffeeb36a0f13fbeda3d036a9d48666188",
+      "historicalPhysicalQualification": {
+        "version": "1.22.0",
+        "dllSha256": "45b741aca0ce5fcb8c6459958f8c41dbbb51d364c38806bf12132217eec407cb"
+      },
+      "note": "Stock1.32 observed on disk, not live-qualified. Native menu flags, metadata decoder and UTF8 compatibility candidate remains required; see docs/toolchain-refresh.md.",
+      "archiveSha256": "3eb37e9e6b3c5065f0f498fc0f5e1747b6cae459512b70f67aec6e42eefa9309"
     }
   ],
   "devbenchCompatibilityCandidate": {
@@ -93,7 +100,16 @@
       "Valve"
     ],
     "maintenance": "Our owned automation-backend candidate. Devkit author has declined full automation API scope and permitted a credited fork; external original licensing remains independent.",
-    "authorReply": "https://www.nexusmods.com/skyrimspecialedition/mods/191452?tab=posts#comment-176787264"
+    "authorReply": "https://www.nexusmods.com/skyrimspecialedition/mods/191452?tab=posts#comment-176787264",
+    "reviewedUpstream": {
+      "version": "2.0.1",
+      "source": "https://github.com/DubiousDuo/VR-Emulator-Driver---SkyrimVR-Devkit/releases/tag/Release_v2.0.1",
+      "commit": "32ec30294a871683254b944b4129cbdec2591e6a",
+      "frontendArchiveSha256": "3ea1160c04b84012b95001d5f9c823202057d3d9e70695a992fc0445e2108b40",
+      "driverArchiveSha256": "391d4dfc30f1a9884e849ea2cc2299af6893e5bb54a76734f5d96f1408d1c434",
+      "driverDllSha256": "fc689623914c6643c6e8629dc6bcb130193888b6835d902ed6411ab476121454",
+      "decision": "Do not replace owned physical backend: neutral grip/trigger/axes and shared pose cannot provide equivalent automation; keep existing qualified pins."
+    }
   },
   "optional": [
     {
@@ -113,7 +129,66 @@
       "id": "devkit",
       "source": "https://www.nexusmods.com/skyrimspecialedition/mods/191452",
       "note": "AHK GUI is not required by this executor."
+    },
+    {
+      "id": "photography-readback-candidate",
+      "source": "https://github.com/Vhodnoylogin/devbench",
+      "commit": "5ff3d711fcc6f35ef5427443551fae5c512c153d",
+      "commonlibCommit": "9106d402cfc7dcbc5bf7458be6748af19d7fc914",
+      "rebuild": "python tools/build_devbench_fork.py --photography --build-dir <new external short directory>",
+      "note": "Own read-only actor/camera integration; native compilation is not live qualification. Original PNG provider is separately acquired/discovered/pinned by Polygon; no binaries or dependencies bundled."
+    },
+    {
+      "id": "claude-code-toolkit",
+      "requestedVersion": "3.7",
+      "source": "https://github.com/WingedGuardian/skyrimvr-claude-toolkit/releases/tag/v3.7",
+      "archiveSha256": "7db59d59db6691e23361bdf167abbbdfb997eb1742f7e9313cc3283dab675513",
+      "separatelyInspectedVersion": "3.9.1",
+      "separatelyInspectedSource": "https://github.com/WingedGuardian/skyrimvr-claude-toolkit/releases/tag/v3.9.1",
+      "note": "Development workspace/helper only. Does not launch Skyrim and is not required by this stdlib executor; do not auto-install AI hooks."
     }
   ],
-  "fixtureDependencies": "VRIK/HIGGS and dependencies of each subject are separately pinned by the test configuration. Supply an authorized hash-pinned ESS/SKSE pair; no private fixture/save distributed."
+  "fixtureDependencies": "VRIK/HIGGS and dependencies of each subject are separately pinned by the test configuration. Supply an authorized hash-pinned ESS/SKSE pair; no private fixture/save distributed.",
+  "targets": {
+    "vr": {
+      "gameVersion": "1.4.15",
+      "skseVersion": "2.0.12",
+      "physicalDriverRequired": true
+    },
+    "se": {
+      "gameVersionObserved": "1.7.104.0",
+      "gameSource": "https://store.steampowered.com/app/489830/Skyrim_Special_Edition/",
+      "skseVersion": "2.3.1",
+      "skseSource": "https://www.nexusmods.com/skyrimspecialedition/mods/30379?file_id=795992&tab=files",
+      "addressLibraryVersion": "13",
+      "addressLibrarySource": "https://www.nexusmods.com/skyrimspecialedition/mods/32444?file_id=795954&tab=files",
+      "acquisitionStatus": "Matching SKSE/Address Library not yet acquired in inspected SE installation",
+      "physicalDriverRequired": false,
+      "liveQualification": "pending"
+    }
+  },
+  "devbenchCurrentCompatibilityCandidate": {
+    "upstreamVersion": "1.32.0",
+    "upstreamCommit": "938c392d5e0fc19260c65f689ff4a80fbec4007c",
+    "source": "https://github.com/Vhodnoylogin/devbench",
+    "commit": "f9c0d17593f604a1bfd4f37843b6e38b73df1a26",
+    "commonlibSource": "https://github.com/Vhodnoylogin/CommonLibSSE-NG",
+    "commonlibCommit": "3ba26698953f37c0b34e633c0b887c45af5f956d",
+    "recipe": "python tools/build_devbench_current.py --build-dir <new external short directory>",
+    "recipeBasis": "Exact upstream/commonlib pins plus hash-checked owned patches, functionally equal to published owner-fork source",
+    "features": [
+      "native menu flags",
+      "invalid UTF8 diagnostic normalization",
+      "object-array bit0 decoder"
+    ],
+    "testedDllSha256": "30a2a432e199e8c35563f90b85f46752d6c374281957c90154e6bc288d4d5c7a",
+    "testedPdbSha256": "b14674c1ceb35977a2b50a1cca6a73ec83ae319cffe27ce766c60bc5fd8ca6ca",
+    "offlineChecks": {
+      "nativeCases": 314,
+      "decoderCases": 8,
+      "unpatchedNegativeControlFailedAsExpected": true
+    },
+    "liveQualification": "pending",
+    "note": "Generated binaries/compiler hashes belong in external manifests; do not infer installed/live acceptance or identical rebuild output."
+  }
 }

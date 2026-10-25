@@ -25,11 +25,15 @@ def operations():
                        'reference.item.plugin', 'reference.item.localId', 'actor.reference', 'actor.base',
                        'reference.item.runtimeCreated','reference.item.runtimeId','reference.item.sourceFilePolicy',
                        'actor.sex', 'actor.race', 'actor.loaded3D', 'actor.weight',
+                       'actor.movementEnabled','actor.aiEnabled','actor.collisionsEnabled','actor.aggression','morph.configuration.values',
                        'actorBase.sex', 'actorBase.race', 'morph.value', 'speech.broker.available',
                        'speech.broker.interfaceVersion', 'speech.broker.adapters', 'speech.broker.asrSource',
                        'speech.subscribers.namespaces', 'speech.vocabulary.phrase', 'speech.events.roundtripCompleted',
                        'speech.recognition.doorTextCount', 'speech.auction.doorGreedyAwardCount', 'speech.utterances.records'],
-        'controller.perform': ['inputIssued','gripExchange.singlePublication'], 'object.perform': ['action.completed','fixture.actor.prepared','fixture.actor.movementEnabled','fixture.actor.pushCompleted'], 'input.perform': [], 'menu.read': []
+        'controller.perform': ['inputIssued','gripExchange.singlePublication'], 'object.perform': ['action.completed','fixture.actor.prepared','fixture.actor.movementEnabled','fixture.actor.pushCompleted',
+            'fixture.actor.created','camera.framing.completed','camera.target.inFrame','photo.saved','photo.decoded',
+            'photo.configuration.matchesReadback','photo.camera.matchesReadback','photo.target.inFrame','photo.hud.hidden',
+            'camera.restored','hud.restored'], 'input.perform': [], 'menu.read': []
     }
     result = {}
     for op, names in fields.items():

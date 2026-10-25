@@ -1,5 +1,15 @@
 # Configuration contract (schemaVersion 1)
 
+`game_edition` is `vr` (legacy default) or `se`. Generate separate templates with
+`init --edition vr|se`; use separate external runtimes and MO2 installations. SE
+requires `SkyrimSE.exe`, `skse64_loader.exe`, a registered SKSE entry with that
+exact loader/game working directory and no hidden arguments. No `openvr_paths`,
+SteamVR, VRIK or HIGGS are required for data-only SE tests. Runtime discovery uses
+the `devbench/se` mirror instead of `devbench/vr`; explicit runtime paths win.
+SE preflight rejects Root Builder installations/root mods, borrowed/reusable MO2
+profiles and VR-control configuration until those combinations are qualified.
+New Game UI is not qualified for SE: declare a cell or authorized pinned save.
+
 The optional tool-owned `boundary_collection` plan records supplementary semantic
 reads at exact, reviewed settled main-scenario boundaries. It defaults to absent
 and needs its own live qualification. See [boundary collection](boundary-collection.md)

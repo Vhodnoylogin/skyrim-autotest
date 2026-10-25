@@ -1,5 +1,14 @@
 # AI-agent instructions: Skyrim Autotest
 
+For either Skyrim SE or VR, read docs/toolchain-refresh.md and the distributed
+agent-kit/PROMPT.txt. Select the target explicitly (`init --edition se|vr`), keep
+independent configurations and never install VR runtime resources for SE. Use
+review-plan to critique relevant behavior and weighted planned coverage; technical
+startup assertions and unavailable checks do not count as exercised mod behavior.
+Stock DevBench1.32 needs the narrow native compatibility candidate for this
+executor's menu-readiness contract. New target/provider combinations need actual
+live qualification; offline tests alone do not prove them ready.
+
 For headset-assisted voice delivery read docs/assisted-voice.md. Use the host's
 supported heartbeat plus skyrim_autotest.voice_inbox, an exact operator thread and
 a private cursor. Do not claim continuous accompaniment from listener health or

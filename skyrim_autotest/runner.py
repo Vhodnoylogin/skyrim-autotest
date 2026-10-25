@@ -37,7 +37,7 @@ DRIVER_ZIP_HASH = '4a4015b710e0b764f4d61ad642e3e3dbba59e5100749e43e7853e1f4e6fe4
 DRIVER_DLL_HASH = '798a148e3579bb790070d1800b0c753d814acdf46c010984f6c81969fd71b939'
 VR_NAMES = {'vrserver.exe', 'vrmonitor.exe', 'vrcompositor.exe', 'vrstartup.exe',
             'vrdashboard.exe', 'vrwebhelper.exe', 'vrprismhost.exe'}
-GAME_NAMES = {'skyrimvr.exe', 'sksevr_loader.exe'}
+GAME_NAMES = {'skyrimvr.exe', 'sksevr_loader.exe', 'skyrimse.exe', 'skse64_loader.exe'}
 OCU = {'OpenComposite Unleashed for Skyrim VR', 'OpenComposite Unleashed for Skyrim VR - No Grip Ready Weapon'}
 ROOT = P.runtime
 RUNS = ROOT / 'runs'
@@ -166,15 +166,26 @@ def prepare_activation_profile(test_profile, scenario, source_profile, run_id):
 
 
 def preflight(profile, restart_idle_mo2=False):
+    from .editions import target
+    selected = target(P.snapshot())
+    vr = selected['edition'] == 'vr'
     if Path(profile).name != profile or profile in ('.', '..'):
         raise Blocked('Invalid profile name')
     source = P.profiles / profile
     for plugin in P.staged_plugins:
         if not Path(plugin['source']).is_file() or sha(plugin['source']) != plugin['sha256']:
             raise Blocked('Missing or changed staged plugin: ' + plugin['source'])
-    for path in (P.mo2_exe, P.mo2_ini, P.game / 'SkyrimVR.exe', source / 'modlist.txt'):
+    for path in (P.mo2_exe, P.mo2_ini, P.game / selected['executable'],
+                 P.game / selected['loader'], source / 'modlist.txt'):
         if not path.is_file():
             raise Blocked(f'Missing required file: {path}')
+    loader_contract = None
+    if not vr:
+        from .editions import validate_mo2_loader
+        try:
+            loader_contract = validate_mo2_loader(P.mo2_ini.read_text(encoding='utf-8-sig'), P.snapshot())
+        except ValueError as error:
+            raise Blocked(str(error)) from error
     busy = [p for p in native.processes() if p['name'].lower() in VR_NAMES | GAME_NAMES | {'modorganizer.exe'}]
     idle_mo2 = [p for p in busy if p['name'].lower() == 'modorganizer.exe']
     reuse = P.value.get('reuse_test_profile', False)
@@ -196,7 +207,7 @@ def preflight(profile, restart_idle_mo2=False):
         ping = request(P.bridge_port, 'ping', token=token)
         bridge_session = request(P.bridge_port, 'session', token=token)
         bridge_profile = ping.get('profile')
-        if (ping.get('game') != 'SkyrimVR' or Path(ping.get('modsPath', '')).resolve() != P.mods.resolve()
+        if (ping.get('game') != selected['bridgeGame'] or Path(ping.get('modsPath', '')).resolve() != P.mods.resolve()
                 or bridge_session.get('mo2Pid') != idle_mo2[0]['pid']
                 or Path(bridge_session.get('profilesPath', '')).resolve() != P.profiles.resolve()
                 or not bridge_session.get('serverBootId') or not bridge_session.get('instanceId')
@@ -205,25 +216,30 @@ def preflight(profile, restart_idle_mo2=False):
         caps = request(P.bridge_port, 'profiles/capabilities', token=token)
         if caps.get('profileSelect') != 'nativeQt':
             raise Blocked('Reusable profiles require native Bridge profile selection')
-    vrpaths = P.openvr_paths
-    paths = read_json(vrpaths)
-    runtime = Path(paths['runtime'][0])
-    config = Path(paths['config'][0]) / 'steamvr.vrsettings'
-    if paths.get('external_drivers'):
-        raise Blocked('External SteamVR drivers require an explicit isolated test configuration')
-    vive_profile = runtime / 'drivers/htc/resources/input/vive_controller_profile.json'
-    if not vive_profile.is_file():
-        raise Blocked('The adapter requires the installed SteamVR Vive input profile')
+    vrpaths = runtime = config = vive_profile = original = rbdata = None
+    if vr:
+        vrpaths = P.openvr_paths
+        paths = read_json(vrpaths)
+        runtime = Path(paths['runtime'][0])
+        config = Path(paths['config'][0]) / 'steamvr.vrsettings'
+        if paths.get('external_drivers'):
+            raise Blocked('External SteamVR drivers require an explicit isolated test configuration')
+        vive_profile = runtime / 'drivers/htc/resources/input/vive_controller_profile.json'
+        if not vive_profile.is_file():
+            raise Blocked('The adapter requires the installed SteamVR Vive input profile')
     enabled = {line[1:] for line in (source / 'modlist.txt').read_text(encoding='utf-8-sig').splitlines() if line.startswith('+')}
     required = set(P.required_mods)
     if not required <= enabled:
         raise Blocked('Required disabled mods: ' + str(sorted(required - enabled)))
-    rb = P.mo2 / 'plugins/data/RootBuilder'
-    originals = [p for p in rb.rglob('openvr_api.dll') if p.parent.name == 'Backup' and p.stat().st_size < 2000000]
-    if len(originals) != 1:
-        raise Blocked('Need exactly one verified stock openvr_api.dll in Root Builder backup')
-    original = originals[0]
-    rbdata = original.parent.parent
+    if vr:
+        rb = P.mo2 / 'plugins/data/RootBuilder'
+        originals = [p for p in rb.rglob('openvr_api.dll') if p.parent.name == 'Backup' and p.stat().st_size < 2000000]
+        if len(originals) != 1:
+            raise Blocked('Need exactly one verified stock openvr_api.dll in Root Builder backup')
+        original = originals[0]
+        rbdata = original.parent.parent
+    elif (P.mo2 / 'plugins/data/RootBuilder').exists() or any((m / 'Root').is_dir() for m in P.mods.iterdir()):
+        raise Blocked('SE Root Builder integration is not qualified; no Root Builder files will be modified')
     # Fingerprint installed binaries, rather than the stale business index.
     dlls = {}
     for mod in sorted(required):
@@ -241,13 +257,13 @@ def preflight(profile, restart_idle_mo2=False):
                 configs[str(file)] = sha(file)
     from . import steam_restore
     steam_client = steam_restore.preflight(P.snapshot())
-    return {'profile': profile, 'bridgeSession': bridge_session, 'originalBridgeProfile': bridge_profile,
+    return {'profile': profile, 'gameEdition': selected['edition'], 'loaderContract': loader_contract, 'bridgeSession': bridge_session, 'originalBridgeProfile': bridge_profile,
             'steamClientRestart': steam_client,
-            'runtime': str(runtime), 'settings': str(config),
-            'viveInputProfile': str(vive_profile), 'viveInputProfileHash': sha(vive_profile),
+            'runtime': str(runtime) if runtime else None, 'settings': str(config) if config else None,
+            'viveInputProfile': str(vive_profile) if vive_profile else None, 'viveInputProfileHash': sha(vive_profile) if vive_profile else None,
             'idleMO2': native.identity(idle_mo2[0]['pid']) if idle_mo2 else None,
-            'vrpaths': str(vrpaths), 'stockOpenVR': str(original), 'stockOpenVRHash': sha(original),
-            'rootBuilderData': str(rbdata), 'dlls': dlls,
+            'vrpaths': str(vrpaths) if vrpaths else None, 'stockOpenVR': str(original) if original else None, 'stockOpenVRHash': sha(original) if original else None,
+            'rootBuilderData': str(rbdata) if rbdata else None, 'dlls': dlls,
             'configHashes': configs,
             'profileHashes': {name: sha(source / name) for name in ('modlist.txt', 'plugins.txt', 'loadorder.txt') if (source / name).exists()}}
 
@@ -369,7 +385,7 @@ class Session:
                 parent = entry['parent']
             if not related:
                 continue
-            role = 'loader' if name == 'sksevr_loader.exe' else 'game' if name in GAME_NAMES else 'vr' if name in VR_NAMES else 'mo2'
+            role = 'loader' if name in ('sksevr_loader.exe', 'skse64_loader.exe') else 'game' if name in GAME_NAMES else 'vr' if name in VR_NAMES else 'mo2'
             self.own(item['pid'], role)
 
     def spawn(self, command, role, cwd=None):
@@ -567,6 +583,8 @@ class Session:
         if self.state.get('postStepsActive') and changes_reference_world(name, args):
             self.invalidate_probe_reference('potential world-changing request: ' + name)
         if name == 'driver':
+            if self.state.get('configuration', {}).get('game_edition', 'vr') == 'se':
+                raise Blocked('VR driver commands are unavailable in a Skyrim SE attempt')
             return self.driver_tool(args)
         if name == 'platform':
             from .platform import execute
@@ -650,7 +668,9 @@ class Session:
     def setup(self):
         # Missing/stale acquisition inputs must fail before profiles, plugins,
         # Root Builder or the stock SteamVR driver can be changed.
-        manifest = verified_driver_build() if self.state['driverBackend'] == 'file' else None
+        from .editions import target
+        vr = target(P.snapshot())['edition'] == 'vr'
+        manifest = verified_driver_build() if vr and self.state['driverBackend'] == 'file' else None
         self.phase('snapshot', 180)
         info = self.state['preflight']
         if P.value.get('reuse_test_profile', False):
@@ -669,20 +689,18 @@ class Session:
                 self.state['reopenMO2'] = False
                 self.save()
                 raise Blocked('Idle MO2 did not close gracefully; refusing to force it')
-        runtime = Path(info['runtime'])
-        driver = runtime / 'drivers/null'
         dep = ROOT / 'dependencies/driver-dedb8ab.zip'
-        if not dep.exists():
+        if vr and not dep.exists():
             dep.parent.mkdir(parents=True, exist_ok=True)
             with urllib.request.urlopen(DRIVER_URL, timeout=30) as response:
                 data = response.read(64 * 1024 * 1024 + 1)
             if len(data) > 64 * 1024 * 1024:
                 raise Blocked('Driver archive exceeds the bounded download size')
             dep.write_bytes(data)
-        if sha(dep) != DRIVER_ZIP_HASH:
+        if vr and sha(dep) != DRIVER_ZIP_HASH:
             raise Blocked('Pinned driver archive hash mismatch')
         # Snapshot any Root Builder target including targets from disabled OCU.
-        targets = {P.game / 'openvr_api.dll'}
+        targets = {P.game / 'openvr_api.dll'} if vr else set()
         for mod in P.mods.iterdir():
             root = mod / 'Root'
             if root.is_dir():
@@ -691,17 +709,20 @@ class Session:
                         targets.add(P.game / file.relative_to(root))
         for path in sorted(targets):
             self.snapshot(path)
-            self.snapshot(Path(info['rootBuilderData']) / 'Backup' / path.relative_to(P.game))
-        for file in (Path(info['rootBuilderData']) / 'Backup').rglob('*'):
-            if file.is_file():
+            if info.get('rootBuilderData'):
+                self.snapshot(Path(info['rootBuilderData']) / 'Backup' / path.relative_to(P.game))
+        if info.get('rootBuilderData'):
+            for file in (Path(info['rootBuilderData']) / 'Backup').rglob('*'):
+                if file.is_file():
+                    self.snapshot(file)
+            for file in Path(info['rootBuilderData']).glob('*.json'):
                 self.snapshot(file)
-        for file in Path(info['rootBuilderData']).glob('*.json'):
-            self.snapshot(file)
-        for name in ('GameData.json', 'BuildData.json'):
-            self.snapshot(Path(info['rootBuilderData']) / name)
+            for name in ('GameData.json', 'BuildData.json'):
+                self.snapshot(Path(info['rootBuilderData']) / name)
         if not self.state.get('borrowedMO2'):
             self.snapshot(P.mo2_ini)
-        self.snapshot(info['settings'])
+        if vr:
+            self.snapshot(info['settings'])
         # Existing mod configuration may be rewritten by the game, even when
         # our APIs change settings only in memory. Preserve those inputs too.
         for path in P.extra_files:
@@ -722,8 +743,8 @@ class Session:
             self.snapshot(path)
         # Existing deployed OCU entries must not be merged into the test build and
         # harvested back into third-party mods when Root Builder clears it.
-        old_build = Path(info['rootBuilderData']) / 'BuildData.json'
-        if old_build.exists():
+        old_build = Path(info['rootBuilderData']) / 'BuildData.json' if info.get('rootBuilderData') else None
+        if old_build and old_build.exists():
             old_build.unlink()
         # Isolated profile: never load or autosave over the owner's original saves.
         if self.state.get('borrowedMO2'):
@@ -806,6 +827,11 @@ class Session:
             text = P.mo2_ini.read_bytes().decode('utf-8-sig')
             text = re.sub(r'(?m)^selected_profile=.*$', lambda _: 'selected_profile=@ByteArray(' + profile_name + ')', text)
             self.write(P.mo2_ini, text)
+        if not vr:
+            self.log('configured', gameEdition='se', profile=profile_name, vrResourcesTouched=False)
+            return
+        runtime = Path(info['runtime'])
+        driver = runtime / 'drivers/null'
         # Disable autobuild's redirect case: registered SKSE is already game-root based.
         self.write(P.game / 'openvr_api.dll', Path(info['stockOpenVR']).read_bytes())
         with zipfile.ZipFile(dep) as archive:
@@ -851,6 +877,13 @@ class Session:
         self.log('configured', driverHash=DRIVER_DLL_HASH, stockOpenVRHash=info['stockOpenVRHash'], profile=profile_name)
 
     def launch(self):
+        from .editions import target, runtime_candidates
+        selected = target(P.snapshot())
+        if selected['edition'] == 'se':
+            from .editions import validate_mo2_loader
+            contract = validate_mo2_loader(P.mo2_ini.read_text(encoding='utf-8-sig'), P.snapshot())
+            if self.state.get('borrowedMO2') or contract != self.state['preflight'].get('loaderContract'):
+                raise Blocked('SE registered loader changed or cannot be verified from a newly owned MO2')
         self.phase('start-mo2', 90)
         if self.state.get('borrowedMO2'):
             self.bridge_profile(self.state['testProfileName'])
@@ -873,18 +906,19 @@ class Session:
         self.log('mo2-ping', result=ping)
         if ping.get('profile') != self.state['testProfileName']:
             raise Blocked('MO2 selected profile does not match the isolated profile')
-        if ping.get('game') != 'SkyrimVR' or Path(ping.get('modsPath', '')).resolve() != P.mods.resolve():
+        if ping.get('game') != selected['bridgeGame'] or Path(ping.get('modsPath', '')).resolve() != P.mods.resolve():
             raise Blocked('MO2 bridge belongs to a different game/instance')
-        self.phase('start-steamvr', 90)
-        self.spawn([str(Path(self.state['preflight']['runtime']) / 'bin/win64/vrstartup.exe')], 'vr')
-        end = time.monotonic() + 45
-        while time.monotonic() < end:
-            self.discover()
-            if any(p['name'].lower() == 'vrcompositor.exe' for p in native.processes()):
-                break
-            time.sleep(1)
-        else:
-            raise Blocked('SteamVR compositor readiness timeout')
+        if selected['edition'] == 'vr':
+            self.phase('start-steamvr', 90)
+            self.spawn([str(Path(self.state['preflight']['runtime']) / 'bin/win64/vrstartup.exe')], 'vr')
+            end = time.monotonic() + 45
+            while time.monotonic() < end:
+                self.discover()
+                if any(p['name'].lower() == 'vrcompositor.exe' for p in native.processes()):
+                    break
+                time.sleep(1)
+            else:
+                raise Blocked('SteamVR compositor readiness timeout')
         self.phase('start-skse', 180)
         self.state['launchIntents']['game'] = {'at': time.time(), 'directory': str(P.game)}
         self.save()
@@ -896,12 +930,13 @@ class Session:
         if launch.get('pid'):
             self.own(launch['pid'], 'loader')
         self.phase('wait-devbench', 180)
-        candidates = [Path(p) for p in P.devbench_runtime_files] or [Path(os.environ['LOCALAPPDATA']) / 'devbench/vr/runtime.json', P.overwrite / 'SKSE/Plugins/devbench/runtime.json']
+        candidates = runtime_candidates(P.snapshot())
         end = time.monotonic() + 150
         first_frame = None
         while time.monotonic() < end:
             self.discover()
-            games = [x['identity'] for x in self.state['owned'] if Path(x['identity']['path']).name.lower() == 'skyrimvr.exe' and native.alive(x['identity'])]
+            advancing = False
+            games = [x['identity'] for x in self.state['owned'] if Path(x['identity']['path']).name.lower() == selected['executable'].lower() and native.alive(x['identity'])]
             for file in candidates:
                 try:
                     if file.stat().st_mtime < self.state['launchIntents']['game']['at'] - 1:
@@ -916,26 +951,34 @@ class Session:
                     self.log('health', result=health)
                     frame = health.get('frame')
                     if first_frame is not None and frame != first_frame:
-                        self.phase('wait-task-queue', 90)
-                        ready_end = time.monotonic() + 75
-                        while time.monotonic() < ready_end:
-                            try:
-                                state = self.tool('inspect', {'kind': 'state'}, timeout=8)
-                                self.log('task-queue-ready', state=state)
-                                return
-                            except RuntimeError as e:
-                                if not str(e).startswith('HTTP 504'):
-                                    raise
-                                # Safe read only: the server abandons a task that did
-                                # not start. No mutation or whole-game retry occurs.
-                                self.log('task-queue-not-ready', error=str(e))
-                                time.sleep(1)
-                        raise Blocked('Game renders but SKSE task queue did not become ready')
+                        advancing = True
+                        break
                     first_frame = frame
                 except (OSError, ValueError, KeyError, RuntimeError):
                     continue
+            if advancing:
+                self.wait_task_queue()
+                return
             time.sleep(1)
         raise Blocked('Fresh matching DevBench with advancing game frames not found')
+
+    def wait_task_queue(self):
+        self.phase('wait-task-queue', 90)
+        ready_end = time.monotonic() + 75
+        while time.monotonic() < ready_end:
+            try:
+                state = self.tool('inspect', {'kind': 'state'}, timeout=8)
+                self.log('task-queue-ready', state=state)
+                break
+            except HTTPResponseError as error:
+                if error.status != 504:
+                    raise
+                self.log('task-queue-not-ready', error=str(error))
+                time.sleep(1)
+        else:
+            raise Blocked('Game renders but SKSE task queue did not become ready')
+        from .api_contract import qualify_readiness
+        qualify_readiness(self)
 
     def collect(self, segment=None):
         from .collection import collect
@@ -957,6 +1000,8 @@ class Session:
 
     def cleanup(self):
         self.phase('stop-and-restore', 150)
+        from .photography import cleanup as cleanup_photography
+        cleanup_photography(self)
         if self.state.get('hardwareFrame'):
             from . import hardware
             with self.lock:
@@ -1094,7 +1139,8 @@ class Session:
 
     def report(self):
         status = self.state.get('result', 'blocked')
-        lines = [f'# Skyrim VR run {self.state["id"]}', '', f'Result: **{status}**', '',
+        from .editions import target
+        lines = [f'# Skyrim {target(self.state.get("configuration", {}))["edition"].upper()} run {self.state["id"]}', '', f'Result: **{status}**', '',
                  f'Profile: {self.state["preflight"]["profile"]}',
                  f'Restored: {self.state.get("restored", False)}',
                  f'Reason: {self.state.get("reason", "")}', '', '## Steps', '']
@@ -1138,7 +1184,7 @@ def guardian(directory):
             last_health=None;health_changed=time.monotonic();connection_failed=None;since=0
         if state.get('game') and not state.get('phase', '').startswith('stop-and-restore') and not restarting:
             if not native.alive(state['game']):
-                reason, expired = 'Owned SkyrimVR process exited unexpectedly (CTD or external termination)', True
+                reason, expired = 'Owned game process exited unexpectedly (CTD or external termination)', True
             else:
                 try:
                     health = request(state['port'], 'api/health', timeout=2)
@@ -1236,7 +1282,7 @@ def guardian_command(directory):
     return [sys.executable, '-c', bootstrap, str(Path(__file__).resolve().parent.parent), str(Path(directory).resolve())]
 
 
-def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, driver_backend='file', input_backend=None):
+def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, driver_backend=None, input_backend=None):
     scenario_bytes = Path(scenario_file).read_bytes()
     scenario = json.loads(scenario_bytes.decode('utf-8-sig'))
     scenario_hash = hashlib.sha256(scenario_bytes).hexdigest()
@@ -1254,12 +1300,20 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
             file = folder / (fixture['saveStem'] + '.' + ext)
             if not file.is_file() or sha(file) != fixture[ext + 'Sha256']:
                 raise Blocked('Missing or changed authorized fixture: ' + str(file))
+    from .editions import target, validate_scenario
+    selected = target(P.snapshot())
+    driver_backend = driver_backend or ('file' if selected['edition'] == 'vr' else 'none')
     input_backend = input_backend or ('driver' if driver_backend == 'file' else 'devbench')
+    validate_scenario(P.snapshot(), scenario, driver_backend, input_backend)
+    if selected['edition'] == 'se' and fault == 'while-held':
+        raise Blocked('The while-held fault requires a physical VR probe')
     if scenario.get('allowBackgroundVR') and (input_backend != 'driver' or driver_backend != 'file'):
         raise Blocked('allowBackgroundVR requires the physical file-adapter backend')
     if input_backend == 'driver' and driver_backend != 'file':
         raise Blocked('Physical frame control requires the file adapter driver')
+    requested_configuration = P.snapshot()
     recover()
+    configure(requested_configuration)
     with native.SessionMutex():
         info = preflight(profile, restart_idle_mo2)
         run_id = time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6]
@@ -1270,6 +1324,7 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
                  'preflight': info, 'checks': [], 'done': False, 'restored': False,
                  'configuration': P.snapshot(), 'scenario': scenario, 'scenarioHash': scenario_hash}
         state['fault'] = fault
+        state['gameEdition'] = selected['edition']
         state['ownedGameRestartBudget'] = restart_budget
         source = directory / 'executor-source'
         source.mkdir()
@@ -1339,7 +1394,7 @@ def main(argv=None):
         if name == 'run':
             item.add_argument('--scenario', type=Path, required=True)
             item.add_argument('--fault', choices=['after-setup', 'after-ready', 'while-held'])
-            item.add_argument('--driver-backend', choices=['file', 'devkit'], default='file')
+            item.add_argument('--driver-backend', choices=['file', 'devkit', 'none'])
             item.add_argument('--input-backend', choices=['driver', 'devbench'], help='Compare injection with the same staged driver; default is physical driver control')
         item.add_argument('--restart-idle-mo2', action='store_true', help='Gracefully restart an idle MO2 and reopen it with its original settings after the test')
     subs.add_parser('recover')

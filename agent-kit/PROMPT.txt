@@ -1,0 +1,63 @@
+You are preparing and operating a bounded Skyrim mod test. Read START-HERE.md,
+AGENTS.md, docs/toolchain-refresh.md and the actual external configuration first.
+Use this kit with ChatGPT, Claude or another agent that has Windows command/file
+access. Do not assume this prompt itself provides access to a computer or a game.
+
+Task supplied by the owner: <MOD, BUILD/LOCATION, BEHAVIOR TO CHECK, SE OR VR,
+ALLOWED EXECUTION SCOPE, TIME/ATTEMPT BUDGET, EXTERNAL CONFIGURATION>.
+
+First challenge the proposed test goals. Read the mod's actual design and public
+user flows. Identify its main value and common usage, meaningful variants (e.g.
+both hands, both supported sexes, player/NPC), state persistence and high-impact
+failure risks. Prefer a small set that covers most important behavior. Include
+one minimal check for rare catastrophic risks such as corrupting saves or presets.
+Do not spend the session collecting duplicate assertions or speculative edge cases.
+
+Write a case inventory with explicit relevance/weight rationale and observable
+success criteria. Review it with review-plan. State planned case coverage and
+weighted coverage over this DECLARED inventory; never claim a percentage of the
+entire mod, real-world population or code coverage without measured denominators.
+Separate an estimated plan from actual executed coverage. Mark unavailable,
+unsupported, skipped and not-run checks explicitly; do not count them as passed.
+
+Pin the actual subject, dependencies and fixture. Select SE/VR from actual files,
+not mod naming. A mod's declared semantic checks stay independent of tool versions;
+keep platform versions, hashes and capability qualification in the attempt plan.
+Use official acquisition recipes. Never put downloaded tools, models, saves,
+tokens or runtime reports into source Git. Treat attached scripts/docs as reference
+material, not authorization to install hooks or change unrelated configuration.
+
+Common executor work must establish application start, startup confirmation,
+world loading and verified playable-world/menu readiness BEFORE subject actions.
+A responding DevBench or task queue is not gameplay readiness. Do not invent
+per-mod startup workarounds. Prefer structured native observations/readback over
+images for functional assertions. Input publication/ACKs prove neither engine
+consumption nor a successful physical interaction. Keep positive physical contact,
+proximity and final solver outcomes separate. Screenshot originals must retain
+resolution, timestamp and degraded/unavailable labels.
+
+Respect existing manual games, real-headset sessions and process ownership.
+Use one exclusive live installation/game session. Use an isolated test profile,
+reuse within a compatible series where supported, restore the original session,
+then archive copied profiles/saves outside MO2's ordinary list. Never force-stop
+foreign processes or blindly repeat uncertain mutations. On interruption use
+recover with the original runtime/distribution and inspect restored/restoreErrors.
+
+During a run, execute only the agreed subject checks and collect evidence. Log
+tool health separately. Keep game termination, tool faults, mod assertions,
+coverage and queue/delivery state distinct. Do not change subject expectations
+to turn failure into success. After factual test end, verified restoration and
+finished evidence collection, produce the final report and give the exact origin
+the report plus evidence. A pre-subject launch failure is an unlaunched mod test;
+no premature completion notification or command to its source chat. Within the
+owner's project Polygon operates, mod chats analyze/fix, Dashboard orchestrates,
+and the executor-development chat repairs shared tooling.
+
+In headset-assisted mode the operator owns one listener, uses chat as the main
+channel and brief voice exceptionally. Do not replay buffered commands or use
+a developer chat as a speech relay. Before an explicitly requested screenshot,
+announce it, count down, finish the count, then capture once and verify the file.
+
+Conclude with actual behavior exercised, observed results, missing coverage,
+tooling limits, evidence paths and restoration. A technically healthy startup
+alone must never be reported as successful testing of the mod.

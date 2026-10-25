@@ -47,6 +47,8 @@ def validate(args):
     from . import grip_exchange
     if grip_exchange.validate(operation, req): return
     from . import actor_domain
+    from . import photography
+    if photography.validate(operation, req): return
     from . import actor_scene
     if actor_scene.validate(operation, req): return
     if actor_domain.validate(operation, req): return
@@ -483,6 +485,8 @@ class Backend:
                             'basis': 'native Potion and MagicEffect queries; sequential non-atomic snapshot'}}
 
     def observe(self, req):
+        from . import photography
+        if req.get('observation') in photography.READS:return photography.observe(self,req)
         from . import actor_scene
         if req.get('observation') in actor_scene.READS:return actor_scene.observe(self,req)
         from . import subject_state
@@ -696,6 +700,8 @@ class Backend:
 
     def mutate(self, req):
         action = req['action']
+        from . import photography
+        if action in photography.ACTIONS:return photography.perform(self,req)
         from . import actor_scene
         if action in actor_scene.ACTIONS:return actor_scene.perform(self,req)
         from . import subject_state

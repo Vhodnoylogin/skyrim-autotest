@@ -9,11 +9,11 @@ from pathlib import Path
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.2.2'
+VERSION = '0.3.0'
 INFO = 'skyrim_autotest-' + VERSION + '.dist-info'
 
 def package_files():
-    return sorted(p for p in (ROOT / 'skyrim_autotest').rglob('*') if p.is_file() and '__pycache__' not in p.parts and p.suffix not in ('.pyc', '.pyo'))
+    return sorted(p for p in (ROOT / 'skyrim_autotest').rglob('*') if p.is_file() and '__pycache__' not in p.parts and p.suffix in ('.py', '.h', '.json', '.md'))
 
 def write_archive(path, entries):
     with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as archive:
@@ -34,14 +34,21 @@ def main():
     entries = {str(p.relative_to(ROOT)).replace('\\','/'): p.read_bytes() for p in package_files()}
     for name in ('README.md', 'AGENTS.md', 'CLAUDE.md', 'LICENSE', 'dependencies.json', 'run.py', 'skyrim-autotest.cmd', 'pyproject.toml'):
         entries[name] = (ROOT / name).read_bytes()
-    for folder in ('docs','tests','tools','native','integrations'):
+    allowed = {'docs': {'.md'}, 'tests': {'.py', '.cpp', '.h'}, 'tools': {'.py', '.cpp', '.h'},
+               'native': {'.cpp', '.h'}, 'integrations': {'.js'}, 'agent-kit': {'.txt', '.md', '.json'}}
+    for folder, suffixes in allowed.items():
         for p in (ROOT/folder).rglob('*'):
-            if p.is_file() and '__pycache__' not in p.parts:
+            if p.is_file() and '__pycache__' not in p.parts and p.suffix in suffixes:
                 entries[str(p.relative_to(ROOT)).replace('\\','/')] = p.read_bytes()
     portable = output / ('skyrim-autotest-' + VERSION + '-portable.zip')
     write_archive(portable, entries)
+    kit_entries = dict(entries)
+    for name in ('START-HERE.md', 'PROMPT.txt', 'test-plan.example.json'):
+        kit_entries[name] = (ROOT / 'agent-kit' / name).read_bytes()
+    kit = output / ('skyrim-autotest-' + VERSION + '-agent-kit.zip')
+    write_archive(kit, kit_entries)
     wheel_entries = {str(p.relative_to(ROOT)).replace('\\','/'): p.read_bytes() for p in package_files()}
-    wheel_entries[INFO+'/METADATA'] = ('Metadata-Version: 2.1\nName: skyrim-autotest\nVersion: '+VERSION+'\nSummary: Bounded Skyrim VR tests with independent recovery\nRequires-Python: >=3.11\nLicense: MIT\n\n').encode()
+    wheel_entries[INFO+'/METADATA'] = ('Metadata-Version: 2.1\nName: skyrim-autotest\nVersion: '+VERSION+'\nSummary: Bounded Skyrim SE and VR tests with independent recovery\nRequires-Python: >=3.11\nLicense: MIT\n\n').encode()
     wheel_entries[INFO+'/WHEEL'] = b'Wheel-Version: 1.0\nGenerator: skyrim-autotest-stdlib-builder\nRoot-Is-Purelib: true\nTag: py3-none-any\n'
     wheel_entries[INFO+'/entry_points.txt'] = b'[console_scripts]\nskyrim-autotest = skyrim_autotest.cli:main\n'
     wheel_entries[INFO+'/licenses/LICENSE'] = (ROOT/'LICENSE').read_bytes()
@@ -50,6 +57,9 @@ def main():
     for p in (ROOT/'integrations').glob('*.js'):
         wheel_entries['skyrim_autotest/integrations/' + p.name] = p.read_bytes()
     wheel_entries['skyrim_autotest/dependencies.json'] = (ROOT/'dependencies.json').read_bytes()
+    for p in (ROOT / 'agent-kit').iterdir():
+        if p.is_file() and p.suffix in ('.txt', '.md', '.json'):
+            wheel_entries['skyrim_autotest/agent-kit/' + p.name] = p.read_bytes()
     record = io.StringIO(newline='')
     writer = csv.writer(record)
     for name, data in sorted(wheel_entries.items()):
@@ -59,7 +69,7 @@ def main():
     wheel_entries[INFO+'/RECORD'] = record.getvalue().encode()
     wheel = output / ('skyrim_autotest-' + VERSION + '-py3-none-any.whl')
     write_archive(wheel, wheel_entries)
-    manifest = {'schemaVersion':1,'version':VERSION,'pythonRuntimeDependencies':[], 'artifacts':[{'name':p.name,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'size':p.stat().st_size} for p in (portable,wheel)], 'sourceFiles':{name:hashlib.sha256(data).hexdigest() for name,data in sorted(entries.items())}}
+    manifest = {'schemaVersion':1,'version':VERSION,'pythonRuntimeDependencies':[], 'artifacts':[{'name':p.name,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'size':p.stat().st_size} for p in (portable,wheel,kit)], 'sourceFiles':{name:hashlib.sha256(data).hexdigest() for name,data in sorted(entries.items())}}
     (output/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
     print(json.dumps({'output':str(output), 'artifacts':manifest['artifacts']},indent=2))
 

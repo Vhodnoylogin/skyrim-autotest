@@ -3,6 +3,28 @@ from skyrim_autotest import api_contract
 
 
 class ApiContractTests(unittest.TestCase):
+    def test_stock_menu_descriptor_is_rejected_before_world_or_metadata_mutations(self):
+        from unittest.mock import patch, Mock
+        from skyrim_autotest.runner import Blocked
+        session = Mock(); session.state = {'port': 1}
+        with patch('skyrim_autotest.runner.request', return_value={'tools': [{'name':'menu','inputSchema':{'properties':{}}}]}):
+            with self.assertRaisesRegex(Blocked, 'native menu flags unavailable'):
+                api_contract.qualify_readiness(session)
+        session.tool.assert_not_called()
+
+    def test_runtime_readiness_contract_is_not_world_readiness_and_missing_flags_do_not_pass(self):
+        from unittest.mock import patch, Mock
+        from skyrim_autotest.runner import Blocked
+        descriptor={'tools':[{'name':'menu','inputSchema':{'properties':{'includeFlags':{'type':'boolean'}}}}]}
+        session=Mock();session.state={'port':1}
+        session.tool.return_value={'openMenus':[],'menuStates':[],'messageBoxOpen':False}
+        with patch('skyrim_autotest.runner.request',return_value=descriptor):
+            api_contract.qualify_readiness(session)
+        self.assertNotIn('gameplayBootstrap',session.state)
+        self.assertEqual(session.state['readinessApi'],{'nativeMenuFlags':True})
+        session.tool.return_value={'openMenus':['HUD Menu'],'menuStates':[],'messageBoxOpen':False}
+        with patch('skyrim_autotest.runner.request',return_value=descriptor):
+            with self.assertRaisesRegex(Blocked,'incomplete'):api_contract.qualify_readiness(session)
     def test_extension_schema_qualifies_refs_independently_of_host_core_inspect(self):
         descriptor={'readOnly':True,'inputSchema':{'properties':{
             'kind':{'const':'world_observer'},'refs':{'type':'array','maxItems':16}}}}

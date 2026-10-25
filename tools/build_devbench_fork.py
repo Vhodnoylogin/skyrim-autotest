@@ -13,6 +13,7 @@ SOURCE = 'https://github.com/Vhodnoylogin/devbench.git'
 COMMIT = '0d8caaec64ff4cfc904c1ff5914533c295003119'
 COMMONLIB = '9106d402cfc7dcbc5bf7458be6748af19d7fc914'
 RUNTIME_FIXTURES = 'd6630ddd672bef22bf2121944fb2c7b8ffec4f1c'
+PHOTOGRAPHY = '5ff3d711fcc6f35ef5427443551fae5c512c153d'
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -20,9 +21,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build-dir', type=Path, required=True)
     parser.add_argument('--runtime-fixtures', action='store_true', help='Build the unqualified native runtime ALCH fixture candidate')
+    parser.add_argument('--photography', action='store_true', help='Build the unqualified read-only VR photography measurement candidate')
     args = parser.parse_args()
     output = args.build_dir.resolve()
-    commit = RUNTIME_FIXTURES if args.runtime_fixtures else COMMIT
+    commit = PHOTOGRAPHY if args.photography else RUNTIME_FIXTURES if args.runtime_fixtures else COMMIT
     if output.is_relative_to(ROOT) or any((p / '.git').exists() for p in [output, *output.parents]):
         raise ValueError('Build directory must be new and outside Git')
     output.mkdir(parents=True, exist_ok=False)

@@ -1,7 +1,18 @@
 # Skyrim Autotest
 
-A standalone Windows executor for bounded Skyrim VR functional tests. It owns an
-isolated MO2 profile, synthetic HMD/controller input, result assertions and an
+Version0.3.0 adds a separate **Skyrim SE** launch path, a reproducible narrow
+DevBench1.32 compatibility build, and a vendor-neutral [AI-agent kit](agent-kit/START-HERE.md).
+`review-plan` critiques declared behavior coverage and priority without claiming
+whole-mod or executed coverage. See [current toolchain and qualification limits](docs/toolchain-refresh.md).
+
+This version also includes the previously prepared [generic disposable NPC photography candidate](docs/photography.md):
+tagged actors, keyed morph readback, owned VR camera framing, original PNG custody,
+paired metadata, complete shot index/contact sheet and restoration. Its native
+readback builds offline; actual render/provider qualification is still required.
+Do not treat these source capabilities as a ready photography platform.
+
+A standalone Windows executor for bounded Skyrim SE and VR functional tests. It owns an
+isolated MO2 profile, synthetic HMD/controller input for VR, result assertions and an
 independent recovery process. No project journal, AI client, shell toolkit, or
 Python third-party package is needed at runtime.
 
@@ -39,9 +50,16 @@ frontend is optional and is not a serial prerequisite for this executor.
 Requires Windows and Python 3.11+. For a wheel:
 
 ```powershell
-python -m pip install --no-deps ./skyrim_autotest-0.2.2-py3-none-any.whl
+python -m pip install --no-deps ./skyrim_autotest-0.3.0-py3-none-any.whl
 python -m skyrim_autotest init --directory C:/TestBench/config
 ```
+
+For the flat game use `init --edition se --directory C:/TestBench/se`; the
+default is `--edition vr`. Separate game targets need separate MO2/config/runtime
+directories and Bridge ports. SE skips OpenVR acquisition/configuration and the
+emulator. SE startup/world loading is an offline-tested candidate, pending an
+actual qualified SKSE/AddressLibrary/DevBench installation and live run. Its
+borrowed-profile, Root Builder and New Game UI paths remain explicitly unsupported.
 
 Alternatively extract the portable ZIP and run its `run.py` by absolute path,
 from any working directory. A Python interpreter must be installed; third-party
@@ -58,6 +76,9 @@ The generated physical-probe examples deliberately contain replacement fixture
 names/hashes and cannot run until an authorized save pair is supplied. Calculate
 SHA-256 of each `.ess` and `.skse` using your file tools, put their common stem and
 hashes in the scenario, and point `fixture_dir` to their external directory.
+
+The following physical-input installation applies to **VR**; SE uses the separate
+path and boundaries described above and in docs/toolchain-refresh.md.
 
 Install licensed Skyrim VR 1.4.15, SKSEVR 2.0.12, MO2, Root Builder and DevBench.
 Install MO2 API Bridge and register the SKSE loader in MO2 with the executable

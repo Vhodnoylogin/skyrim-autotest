@@ -11,9 +11,12 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="skyrim-autotest")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--config", type=Path, help="External configuration JSON; required for live operations")
-    parser.add_argument("command", choices=["init", "config-check", "preflight", "run", "status", "recover", "queue", "build-driver", "guardian", "guide"])
+    parser.add_argument("command", choices=["init", "config-check", "preflight", "run", "status", "recover", "queue", "build-driver", "guardian", "guide", "review-plan"])
     args, rest = parser.parse_known_args(argv)
     try:
+        if args.command == 'review-plan':
+            from .test_plan import main as review
+            return review(rest)
         if args.command == "guide":
             from importlib.resources import files
             print(files("skyrim_autotest").joinpath("AI_AGENTS.md").read_text(encoding="utf-8"))
@@ -21,17 +24,27 @@ def main(argv=None):
         if args.command == "init":
             sub = argparse.ArgumentParser(prog="skyrim-autotest init")
             sub.add_argument("--directory", type=Path, required=True)
+            sub.add_argument("--edition", choices=['vr', 'se'], default='vr')
             options = sub.parse_args(rest)
             directory = options.directory.resolve()
             directory.mkdir(parents=True, exist_ok=True)
             with (directory / "config.json").open("x", encoding="utf-8") as stream:
-                json.dump(template(), stream, indent=2)
+                json.dump(template(options.edition), stream, indent=2)
             from importlib.resources import files
             examples = files("skyrim_autotest").joinpath("examples")
             for file in examples.iterdir():
                 if file.name.endswith(".json"):
+                    if options.edition == 'se':
+                        continue
                     with (directory / file.name).open("x", encoding="utf-8") as stream:
                         stream.write(file.read_text(encoding="utf-8"))
+            if options.edition == 'se':
+                with (directory / 'se-world-smoke.json').open('x', encoding='utf-8') as stream:
+                    json.dump({'schemaVersion': 1, 'cell': 'QASmoke', 'steps': [
+                        {'name': 'world loaded (tool selftest only)', 'tool': 'inspect',
+                         'args': {'kind': 'scene'}, 'assert': [
+                             {'path': 'playerLoaded', 'equals': True},
+                             {'path': 'cell.editorId', 'equals': 'QASmoke'}]}]}, stream, indent=2)
             print(json.dumps({"configuration": str(directory / "config.json"), "instruction": "Replace paths and supply hash-pinned authorized fixture before running"}))
             return 0
         from . import runner, native
@@ -58,6 +71,8 @@ def main(argv=None):
         if os.name != "nt":
             raise ConfigurationError("Live testing and recovery require Windows")
         if args.command == "build-driver":
+            if value.get('game_edition') == 'se':
+                raise ConfigurationError('Skyrim SE does not use the VR driver')
             if rest:
                 raise ConfigurationError("Unexpected arguments to build-driver")
             from .build_driver import main as build

@@ -27,21 +27,46 @@ class Paths:
     def snapshot(self):
         return dict(self.value)
 
-PATH_KEYS = {"runtime", "mo2", "mo2_exe", "mo2_ini", "game", "mods", "profiles", "overwrite", "bridge_token", "openvr_paths", "skse_logs", "fixture_dir", "steam_exe"}
+PATH_KEYS = {"runtime", "mo2", "mo2_exe", "mo2_ini", "game", "mods", "profiles", "overwrite", "bridge_token", "openvr_paths", "skse_logs", "fixture_dir", "steam_exe", "root_builder_data"}
 REQUIRED = {"runtime", "mo2", "game", "mods", "profiles", "overwrite", "bridge_token", "openvr_paths", "skse_logs"}
 P = Paths()
 
 def configure(value, base=None):
     if value.get("schemaVersion") != SCHEMA:
         raise ConfigurationError("Configuration needs schemaVersion 1")
-    missing = sorted(k for k in REQUIRED if not value.get(k))
+    from .editions import target
+    try:
+        selected = target(value)
+    except (ValueError, TypeError) as error:
+        raise ConfigurationError(str(error)) from error
+    required = REQUIRED - ({'openvr_paths'} if selected['edition'] == 'se' else set())
+    missing = sorted(k for k in required if not value.get(k))
     if missing:
         raise ConfigurationError("Missing configuration fields: " + ", ".join(missing))
-    unknown = set(value) - PATH_KEYS - {"schemaVersion", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings", "allow_steam_client_restart", "boundary_collection", "fixture_actor_allowlist"}
+    unknown = set(value) - PATH_KEYS - {"schemaVersion", "game_edition", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings", "allow_steam_client_restart", "boundary_collection", "fixture_actor_allowlist", "fixture_actor_base_allowlist", "photography"}
     if unknown:
         raise ConfigurationError("Unknown configuration fields: " + ", ".join(sorted(unknown)))
     base = Path(base or Path.cwd()).resolve()
     result = dict(value)
+    result['game_edition'] = selected['edition']
+    if selected['edition'] == 'se' and (result.get('root_builder_data') or result.get('reuse_test_profile')):
+        raise ConfigurationError('SE Root Builder and borrowed/reusable MO2 profiles need separate qualification; keep them disabled')
+    if selected['edition'] == 'se' and any(result.get(k) for k in (
+            'controller_start_positions_metres', 'physical_grip_geometry',
+            'allow_background_physical_vr', 'allow_steam_client_restart')):
+        raise ConfigurationError('Skyrim SE must not configure VR controls or SteamVR recovery')
+    if 'photography' in result:
+        from .photography import configuration
+        try:configuration(result['photography'])
+        except (ValueError,TypeError,KeyError) as error:raise ConfigurationError('Invalid photography configuration: '+str(error)) from error
+    if 'fixture_actor_base_allowlist' in result:
+        from .actor_scene import selector
+        allowed=result['fixture_actor_base_allowlist']
+        try:
+            if not isinstance(allowed,list) or len(allowed)>16:raise ValueError('At most16 explicit NPC bases required')
+            keys=[selector(v) for v in allowed]
+            if len(set(keys))!=len(keys):raise ValueError('Duplicate NPC bases')
+        except (ValueError,TypeError,AttributeError) as error:raise ConfigurationError('Invalid fixture NPC base allowlist: '+str(error)) from error
     if 'fixture_actor_allowlist' in result:
         from .actor_scene import selector
         allowed=result['fixture_actor_allowlist']
@@ -100,7 +125,7 @@ def configure(value, base=None):
     port = result.setdefault("bridge_port", 8930)
     if type(port) is not int or not 1 <= port <= 65535:
         raise ConfigurationError("bridge_port must be an integer in [1, 65535]")
-    mods = result.setdefault("required_mods", ["DevBench", "VRIK Player Avatar", "HIGGS - Enhanced VR Interaction"])
+    mods = result.setdefault("required_mods", ["DevBench"] if selected['edition'] == 'se' else ["DevBench", "VRIK Player Avatar", "HIGGS - Enhanced VR Interaction"])
     if not isinstance(mods, list) or not mods or any(not isinstance(m, str) or not m or m in (".", "..") or "/" in m or "\\" in m for m in mods):
         raise ConfigurationError("required_mods must contain safe mod directory names")
     for key in ("extra_files", "devbench_runtime_files", "collected_files"):
@@ -177,5 +202,10 @@ def load(path):
     path = Path(path).resolve()
     return configure(json.loads(path.read_text(encoding="utf-8-sig")), path.parent)
 
-def template():
-    return {"schemaVersion": 1, "runtime": str(default_runtime()), "mo2": "REPLACE/MO2", "game": "REPLACE/SkyrimVR", "mods": "REPLACE/MO2/mods", "profiles": "REPLACE/MO2/profiles", "overwrite": "REPLACE/MO2/overwrite", "bridge_token": "REPLACE/MO2/plugins/mo2aibridge/mo2aibridge-token.txt", "bridge_port": 8930, "openvr_paths": str(Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "openvr/openvrpaths.vrpath"), "skse_logs": "REPLACE/Documents/My Games/Skyrim VR/SKSE", "fixture_dir": "REPLACE/authorized-fixture", "required_mods": ["DevBench", "VRIK Player Avatar", "HIGGS - Enhanced VR Interaction"], "extra_files": [], "staged_plugins": [], "devbench_runtime_files": []}
+def template(edition='vr'):
+    from .editions import target
+    selected = target({'game_edition': edition})
+    result = {"schemaVersion": 1, "game_edition": edition, "runtime": str(default_runtime()), "mo2": "REPLACE/MO2", "game": "REPLACE/" + selected['bridgeGame'], "mods": "REPLACE/MO2/mods", "profiles": "REPLACE/MO2/profiles", "overwrite": "REPLACE/MO2/overwrite", "bridge_token": "REPLACE/MO2/plugins/mo2aibridge/mo2aibridge-token.txt", "bridge_port": 8930, "skse_logs": "REPLACE/Documents/My Games/" + ('Skyrim VR' if edition == 'vr' else 'Skyrim Special Edition') + "/SKSE", "fixture_dir": "REPLACE/authorized-fixture", "required_mods": ["DevBench"] + (["VRIK Player Avatar", "HIGGS - Enhanced VR Interaction"] if edition == 'vr' else []), "extra_files": [], "staged_plugins": [], "devbench_runtime_files": []}
+    if edition == 'vr':
+        result['openvr_paths'] = str(Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "openvr/openvrpaths.vrpath")
+    return result

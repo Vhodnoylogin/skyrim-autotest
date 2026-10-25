@@ -101,12 +101,13 @@ def collect(session, segment=None):
             if launched and path.stat().st_mtime >= launched-1:
                 copy(path, path.name, 'skse-log')
         except OSError as exception: error(path, exception)
-    try:
-        steam = Path(read_json(session.state['preflight']['vrpaths'])['log'][0])
-        for name in ('vrserver.txt', 'vrcompositor.txt', 'vrmonitor.txt'):
-            copy(steam/name, name, 'steamvr-log')
-    except (OSError, ValueError, KeyError, IndexError) as exception:
-        error('SteamVR log metadata', exception)
+    if session.state.get('configuration', P.value).get('game_edition', 'vr') == 'vr':
+        try:
+            steam = Path(read_json(session.state['preflight']['vrpaths'])['log'][0])
+            for name in ('vrserver.txt', 'vrcompositor.txt', 'vrmonitor.txt'):
+                copy(steam/name, name, 'steamvr-log')
+        except (OSError, ValueError, KeyError, IndexError, TypeError) as exception:
+            error('SteamVR log metadata', exception)
     copy(P.mo2/'plugins/mo2aibridge/mo2aibridge.log', 'mo2aibridge.log', 'bridge-log')
     if segment is None and 'boundaryCollection' in session.state:
         from .boundary_collection import finalize
@@ -127,6 +128,9 @@ def collect(session, segment=None):
         from .actor_scene import collect as collect_actor_captures
         try:collect_actor_captures(session,copy)
         except (OSError,ValueError,KeyError,TypeError) as exception:error('actor contact captures',exception)
+        from .photography import collect as collect_photography
+        try:collect_photography(session,copy)
+        except (OSError,ValueError,KeyError,TypeError) as exception:error('photography',exception)
     capture = P.overwrite/'SKSE/Plugins/devbench/captures'
     if capture.exists():
         for path in capture.rglob(session.state['id']+'-*.png'):
