@@ -77,6 +77,16 @@ backup/compare-before-write evidence while the manager is closed. Omitting the
 version can instead expose category migration. This is instance preparation,
 not a subject scenario or a substitute for world readiness.
 
+The 2026-10-26 SE smoke corrected that instance preparation and actually launched
+an owned SKSE64 game with matching DevBench. It still failed before world loading:
+main-thread inspection never completed, including an interval in which game
+frames advanced, followed by a Main Menu stall. None of its twelve action checks
+ran. The copied SE INIs also omitted `bAlwaysActive`; background pause is a
+possible additional problem, not an established explanation of the initial task
+failure. Foreground state was not captured. The guardian restored the session;
+an acknowledged queued `qqq` request does not prove its execution or an entirely
+normal session end. SE gameplay/control qualification remains unavailable.
+
 VR adds SteamVR/OpenVR, separate head/hand poses, physical buttons/axes and
 calibration before the same world-ready boundary. The supplied2.0.1 archive is
 the small AHK frontend, not the separate driver archive. Its stock driver shares
