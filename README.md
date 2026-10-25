@@ -1,5 +1,9 @@
 # Skyrim Autotest
 
+The `feature/se-morph-presets` branch contains the unqualified 0.3.8
+[semantic preset/link adapter](docs/morph-presets.md). The native-tested SE
+baseline remains the exact 0.3.7 configuration in [SE setup](docs/se-qualified.md).
+
 Version0.3.7 prepares background activity only in the copied SE profile and waits
 for native dataLoaded/Main Menu events before probing SKSE tasks. World readiness
 and action assertions remain separate mandatory stages. Its exact SE configuration

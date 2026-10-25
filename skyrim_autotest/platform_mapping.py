@@ -6,7 +6,8 @@ def operations():
         'state.read': ['world.ready'],
         'player.read': ['player.health.points', 'actor.reference', 'actor.base', 'actor.sex',
                         'actor.race', 'actor.loaded3D', 'actor.weight'],
-        'world.read': ['save.completed', 'save.ownedByAttempt', 'save.essSha256', 'save.skseSha256',
+        'world.read': ['catalog.presetNames','catalog.sex','catalog.emptyAvailabilityUnknown',
+                       'preset.name','preset.status','preset.statusName','preset.lastError','save.completed', 'save.ownedByAttempt', 'save.essSha256', 'save.skseSha256',
                        'lifecycle.worldReady', 'lifecycle.pidChanged', 'lifecycle.generationChanged',
                        'lifecycle.oldReferenceTagsInvalidated', 'alchemy.effects.0.runtimeId', 'alchemy.runtimeId', 'alchemy.poison', 'alchemy.hostile', 'alchemy.food',
                        'alchemy.effectCount', 'alchemy.effects', 'alchemy.hasDetrimentalEffect',
@@ -30,7 +31,7 @@ def operations():
                        'speech.broker.interfaceVersion', 'speech.broker.adapters', 'speech.broker.asrSource',
                        'speech.subscribers.namespaces', 'speech.vocabulary.phrase', 'speech.events.roundtripCompleted',
                        'speech.recognition.doorTextCount', 'speech.auction.doorGreedyAwardCount', 'speech.utterances.records'],
-        'controller.perform': ['inputIssued','gripExchange.singlePublication'], 'object.perform': ['action.completed','fixture.actor.prepared','fixture.actor.movementEnabled','fixture.actor.pushCompleted',
+        'controller.perform': ['inputIssued','gripExchange.singlePublication'], 'object.perform': ['action.admitted','action.completed','fixture.actor.prepared','fixture.actor.movementEnabled','fixture.actor.pushCompleted',
             'fixture.actor.created','camera.framing.completed','camera.target.inFrame','photo.saved','photo.decoded',
             'photo.configuration.matchesReadback','photo.camera.matchesReadback','photo.target.inFrame','photo.hud.hidden',
             'camera.restored','hud.restored'], 'input.perform': [], 'menu.read': []

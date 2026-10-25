@@ -44,6 +44,8 @@ def validate(args):
     req = args.get('request', {})
     if not isinstance(req, dict):
         raise ValueError('Semantic request must be an object')
+    from . import preset_domain
+    if preset_domain.validate(operation, req): return
     from . import grip_exchange
     if grip_exchange.validate(operation, req): return
     from . import actor_domain
@@ -485,6 +487,8 @@ class Backend:
                             'basis': 'native Potion and MagicEffect queries; sequential non-atomic snapshot'}}
 
     def observe(self, req):
+        from . import preset_domain
+        if req.get('quantity') in preset_domain.READS: return preset_domain.observe(self, req)
         from . import photography
         if req.get('observation') in photography.READS:return photography.observe(self,req)
         from . import actor_scene
@@ -699,6 +703,8 @@ class Backend:
         return {'inputIssued': True, 'observedGameplaySuccess': None, 'publication': response}
 
     def mutate(self, req):
+        from . import preset_domain
+        if req.get('action') in preset_domain.ACTIONS: return preset_domain.perform(self, req)
         action = req['action']
         from . import photography
         if action in photography.ACTIONS:return photography.perform(self,req)
