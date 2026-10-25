@@ -21,6 +21,16 @@ SE preflight rejects Root Builder installations/root mods, borrowed/reusable MO2
 profiles and VR-control configuration until those combinations are qualified.
 New Game UI is not qualified for SE: declare a cell or authorized pinned save.
 
+SE preparation sets `General/bAlwaysActive=1` in `Skyrim.ini` and
+`SkyrimCustom.ini` of the owned copied profile, retaining before/after hashes.
+The source profile remains unchanged and the copied files follow normal archive
+and removal. This prevents ordinary background pausing without requiring focus
+stealing. Before the first SKSE task probe, the executor waits on the independent
+native event stream for contiguous `dataLoaded` and an open `Main Menu`, checking
+the owned process identity. Event gaps, resets, unexpected world transitions and
+late responses refuse admission. This startup admission is not world readiness;
+the task, menu, world and scenario checks still run afterward.
+
 The optional tool-owned `boundary_collection` plan records supplementary semantic
 reads at exact, reviewed settled main-scenario boundaries. It defaults to absent
 and needs its own live qualification. See [boundary collection](boundary-collection.md)

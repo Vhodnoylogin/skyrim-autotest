@@ -71,6 +71,10 @@ class EditionTests(unittest.TestCase):
             with self.assertRaises(config.ConfigurationError): config.configure(dict(self.value, **change))
 
     def test_se_setup_restores_and_archives_without_vr_write_or_driver_download(self):
+        source_ini = '[General]\nsLanguage=ENGLISH'
+        source_custom = '[General]\nbAlwaysActive=0\n'
+        (self.source / 'Skyrim.ini').write_text(source_ini)
+        (self.source / 'SkyrimCustom.ini').write_text(source_custom)
         info = self.preflight()
         directory = runner.RUNS / 'se-offline'
         directory.mkdir(parents=True)
@@ -85,6 +89,11 @@ class EditionTests(unittest.TestCase):
         paths = [p['path'] for p in state['snapshots']]
         self.assertFalse(any('openvr' in p.lower() or 'steamvr' in p.lower() for p in paths))
         self.assertTrue(Path(state['testProfile']).is_dir())
+        copied = Path(state['testProfile'])
+        self.assertIn('bAlwaysActive=1', (copied / 'Skyrim.ini').read_text())
+        self.assertIn('sLanguage=ENGLISH', (copied / 'Skyrim.ini').read_text())
+        self.assertIn('bAlwaysActive=1', (copied / 'SkyrimCustom.ini').read_text())
+        self.assertEqual(len(state['seBackgroundPreparation']['files']), 2)
         with patch.object(runner.native, 'processes', return_value=[{'pid':4,'parent':0,'name':'System'}]), patch.object(session, 'collect', return_value=True):
             session.cleanup()
         self.assertTrue(state['restored'])
@@ -92,6 +101,16 @@ class EditionTests(unittest.TestCase):
         self.assertFalse(Path(state['testProfile']).exists())
         self.assertTrue((directory / 'test-profile/modlist.txt').exists())
         self.assertEqual((self.source / 'SkyrimPrefs.ini').read_text(), '[Main]\nbSaveOnTravel=1\n')
+        self.assertEqual((self.source / 'Skyrim.ini').read_text(), source_ini)
+        self.assertEqual((self.source / 'SkyrimCustom.ini').read_text(), source_custom)
+        self.assertIn('bAlwaysActive=1', (directory / 'test-profile/SkyrimCustom.ini').read_text())
+
+    def test_missing_ini_key_preserves_last_value_without_terminal_newline(self):
+        for newline in ('\n', '\r\n'):
+            with self.subTest(newline=repr(newline)):
+                original = '[General]' + newline + 'sLanguage=ENGLISH'
+                actual = runner.set_ini(original, 'General', 'bAlwaysActive', '1')
+                self.assertEqual(actual, original + newline + 'bAlwaysActive=1' + newline)
 
     def test_se_collection_does_not_require_steamvr_metadata(self):
         info = self.preflight()

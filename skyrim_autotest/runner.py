@@ -142,6 +142,8 @@ def set_ini(text, section, key, value):
     if keypattern.search(contents):
         contents = keypattern.sub(lambda match: match[1] + value, contents)
     else:
+        if contents and not contents.endswith(('\n', '\r')):
+            contents += newline
         contents += f'{key}={value}{newline}'
     return text[:match.start(1)] + contents + text[match.end(1):]
 
@@ -820,6 +822,18 @@ class Session:
         for key in ('LocalSaves', 'LocalSettings'):
             settings_text = set_ini(settings_text, 'General', key, 'true')
         settings_file.write_text(settings_text, encoding='utf-8')
+        if not vr:
+            prepared = []
+            for name in ('Skyrim.ini', 'SkyrimCustom.ini'):
+                path = test_profile / name
+                before = sha(path) if path.is_file() else None
+                text = path.read_text(encoding='utf-8-sig') if path.exists() else '[General]\n'
+                path.write_text(set_ini(text, 'General', 'bAlwaysActive', '1'), encoding='utf-8')
+                prepared.append({'path': str(path), 'beforeSha256': before, 'sha256': sha(path)})
+            self.state['seBackgroundPreparation'] = {'files': prepared,
+                'scope': 'owned copied profile only; source profile unchanged'}
+            self.save()
+            self.log('se-background-profile-prepared', files=prepared)
         if P.value.get('allow_owned_save_load') is True:
             owned_saves = test_profile / 'saves'
             from .profile_cache import regular_tree
@@ -1018,6 +1032,14 @@ class Session:
                 except (OSError, ValueError, KeyError, RuntimeError):
                     continue
             if advancing:
+                if selected['edition'] == 'se':
+                    from .se_startup import wait_main_menu
+                    wait_main_menu(self)
+                    try:
+                        focus = native.focus_owned(self.state['game'], activate=False)
+                    except Exception as error:
+                        focus = {'available': False, 'error': str(error)}
+                    self.log('se-startup-focus-observed', observation=focus)
                 self.wait_task_queue()
                 return
             time.sleep(1)

@@ -1,5 +1,10 @@
 # Skyrim Autotest
 
+Version0.3.7 prepares background activity only in the copied SE profile and waits
+for native dataLoaded/Main Menu events before probing SKSE tasks. World readiness
+and action assertions remain separate mandatory stages. This repair is a
+candidate until its exact end-to-end SE qualification succeeds.
+
 Version0.3.6 includes the exact [modern DevBench acquisition/build recipe](docs/devbench-modern-se.md)
 for the SkyrimSE1.7.104 candidate and records its separate SDK configuration.
 The provider passed offline compilation/tests; it is not game-qualified or
