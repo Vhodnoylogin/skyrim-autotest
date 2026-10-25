@@ -64,6 +64,19 @@ SKSE2.3.1 and AddressLibraryv13. This target is an offline-tested candidate unti
 that complete installation is exercised in game. Root Builder, borrowed/reusable
 MO2 and actual New Game UI transitions are deliberately refused for SE for now.
 
+Complete a new MO2 instance's initial setup before its first qualification. In
+MO2 2.5.2, missing `General.first_start` defaults to first startup; onboarding
+dialogs run before plugins receive `onUserInterfaceInitialized`. A loaded Bridge
+plugin therefore need not have started its server. Capture the exact owned MO2
+window when this gate stalls; never blindly accept an unknown dialog or treat a
+late server response as a completed game launch. A deliberately generated portable
+test instance with its game, paths, profile and categories already configured
+must also initialize `General.first_start=false` and `General.version=2.5.2`.
+Use the actual installed manager version, preserve other INI bytes and retain
+backup/compare-before-write evidence while the manager is closed. Omitting the
+version can instead expose category migration. This is instance preparation,
+not a subject scenario or a substitute for world readiness.
+
 VR adds SteamVR/OpenVR, separate head/hand poses, physical buttons/axes and
 calibration before the same world-ready boundary. The supplied2.0.1 archive is
 the small AHK frontend, not the separate driver archive. Its stock driver shares
@@ -71,6 +84,16 @@ a pose and neutralizes grip/trigger/axes; replacing our driver with it would
 remove necessary automation capabilities. Keep the exact owned physical backend
 pins. The calibration frame now sends supported touch bits only. Lease/ACK
 success still requires actual menu closure and world/physical readback.
+
+The 2026-10-25 VR smoke attempt reached a Steam-started, uninstrumented game;
+no fresh matching DevBench or gameplay assertions were obtained. Initial SKSEVR
+injection and a `patched iat` log alone do not prove main SKSE initialization.
+An independently observed Steam process must stay outside the runner's owned
+tree unless its provenance is proven. The shutdown guard correctly preserves
+the shared VR runtime in this case. A deliberate separately reviewed cleanup
+does not make the failed test pass, establish an exact historical start count,
+or authorize another VR game. Preserve raw logs, exact identities, unavailable
+coverage and restoration state; do not add guessed AppID or DRM workarounds.
 
 Real-headset assisted testing uses the owner's hardware and operator-owned voice
 channel. It is distinct from unattended emulated VR; neither mode is permission
