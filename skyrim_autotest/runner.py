@@ -175,8 +175,11 @@ def preflight(profile, restart_idle_mo2=False):
     for plugin in P.staged_plugins:
         if not Path(plugin['source']).is_file() or sha(plugin['source']) != plugin['sha256']:
             raise Blocked('Missing or changed staged plugin: ' + plugin['source'])
-    for path in (P.mo2_exe, P.mo2_ini, P.game / selected['executable'],
-                 P.game / selected['loader'], source / 'modlist.txt'):
+    root_policy = P.value.get('root_builder')
+    required_files = [P.mo2_exe, P.mo2_ini, P.game / selected['executable'], source / 'modlist.txt']
+    if not root_policy:
+        required_files.append(P.game / selected['loader'])
+    for path in required_files:
         if not path.is_file():
             raise Blocked(f'Missing required file: {path}')
     loader_contract = None
@@ -217,6 +220,17 @@ def preflight(profile, restart_idle_mo2=False):
         if caps.get('profileSelect') != 'nativeQt':
             raise Blocked('Reusable profiles require native Bridge profile selection')
     vrpaths = runtime = config = vive_profile = original = rbdata = None
+    root_contract = None
+    if root_policy:
+        from . import root_builder
+        try:
+            root_contract = root_builder.preflight(P.snapshot(), source)
+        except (ValueError, OSError, KeyError) as error:
+            raise Blocked('Root Builder preflight: ' + str(error)) from error
+        rbdata = Path(root_contract['paths']['root_builder_data'])
+        original = rbdata / 'Backup/openvr_api.dll'
+        if not original.is_file() or original.stat().st_size >= 2000000:
+            raise Blocked('Explicit Root Builder needs its pinned game/version stock OpenVR backup')
     if vr:
         vrpaths = P.openvr_paths
         paths = read_json(vrpaths)
@@ -231,14 +245,14 @@ def preflight(profile, restart_idle_mo2=False):
     required = set(P.required_mods)
     if not required <= enabled:
         raise Blocked('Required disabled mods: ' + str(sorted(required - enabled)))
-    if vr:
+    if vr and not root_policy:
         rb = P.mo2 / 'plugins/data/RootBuilder'
         originals = [p for p in rb.rglob('openvr_api.dll') if p.parent.name == 'Backup' and p.stat().st_size < 2000000]
         if len(originals) != 1:
             raise Blocked('Need exactly one verified stock openvr_api.dll in Root Builder backup')
         original = originals[0]
         rbdata = original.parent.parent
-    elif (P.mo2 / 'plugins/data/RootBuilder').exists() or any((m / 'Root').is_dir() for m in P.mods.iterdir()):
+    elif not vr and ((P.mo2 / 'plugins/data/RootBuilder').exists() or any((m / 'Root').is_dir() for m in P.mods.iterdir())):
         raise Blocked('SE Root Builder integration is not qualified; no Root Builder files will be modified')
     # Fingerprint installed binaries, rather than the stale business index.
     dlls = {}
@@ -258,6 +272,7 @@ def preflight(profile, restart_idle_mo2=False):
     from . import steam_restore
     steam_client = steam_restore.preflight(P.snapshot())
     return {'profile': profile, 'gameEdition': selected['edition'], 'loaderContract': loader_contract, 'bridgeSession': bridge_session, 'originalBridgeProfile': bridge_profile,
+            'rootBuilder': root_contract,
             'steamClientRestart': steam_client,
             'runtime': str(runtime) if runtime else None, 'settings': str(config) if config else None,
             'viveInputProfile': str(vive_profile) if vive_profile else None, 'viveInputProfileHash': sha(vive_profile) if vive_profile else None,
@@ -308,6 +323,15 @@ class Session:
 
     def snapshot(self, path):
         path = Path(path).resolve()
+        # An immutable shared game executable must never enter generic recovery,
+        # even through another hardlink supplied as an extra/staged write target.
+        current = path.stat() if path.is_file() else None
+        for tree in self.state.get('rootBuilder', {}).get('contract', {}).get('trees', []):
+            for relative, immutable in tree.get('immutableFiles', {}).items():
+                if (path == (Path(tree['path']) / relative).resolve() or
+                        current is not None and (current.st_dev, current.st_ino) ==
+                        (immutable['device'], immutable['inode'])):
+                    raise Blocked('Refusing any snapshot/write of the immutable hard-linked game executable')
         if any(s['path'].casefold() == str(path).casefold() for s in self.state['snapshots']):
             return
         entry = {'path': str(path), 'exists': path.is_file()}
@@ -700,6 +724,15 @@ class Session:
                 self.state['reopenMO2'] = False
                 self.save()
                 raise Blocked('Idle MO2 did not close gracefully; refusing to force it')
+        if info.get('rootBuilder'):
+            from . import root_builder
+            fresh_contract = root_builder.preflight(P.snapshot(), P.profiles / info['profile'])
+            if (fresh_contract != info['rootBuilder'] or
+                    any(not (P.profiles / info['profile'] / name).is_file() or
+                        sha(P.profiles / info['profile'] / name) != digest
+                        for name, digest in info['profileHashes'].items())):
+                raise Blocked('Root Builder or source profile changed while closing idle MO2; a new plan is required')
+            root_builder.prepare(self, info['rootBuilder'])
         dep = ROOT / 'dependencies/driver-dedb8ab.zip'
         if vr and not dep.exists():
             dep.parent.mkdir(parents=True, exist_ok=True)
@@ -711,8 +744,8 @@ class Session:
         if vr and sha(dep) != DRIVER_ZIP_HASH:
             raise Blocked('Pinned driver archive hash mismatch')
         # Snapshot any Root Builder target including targets from disabled OCU.
-        targets = {P.game / 'openvr_api.dll'} if vr else set()
-        for mod in P.mods.iterdir():
+        targets = {P.game / 'openvr_api.dll'} if vr and not info.get('rootBuilder') else set()
+        for mod in ([] if info.get('rootBuilder') else P.mods.iterdir()):
             root = mod / 'Root'
             if root.is_dir():
                 for file in root.rglob('*'):
@@ -722,7 +755,7 @@ class Session:
             self.snapshot(path)
             if info.get('rootBuilderData'):
                 self.snapshot(Path(info['rootBuilderData']) / 'Backup' / path.relative_to(P.game))
-        if info.get('rootBuilderData'):
+        if info.get('rootBuilderData') and not info.get('rootBuilder'):
             for file in (Path(info['rootBuilderData']) / 'Backup').rglob('*'):
                 if file.is_file():
                     self.snapshot(file)
@@ -754,7 +787,7 @@ class Session:
             self.snapshot(path)
         # Existing deployed OCU entries must not be merged into the test build and
         # harvested back into third-party mods when Root Builder clears it.
-        old_build = Path(info['rootBuilderData']) / 'BuildData.json' if info.get('rootBuilderData') else None
+        old_build = Path(info['rootBuilderData']) / 'BuildData.json' if info.get('rootBuilderData') and not info.get('rootBuilder') else None
         if old_build and old_build.exists():
             old_build.unlink()
         # Isolated profile: never load or autosave over the owner's original saves.
@@ -919,6 +952,15 @@ class Session:
             raise Blocked('MO2 selected profile does not match the isolated profile')
         if ping.get('game') != selected['bridgeGame'] or Path(ping.get('modsPath', '')).resolve() != P.mods.resolve():
             raise Blocked('MO2 bridge belongs to a different game/instance')
+        bridge_identity = None
+        if self.state.get('rootBuilder'):
+            bridge_identity = request(P.bridge_port, 'session', token=token, timeout=3)
+            owned_mo2 = [row['identity'] for row in self.state['owned'] if row['role'] == 'mo2']
+            if (len(owned_mo2) != 1 or bridge_identity.get('mo2Pid') != owned_mo2[0]['pid'] or
+                    native.identity(owned_mo2[0]['pid']) != owned_mo2[0] or
+                    not bridge_identity.get('serverBootId') or not bridge_identity.get('instanceId') or
+                    Path(bridge_identity.get('profilesPath', '')).resolve() != P.profiles.resolve()):
+                raise Blocked('Root Builder requires the exact live owned MO2 Bridge boot')
         if selected['edition'] == 'vr':
             self.phase('start-steamvr', 90)
             self.spawn([str(Path(self.state['preflight']['runtime']) / 'bin/win64/vrstartup.exe')], 'vr')
@@ -933,12 +975,20 @@ class Session:
         self.phase('start-skse', 180)
         self.state['launchIntents']['game'] = {'at': time.time(), 'directory': str(P.game)}
         self.save()
-        launch = request(P.bridge_port, 'run', {'binary': 'SKSE', 'wait': False,
-            'iUnderstandTheRisk': 'yes-I-read-the-docs-and-accept-irreversible-changes'}, token=token, timeout=30)
+        launch_body = {'binary': 'SKSE', 'wait': False,
+            'iUnderstandTheRisk': 'yes-I-read-the-docs-and-accept-irreversible-changes'}
+        if bridge_identity:
+            launch_body.update(expectedServerBootId=bridge_identity['serverBootId'],
+                               expectedInstance=bridge_identity['instanceId'],
+                               expectedProfile=self.state['testProfileName'])
+        launch = request(P.bridge_port, 'run', launch_body, token=token, timeout=30)
         self.log('mo2-launch', result=launch)
         if not launch.get('started') or launch.get('applied') is False:
             raise Blocked('MO2 did not start registered SKSE')
-        if launch.get('pid'):
+        if self.state.get('rootBuilder'):
+            from . import root_builder
+            root_builder.record_launch(self, launch, bridge_identity)
+        elif launch.get('pid'):
             self.own(launch['pid'], 'loader')
         self.phase('wait-devbench', 180)
         candidates = runtime_candidates(P.snapshot())
@@ -1101,14 +1151,25 @@ class Session:
                          noLiveSetupMutations=True, forcedStop=False)
         if busy:
             raise RuntimeError(f'Unexpected session after owned process shutdown: {busy}')
+        if self.state.get('rootBuilder'):
+            self.state['rootBuilderMO2Finished'] = {'verified': True, 'game': self.state.get('game'),
+                'ownedMO2': [row['identity'] for row in self.state['owned'] if row['role'] == 'mo2'],
+                'at': time.time()}
+            self.save()
         with self.lock:
             self.state['restoringFiles'] = True
             self.save()
         from . import steam_restore
         steam_restore.prepare(self)
         errors = []
+        # This scope is restored by its own validated lifecycle below. Do not
+        # write it first through the legacy loop, bypassing its immutable checks.
+        root_snapshots = {str(Path(path).resolve()).casefold()
+                          for path in self.state.get('rootBuilder', {}).get('snapshotPaths', [])}
         for snapshot in reversed(self.state['snapshots']):
             path = Path(snapshot['path'])
+            if str(path.resolve()).casefold() in root_snapshots:
+                continue
             try:
                 self.restore_file(snapshot)
             except OSError as e:
@@ -1125,6 +1186,14 @@ class Session:
         self.save()
         if errors:
             raise RuntimeError(f'Restoration incomplete: {errors}')
+        if self.state.get('rootBuilder'):
+            from . import root_builder
+            try:
+                root_builder.restore(self)
+            except Exception as error:
+                self.state['restoreErrors'].append({'path': 'root-builder-managed-view', 'error': str(error)})
+                self.save()
+                raise
         steam_restore.reopen(self)
         profile = self.state.get('testProfile')
         if self.state.get('reusableProfile'):
@@ -1360,6 +1429,9 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
             if fault == 'after-setup':
                 os._exit(99)  # Acceptance test: guardian must restore without finally.
             session.launch()
+            if session.state.get('rootBuilder'):
+                from . import root_builder
+                root_builder.verify_started(session)
             if any(sha(Path(__file__).parent / name) != digest for name, digest in state['executorHashes'].items()):
                 raise Blocked('Executor source changed during startup; rerun with stable sources')
             if fault == 'after-ready':

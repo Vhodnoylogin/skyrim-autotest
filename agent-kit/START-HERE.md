@@ -21,6 +21,10 @@ not Skyrim, MO2, SKSE, DevBench, drivers, models or private saves.
 3. Read `docs/toolchain-refresh.md`. Stock DevBench1.32 is not a drop-in readiness
    provider: the narrow compatibility candidate must be built/qualified separately.
    Acquisition recipes and known hashes are in `dependencies.json`.
+   If VR uses Root Builder, read `docs/root-builder.md`: opt into the audited
+   cold-owned lifecycle with exact source bundle/cache pins. A loader missing
+   before autobuild is different from a missing source bundle. Never deploy it
+   manually or clear an uncertain Polygon reservation as a workaround.
 4. Describe relevant mod behavior in `test-plan.example.json`, save the edited
    plan externally, then run:
 

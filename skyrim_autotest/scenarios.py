@@ -56,11 +56,13 @@ def validate(scenario):
         if not rules and (step.get('observe') is not True or step.get('poll')):
             raise ValueError('A step needs assertions, or explicit non-polling observe:true')
         for rule in rules:
-            operators = [k for k in ('equals', 'contains', 'min', 'max', 'exists') if k in rule]
+            operators = [k for k in ('equals', 'contains', 'min', 'max', 'exists', 'type') if k in rule]
             if len(operators) != 1 or not isinstance(rule.get('path', ''), str):
                 raise ValueError('Assertion needs exactly one operator and a string path')
             if 'exists' in rule and type(rule['exists']) is not bool:
                 raise ValueError('exists assertion needs a boolean')
+            if 'type' in rule and (type(rule['type']) is not str or rule['type'] not in RESULT_TYPES):
+                raise ValueError('Unsupported returned JSON type assertion')
             for operator in ('min', 'max'):
                 if operator in rule and (type(rule[operator]) not in (int, float) or not math.isfinite(rule[operator])):
                     raise ValueError(operator + ' assertion needs a finite number')
@@ -99,6 +101,8 @@ def field(value, path):
 
 def check(value, rule):
     actual = field(value, rule.get('path', ''))
+    if 'type' in rule:
+        return result_type(actual, rule['type'])
     if 'equals' in rule:
         return json_equal(actual, rule['equals'])
     if 'contains' in rule:
@@ -109,7 +113,28 @@ def check(value, rule):
         return type(actual) in (int, float) and math.isfinite(actual) and actual <= rule['max']
     if 'exists' in rule:
         return (actual is not None) == rule['exists']
-    raise ValueError('Assertion needs equals, contains, min or exists')
+    raise ValueError('Assertion needs equals, contains, min, max, exists or type')
+
+
+RESULT_TYPES = frozenset(('null', 'boolean', 'integer', 'number', 'string', 'array', 'object',
+                          'boolean[]', 'integer[]', 'number[]', 'string[]'))
+
+
+def result_type(value, expected):
+    """JSON return types, not Papyrus declaration or mutation-effect evidence."""
+    if type(expected) is not str or expected not in RESULT_TYPES:
+        raise ValueError('Unsupported returned JSON type assertion')
+    if expected.endswith('[]'):
+        return type(value) is list and all(result_type(item, expected[:-2]) for item in value)
+    if expected == 'number':
+        if type(value) not in (int, float):
+            return False
+        try:
+            return math.isfinite(value)
+        except OverflowError:
+            return False
+    return type(value) is {'null': type(None), 'boolean': bool, 'integer': int, 'string': str,
+                           'array': list, 'object': dict}[expected]
 
 
 def json_equal(actual, expected):

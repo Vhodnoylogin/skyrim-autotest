@@ -6,6 +6,15 @@ session, configured module pins, finite deadline and mask-checked measurements.
 It does not move startup handling into a mod scenario or qualify a platform by
 being syntactically accepted.
 
+Typed native return checks use a separate assertion, for example
+`{"path":"returned","type":"string[]"}` or type `boolean`/`number`. Arrays
+validate every element; booleans never coerce strings/numbers, and `number`
+requires finite JSON numeric data (it does not distinguish a Papyrus float from
+integer notation). Verify the live declared function signature separately, and
+assert actual values/effects independently. Typed transport is not mutation or
+render evidence. Supported types: null, boolean, integer, number, string, array,
+object and primitive boolean[]/integer[]/number[]/string[].
+
 `startMode:"new-game"` selects the identified NEW item in the actual Skyrim VR
 main menu, verifies its confirmation state, and requires fresh ordered main-menu
 close, loading-start and target-cell-loaded events before world readiness.

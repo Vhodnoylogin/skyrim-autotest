@@ -1,5 +1,12 @@
 # Skyrim Autotest
 
+Version0.3.4 adds an explicit pinned Root Builder5.1.1 copy-mode lifecycle for
+cold-owned VR launches. It validates the source SKSEVR bundle before deployment,
+checks the actual deployed bundle and preserves Root-source/overwrite/cache
+changes during restoration. See [Root Builder contract](docs/root-builder.md).
+Typed assertions also validate actual returned JSON primitives and arrays.
+Source tests do not establish live qualification of this new launch path.
+
 Version0.3.3 adds the optional owned-session `native14` read: exact endpoint and
 declared loaded-module checks, bounded fresh native samples, explicit load/body
 transition comparisons and transactional evidence tags. See [live-read contract](docs/native14-live.md).
@@ -63,7 +70,7 @@ frontend is optional and is not a serial prerequisite for this executor.
 Requires Windows and Python 3.11+. For a wheel:
 
 ```powershell
-python -m pip install --no-deps ./skyrim_autotest-0.3.3-py3-none-any.whl
+python -m pip install --no-deps ./skyrim_autotest-0.3.4-py3-none-any.whl
 python -m skyrim_autotest init --directory C:/TestBench/config
 ```
 

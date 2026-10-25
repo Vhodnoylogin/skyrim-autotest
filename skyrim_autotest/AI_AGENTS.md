@@ -1,5 +1,16 @@
 # AI-agent instructions: Skyrim Autotest
 
+For explicit VR Root Builder support read docs/root-builder.md. Pin the audited
+copy package, existing game/version cache and unique SKSEVR source bundle; use
+only cold-owned MO2. Never copy the loader manually to bypass preflight, change
+cache exclusions or restore the hardlinked game executable. The new lifecycle
+requires its own live qualification and does not clear an old queue reservation.
+For native14 read docs/native14.md and docs/native14-live.md: validate actual
+availability masks, exact endpoint/module pins and the owned ready game. Offline
+validation, command receipts and diagnostic history do not prove gameplay,
+rendered behavior, input consumption, equipment transactions or physics.
+Never use direct run or another runtime root to bypass Polygon admission.
+
 For either Skyrim SE or VR, read docs/toolchain-refresh.md and the distributed
 agent-kit/PROMPT.txt. Select the target explicitly (`init --edition se|vr`), keep
 independent configurations and never install VR runtime resources for SE. Use
@@ -47,7 +58,7 @@ Measured signal is not human-speech qualification; coordinate actual owner speec
 with the sample, inspect headset/streaming mute/permissions, and never silently
 switch to a desktop microphone or restart the manual game.
 
-Use this tool for autonomous, bounded Skyrim VR tests after the owner has
+Use this tool for autonomous, bounded Skyrim SE or VR tests after the owner has
 requested/authorized testing. Existing authorization persists; do not ask again
 for ordinary reversible launches within that scope. New fixture setup and mod
 installation must remain within the owner's requested scope.

@@ -76,6 +76,13 @@ Real-headset assisted testing uses the owner's hardware and operator-owned voice
 channel. It is distinct from unattended emulated VR; neither mode is permission
 to appropriate a running manual session.
 
+Executor0.3.4 adds the explicit VR [Root Builder copy-mode lifecycle](root-builder.md).
+The old0.3.1 qualification refused the undeployed game-root SKSEVR loader before
+native setup; it did not qualify startup. The new candidate verifies its actual
+enabled source, cold-owned Bridge launch, deployed bundle and complete Root
+restoration. It needs a new bounded live qualification after independent accounting
+and completion of the old reservation; frozen failed plans remain unchanged.
+
 ## High-value test planning
 
 Use the kit's case inventory and `review-plan` before creating subject scenarios.

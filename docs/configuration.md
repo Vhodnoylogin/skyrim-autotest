@@ -4,6 +4,13 @@ Optional `native14_live` pins the actual modules/expected absence and freshness
 policy for executor-local read-only native14 steps. It is VR-only and requires
 separate live qualification; see [owned native14 reads](native14-live.md).
 
+Optional `root_builder` and `root_builder_data` select the explicitly pinned VR
+Root Builder copy-mode lifecycle. The loader may be absent in the physical game
+root before MO2 autobuild, but its exact enabled source bundle must be present.
+Borrowed/reusable MO2 and SE are not admitted in this mode. See
+[Root Builder planning and restoration](root-builder.md). Without this policy,
+the legacy physical game-root loader requirement remains in force.
+
 `game_edition` is `vr` (legacy default) or `se`. Generate separate templates with
 `init --edition vr|se`; use separate external runtimes and MO2 installations. SE
 requires `SkyrimSE.exe`, `skse64_loader.exe`, a registered SKSE entry with that
@@ -79,6 +86,7 @@ file whose content is read immediately before an authenticated request.
 | extra_files | Explicit paths to regular files that may change; existence/content snapshotted before launch |
 | collected_files | Optional explicit subset of extra_files to capture before restoration; each file is required, at most64MiB, and hash-pinned in evidence; defaults to empty |
 | staged_plugins | External source files staged into MO2 overwrite before launch, with source/destination/sha256 |
+| root_builder / root_builder_data | Optional audited copy-5.1.1 policy and exact existing game/version cache directory; see root-builder.md |
 | devbench_runtime_files | Optional discovery file override list; default LOCALAPPDATA/devbench/vr/runtime.json and overwrite/SKSE/Plugins/devbench/runtime.json |
 | controller_start_positions_metres | Optional platform-owned left/right tracking translations, three finite metre values each within [-2,2]; open-hand pose applied once after common gameplay readiness and before subject actions |
 | reuse_test_profile | Optional boolean, default false; candidate lifecycle requiring an already-open idle MO2 with session-bound native Bridge selection; reuse an owned archived profile across compatible runs/series |

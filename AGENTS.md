@@ -22,6 +22,12 @@ SE uses no VR adapter and does not support unqualified Root Builder/borrowed-pro
 or New Game UI paths. A stock1.32 version string does not prove native menu flags,
 safe Papyrus metadata, physics/contact data or a capture provider are available.
 
+For explicit VR Root Builder support read docs/root-builder.md. Pin the audited
+copy package, existing game/version cache and unique SKSEVR source bundle; use
+only cold-owned MO2. Never copy the loader manually to bypass preflight, change
+cache exclusions or restore the hardlinked game executable. The new lifecycle
+requires its own live qualification and does not clear an old queue reservation.
+
 1. Read README, docs/configuration.md and docs/scenarios.md. Discover the explicit
    external config; do not guess the owner's game/MO2 profile paths. `init`
    creates a template only, never installs mods or prepares a personal save.
