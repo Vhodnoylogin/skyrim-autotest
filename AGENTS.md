@@ -10,6 +10,11 @@ Read docs/toolchain-refresh.md and agent-kit/PROMPT.txt. Use review-plan to chal
 the case inventory, relevance weights, core behavior, severe data-loss risks and
 actual-result oracles. Report planned declared-case coverage separately from
 executed coverage; never infer whole-mod coverage from a test or assertion count.
+For native14 diagnostics read docs/native14.md. Validate the real producer
+contract and availability masks before selecting measurements. Exact decimal
+tokens, nonfinite IEEE diagnostics and native haptic requests are not defaults,
+rendered pixels, hardware delivery or equipment transaction receipts. Offline
+file validation neither qualifies the provider nor authorizes a game run.
 SE uses no VR adapter and does not support unqualified Root Builder/borrowed-profile
 or New Game UI paths. A stock1.32 version string does not prove native menu flags,
 safe Papyrus metadata, physics/contact data or a capture provider are available.

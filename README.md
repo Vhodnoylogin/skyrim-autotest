@@ -1,5 +1,10 @@
 # Skyrim Autotest
 
+Version0.3.2 adds [read-only native14 result validation](docs/native14.md), exact
+uint64/IEEE preservation, mask-aware measurements and bounded haptic-request
+history checks. `validate-native14` checks an already collected file without a
+game/configuration; its success is not live platform or mod-test acceptance.
+
 Version0.3.1 adds a separate **Skyrim SE** launch path, a reproducible narrow
 DevBench1.32 compatibility build, and a vendor-neutral [AI-agent kit](agent-kit/START-HERE.md).
 `review-plan` critiques declared behavior coverage and priority without claiming
@@ -53,7 +58,7 @@ frontend is optional and is not a serial prerequisite for this executor.
 Requires Windows and Python 3.11+. For a wheel:
 
 ```powershell
-python -m pip install --no-deps ./skyrim_autotest-0.3.1-py3-none-any.whl
+python -m pip install --no-deps ./skyrim_autotest-0.3.2-py3-none-any.whl
 python -m skyrim_autotest init --directory C:/TestBench/config
 ```
 

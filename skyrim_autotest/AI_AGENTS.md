@@ -113,7 +113,11 @@ installation must remain within the owner's requested scope.
 Commands: `python -m skyrim_autotest --config <external JSON> <command>`.
 For portable extraction use `python <absolute distribution>/run.py ...`.
 Commands are init, config-check, build-driver, preflight, run, status, recover and
-queue. `guide` prints these instructions. Fault injection requires a deliberate
+queue, with offline review-plan and validate-native14. Native14 file checks
+preserve decimal uint64/IEEE bits; require field availability before consuming
+values. Request-site haptic records do not prove hardware delivery, and file
+validation does not establish a live provider or authorize a run. See
+docs/native14.md in the source/portable kit. `guide` prints these instructions. Fault injection requires a deliberate
 recovery-test task; its expected failed result is not a mod regression.
 
 Code contributors: use Python standard library only for runtime; preserve

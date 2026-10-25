@@ -11,9 +11,12 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="skyrim-autotest")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--config", type=Path, help="External configuration JSON; required for live operations")
-    parser.add_argument("command", choices=["init", "config-check", "preflight", "run", "status", "recover", "queue", "build-driver", "guardian", "guide", "review-plan"])
+    parser.add_argument("command", choices=["init", "config-check", "preflight", "run", "status", "recover", "queue", "build-driver", "guardian", "guide", "review-plan", "validate-native14"])
     args, rest = parser.parse_known_args(argv)
     try:
+        if args.command == 'validate-native14':
+            from .native14_cli import main as validate_native14
+            return validate_native14(rest)
         if args.command == 'review-plan':
             from .test_plan import main as review
             return review(rest)

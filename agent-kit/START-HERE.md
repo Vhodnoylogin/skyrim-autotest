@@ -44,3 +44,8 @@ not Skyrim, MO2, SKSE, DevBench, drivers, models or private saves.
 
 Full command reference, supported boundaries and recovery are in README and docs.
 Source/offline tests do not establish live acceptance of a new game/provider build.
+
+For a qualified producer's already collected native14 diagnostics, use
+`validate-native14 --snapshot FILE --expected-pid PID --max-age-micros AGE`.
+Read docs/native14.md before selecting measurements or haptic intervals. Offline
+validation never supplies gameplay readiness, producer identity or launch authority.
