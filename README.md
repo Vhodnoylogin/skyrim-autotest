@@ -1,5 +1,10 @@
 # Skyrim Autotest
 
+Version0.3.6 includes the exact [modern DevBench acquisition/build recipe](docs/devbench-modern-se.md)
+for the SkyrimSE1.7.104 candidate and records its separate SDK configuration.
+The provider passed offline compilation/tests; it is not game-qualified or
+bundled in the agent kit. Existing safety guards from0.3.5 remain unchanged.
+
 Version0.3.5 refuses owned-process shutdown when an unowned or unidentified game
 is present, before stopping the shared VR runtime. It rechecks between shutdown
 groups and releases only its own input first. The0.3.4 live attempt did not reach
@@ -76,7 +81,7 @@ frontend is optional and is not a serial prerequisite for this executor.
 Requires Windows and Python 3.11+. For a wheel:
 
 ```powershell
-python -m pip install --no-deps ./skyrim_autotest-0.3.5-py3-none-any.whl
+python -m pip install --no-deps ./skyrim_autotest-0.3.6-py3-none-any.whl
 python -m skyrim_autotest init --directory C:/TestBench/config
 ```
 

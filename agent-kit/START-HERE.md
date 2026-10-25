@@ -21,6 +21,10 @@ not Skyrim, MO2, SKSE, DevBench, drivers, models or private saves.
 3. Read `docs/toolchain-refresh.md`. Stock DevBench1.32 is not a drop-in readiness
    provider: the narrow compatibility candidate must be built/qualified separately.
    Acquisition recipes and known hashes are in `dependencies.json`.
+   SkyrimSE1.7.104 requires the separate modern SDK/provider candidate described
+   in `docs/devbench-modern-se.md`. An old VR SDK DLL or the upstream version
+   string alone does not establish this target. Build/qualify the exact provider;
+   do not substitute an incompatible prebuilt library.
    If VR uses Root Builder, read `docs/root-builder.md`: opt into the audited
    cold-owned lifecycle with exact source bundle/cache pins. A loader missing
    before autobuild is different from a missing source bundle. Never deploy it

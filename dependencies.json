@@ -66,6 +66,21 @@
       "archiveSha256": "3eb37e9e6b3c5065f0f498fc0f5e1747b6cae459512b70f67aec6e42eefa9309"
     }
   ],
+  "devbenchModernSECandidate": {
+    "targetRuntime": "SkyrimSE 1.7.104.0; live qualification pending",
+    "upstreamVersion": "1.32.0",
+    "source": "https://github.com/Vhodnoylogin/devbench/tree/fix/autotest-v132-se17104",
+    "commit": "3bb1673f95923f9a8185cf3df0337d775548033d",
+    "commonlibSource": "https://github.com/Vhodnoylogin/CommonLibSSE-NG/tree/fix/typeinfo-array-pointer-modern-se",
+    "commonlibCommit": "0c95630c29ff98f64caeea83c29ca373cf93e58b",
+    "commonlibBase": "a898f469851c464d05137bb74b069dd234897643",
+    "openvrHeadersCommit": "60eb187801956ad277f1cae6680e3a410ee0873b",
+    "rebuild": "docs/devbench-modern-se.md; exact source/configuration/commands, no binaries bundled",
+    "observedDllSha256": "665d71e91390aae754cf1296dd8318d58fafee45da92f2d51cc9488a9658c512",
+    "observedPdbSha256": "609a2adee0b1b0ae66bbe5a935894054affc879450de979b87114f60cdcbe0ff",
+    "status": "Compiled with own matching source SDK;314 native cases and8 actual SDK decoder cases passed; exact original decoder negative control failed as expected. Not installed/game-qualified by these tests.",
+    "note": "Old VR SDK/provider pins remain separate. Do not mix another SDK library/header/features/CRT configuration or infer target support from the1.32 version string. Rebuilt binary hashes may differ; pin matching actual outputs."
+  },
   "devbenchCompatibilityCandidate": {
     "upstreamVersion": "1.26.0",
     "source": "https://github.com/Vhodnoylogin/devbench/tree/fix/vr-readiness-v126",
