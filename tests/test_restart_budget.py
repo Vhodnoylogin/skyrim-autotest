@@ -70,7 +70,7 @@ class BudgetTests(unittest.TestCase):
             s['gameRestartHistory']=[{'ordinal':i,'completed':True} for i in range(1,7)]
             s['activeScenarioStep']=s['ownedGameRestartBudget']['slots'][6]
             with patch.object(native,'alive',side_effect=lambda i:fixture.old_live if i['pid']==17 else True), \
-                 patch.object(native,'processes',return_value=[]),patch.object(runner,'request',side_effect=request):
+                 patch.object(native,'processes',return_value=[{'pid':4,'parent':0,'name':'System'}]),patch.object(runner,'request',side_effect=request):
                 game_restart.start(b)
             self.assertEqual(fixture.segments,['before-restart-7'])
             self.assertEqual(sum(route=='run' for route,args in fixture.calls),1)

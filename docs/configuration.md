@@ -35,6 +35,15 @@ newer durable main-thread data. `result.json` includes `heartbeatHealth`; a
 failed or non-stopping monitor makes the technical result fail even when game
 checks and file restoration succeeded. Heartbeat health is not gameplay readiness.
 
+Cleanup releases its own synthetic input, then checks current game/loader
+identities before quitting any owned process. An unidentified, reused or unowned
+game PID prevents shutdown, including shutdown of the owned shared SteamVR
+runtime. Checks repeat between role groups and before individual close/terminate
+requests. This is sampled observation, not an atomic exclusion of later manual
+launches. It never adopts a Steam-created game merely because path/time matches.
+The exact refusal remains in state/logs; ordinary recovery must wait for the
+foreign session to end rather than closing it or altering live files under it.
+
 Optional `allow_steam_client_restart: true` requires an explicit `steam_exe` path.
 It authorizes one graceful `steam.exe -shutdown` only if the exact preflight
 client is still alive, holds our staged null-driver module, its executable and

@@ -1,5 +1,11 @@
 # Skyrim Autotest
 
+Version0.3.5 refuses owned-process shutdown when an unowned or unidentified game
+is present, before stopping the shared VR runtime. It rechecks between shutdown
+groups and releases only its own input first. The0.3.4 live attempt did not reach
+DevBench readiness; no gameplay/data qualification is claimed. See
+[validation and retained limits](docs/validation.md).
+
 Version0.3.4 adds an explicit pinned Root Builder5.1.1 copy-mode lifecycle for
 cold-owned VR launches. It validates the source SKSEVR bundle before deployment,
 checks the actual deployed bundle and preserves Root-source/overwrite/cache
@@ -70,7 +76,7 @@ frontend is optional and is not a serial prerequisite for this executor.
 Requires Windows and Python 3.11+. For a wheel:
 
 ```powershell
-python -m pip install --no-deps ./skyrim_autotest-0.3.4-py3-none-any.whl
+python -m pip install --no-deps ./skyrim_autotest-0.3.5-py3-none-any.whl
 python -m skyrim_autotest init --directory C:/TestBench/config
 ```
 

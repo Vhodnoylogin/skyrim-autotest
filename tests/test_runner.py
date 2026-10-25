@@ -28,7 +28,7 @@ class RecoveryTests(unittest.TestCase):
     def test_repeated_write_keeps_first_backup_and_recovers(self):
         self.session.write(self.file, b'changed once')
         self.session.write(self.file, b'changed twice')
-        with patch.object(native, 'processes', return_value=[]), patch.object(self.session, 'collect'):
+        with patch.object(native, 'processes', return_value=[{'pid':4,'parent':0,'name':'System'}]), patch.object(self.session, 'collect'):
             self.session.cleanup()
         self.assertEqual(self.file.read_bytes(), b'original\r\n')
         self.assertTrue(self.session.state['restored'])
@@ -41,6 +41,100 @@ class RecoveryTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Unexpected session'):
                 self.session.cleanup()
         self.assertEqual(self.file.read_bytes(), b'test state')
+
+    def test_foreign_game_blocks_before_shared_vr_or_mo2_shutdown(self):
+        ours = {'pid': 41, 'birth': 101, 'path': 'runtime/vrserver.exe'}
+        foreign = {'pid': 42, 'birth': 102, 'path': 'game/SkyrimVR.exe'}
+        self.session.state['owned'] = [{'role': 'vr', 'identity': ours}]
+        rows = [{'pid': 42, 'parent': 99, 'name': 'SkyrimVR.exe'}]
+        with patch.object(self.session, 'discover'), \
+             patch.object(native, 'processes', return_value=rows), \
+             patch.object(native, 'identity', return_value=foreign), \
+             patch.object(native, 'close') as close, patch.object(native, 'terminate') as terminate, \
+             patch.object(self.session, 'collect') as collect:
+            with self.assertRaisesRegex(RuntimeError, 'shared runtime preserved'):
+                self.session.cleanup()
+        close.assert_not_called()
+        terminate.assert_not_called()
+        collect.assert_not_called()
+        self.assertEqual(self.session.state['foreignGameShutdownRefused'][0]['identity'], foreign)
+        self.assertFalse(self.session.state.get('restored', False))
+
+    def test_shutdown_guard_rejects_unknown_or_reused_game_pid(self):
+        old = {'pid': 42, 'birth': 102, 'path': 'game/SkyrimVR.exe'}
+        self.session.state['owned'] = [{'role': 'game', 'identity': old}]
+        rows = [{'pid': 42, 'parent': 99, 'name': 'SkyrimVR.exe'}]
+        for identity in (None, {**old, 'birth': 103}):
+            with self.subTest(identity=identity), patch.object(native, 'processes', return_value=rows), \
+                 patch.object(native, 'identity', return_value=identity):
+                with self.assertRaisesRegex(RuntimeError, 'Unexpected session'):
+                    self.session.guard_shutdown()
+        with patch.object(native, 'processes', return_value=rows), patch.object(native, 'identity', return_value=old):
+            self.session.guard_shutdown()
+
+    def test_shutdown_guard_refuses_empty_or_unavailable_process_inventory(self):
+        for inventory in ([], None, {}, 'unavailable'):
+            with self.subTest(inventory=inventory), patch.object(native, 'processes', return_value=inventory):
+                with self.assertRaisesRegex(RuntimeError, 'Process inventory unavailable'):
+                    self.session.guard_shutdown()
+
+    def test_own_input_is_released_and_persisted_before_discovery_failure(self):
+        self.session.state['hardwareFrame'] = {'held': True}
+        order = []
+        def release(frame):
+            order.append('release')
+            frame['held'] = False
+        def publish(frame, new_command=False):
+            order.append('publish')
+            self.assertFalse(frame['held'])
+            self.assertTrue(new_command)
+        def discovery_failure():
+            order.append('discover')
+            raise OSError('process enumeration failed')
+        with patch('skyrim_autotest.hardware.release', side_effect=release), \
+             patch.object(self.session, 'publish_hardware', side_effect=publish), \
+             patch.object(self.session, 'discover', side_effect=discovery_failure):
+            with self.assertRaisesRegex(OSError, 'process enumeration failed'):
+                self.session.cleanup()
+        self.assertEqual(order, ['release', 'publish', 'discover'])
+        self.assertFalse(runner.read_json(self.dir / 'state.json')['hardwareFrame']['held'])
+
+    def test_foreign_game_appearing_during_photo_cleanup_blocks_before_quit(self):
+        game = {'pid': 42, 'birth': 102, 'path': 'game/SkyrimVR.exe'}
+        foreign = {'pid': 43, 'birth': 103, 'path': 'game/SkyrimVR.exe'}
+        self.session.state.update(game=game, owned=[{'role': 'game', 'identity': game}])
+        rows = [{'pid': 4, 'parent': 0, 'name': 'System'},
+                {'pid': 42, 'parent': 7, 'name': 'SkyrimVR.exe'}]
+        def late_foreign(session):
+            rows.append({'pid': 43, 'parent': 99, 'name': 'SkyrimVR.exe'})
+        with patch.object(self.session, 'discover'), \
+             patch.object(native, 'processes', side_effect=lambda: list(rows)), \
+             patch.object(native, 'identity', side_effect=lambda pid: {42: game, 43: foreign}.get(pid)), \
+             patch.object(native, 'alive', return_value=True), \
+             patch('skyrim_autotest.photography.cleanup', side_effect=late_foreign), \
+             patch.object(self.session, 'tool') as tool, \
+             patch.object(native, 'close') as close, patch.object(native, 'terminate') as terminate:
+            with self.assertRaisesRegex(RuntimeError, 'shared runtime preserved'):
+                self.session.cleanup()
+        tool.assert_not_called()
+        close.assert_not_called()
+        terminate.assert_not_called()
+
+    def test_foreign_game_appearing_between_role_groups_stops_later_shutdown(self):
+        game = {'pid': 42, 'birth': 102, 'path': 'game/SkyrimVR.exe'}
+        vr = {'pid': 41, 'birth': 101, 'path': 'runtime/vrserver.exe'}
+        self.session.state['owned'] = [{'role': 'vr', 'identity': vr}]
+        healthy = [{'pid': 4, 'parent': 0, 'name': 'System'}]
+        rows = [healthy, healthy, healthy, [{'pid': 42, 'parent': 99, 'name': 'SkyrimVR.exe'}]]
+        with patch.object(self.session, 'discover'), \
+             patch.object(native, 'processes', side_effect=rows), \
+             patch.object(native, 'identity', return_value=game), \
+             patch.object(native, 'alive', return_value=False), \
+             patch.object(native, 'close') as close, patch.object(native, 'terminate') as terminate:
+            with self.assertRaisesRegex(RuntimeError, 'shared runtime preserved'):
+                self.session.cleanup()
+        close.assert_not_called()
+        terminate.assert_not_called()
 
     def test_pristine_restart_refusal_preserves_exact_preflight_mo2(self):
         idle = {'pid': 999, 'birth': 123, 'path': 'original/ModOrganizer.exe'}
@@ -74,7 +168,7 @@ class RecoveryTests(unittest.TestCase):
     def test_corrupt_backup_is_not_restored(self):
         self.session.write(self.file, b'test state')
         Path(self.session.state['snapshots'][0]['backup']).write_bytes(b'corrupt')
-        with patch.object(native, 'processes', return_value=[]), patch.object(self.session, 'collect'):
+        with patch.object(native, 'processes', return_value=[{'pid':4,'parent':0,'name':'System'}]), patch.object(self.session, 'collect'):
             with self.assertRaisesRegex(RuntimeError, 'Restoration incomplete'):
                 self.session.cleanup()
         self.assertFalse(self.session.state['restored'])
@@ -83,7 +177,7 @@ class RecoveryTests(unittest.TestCase):
     def test_new_file_removed_without_touching_neighbors(self):
         new = self.dir / 'new.ini'
         self.session.write(new, b'test state')
-        with patch.object(native, 'processes', return_value=[]), patch.object(self.session, 'collect'):
+        with patch.object(native, 'processes', return_value=[{'pid':4,'parent':0,'name':'System'}]), patch.object(self.session, 'collect'):
             self.session.cleanup()
         self.assertFalse(new.exists())
         self.assertEqual(self.file.read_bytes(), b'original\r\n')

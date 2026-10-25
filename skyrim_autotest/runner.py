@@ -1059,10 +1059,33 @@ class Session:
         elif path.exists():
             path.unlink() # Individually registered file only.
 
+    def guard_shutdown(self):
+        """A foreign game must not lose a shared VR runtime during our cleanup.
+
+        This read never claims a process by path/time or closes a foreign game.
+        Check before any shutdown, including again between owned role groups.
+        """
+        foreign = []
+        owned = [row['identity'] for row in self.state.get('owned', [])
+                 if row.get('role') in ('game', 'loader')]
+        processes = native.processes()
+        if not isinstance(processes, list) or not processes:
+            raise RuntimeError('Process inventory unavailable; refusing owned shutdown and preserving shared runtime')
+        for row in processes:
+            if row['name'].lower() not in GAME_NAMES:
+                continue
+            identity = native.identity(row['pid'])
+            if identity is None or identity not in owned:
+                foreign.append({**row, 'identity': identity})
+        if foreign:
+            self.state['foreignGameShutdownRefused'] = foreign
+            self.save()
+            self.log('foreign-game-shutdown-refused', processes=foreign,
+                     sharedVRRuntimePreserved=True, noForeignOwnershipInferred=True)
+            raise RuntimeError('Unexpected session before owned shutdown; shared runtime preserved: ' + str(foreign))
+
     def cleanup(self):
         self.phase('stop-and-restore', 150)
-        from .photography import cleanup as cleanup_photography
-        cleanup_photography(self)
         if self.state.get('hardwareFrame'):
             from . import hardware
             with self.lock:
@@ -1070,6 +1093,11 @@ class Session:
                 self.publish_hardware(self.state['hardwareFrame'], new_command=True)
                 self.save()
         self.discover()
+        self.guard_shutdown()
+        from .photography import cleanup as cleanup_photography
+        cleanup_photography(self)
+        self.discover()
+        self.guard_shutdown()
         if self.state.get('game') and native.alive(self.state['game']):
             try:
                 self.tool('console', {'action': 'exec', 'command': 'qqq'}, timeout=4)
@@ -1078,14 +1106,17 @@ class Session:
         roles = ('game', 'loader', 'mo2', 'vr')
         for role in roles:
             self.discover()
+            self.guard_shutdown()
             owned = [p['identity'] for p in self.state['owned'] if p['role'] == role and native.alive(p['identity'])]
             for ident in owned:
+                self.guard_shutdown()
                 native.close(ident)
             end = time.monotonic() + (12 if owned else 0)
             while time.monotonic() < end and any(native.alive(i) for i in owned):
                 time.sleep(.5)
             for ident in owned:
                 if native.alive(ident):
+                    self.guard_shutdown()
                     self.log('forced-stop', role=role, pid=ident['pid'])
                     native.terminate(ident)
             end = time.monotonic() + 4

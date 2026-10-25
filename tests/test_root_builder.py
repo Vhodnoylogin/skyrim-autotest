@@ -106,7 +106,7 @@ class RootBuilderTests(unittest.TestCase):
                 path.unlink()
         self.session.restore_file = restore_file
         self.identities = {}
-        self.process_rows = []
+        self.process_rows = [{'pid': 4, 'parent': 0, 'name': 'System'}]
         for patch in (mock.patch.object(native, 'identity', lambda pid: copy.deepcopy(self.identities.get(pid))),
                       mock.patch.object(native, 'alive', lambda identity: self.identities.get(identity['pid']) == identity),
                       mock.patch.object(native, 'processes', lambda: list(self.process_rows))):

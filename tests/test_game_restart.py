@@ -18,7 +18,7 @@ class RestartTests(unittest.TestCase):
                 self.assertFalse(any(route=='run' for route,args in self.calls))
                 self.calls.append(('fixture-write',None))
             with patch.object(native,'alive',side_effect=lambda i:self.old_live if i['pid']==17 else True), \
-                 patch.object(native,'processes',return_value=[]),patch.object(runner,'request',side_effect=request):
+                 patch.object(native,'processes',return_value=[{'pid':4,'parent':0,'name':'System'}]),patch.object(runner,'request',side_effect=request):
                 game_restart.start(b,before_launch=prepare)
             routes=[route for route,args in self.calls]
             self.assertEqual(routes.count('fixture-write'),1)
@@ -29,7 +29,7 @@ class RestartTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             b,new,request=self.backend(Path(tmp))
             with patch.object(native,'alive',side_effect=lambda i:self.old_live if i['pid']==17 else True), \
-                 patch.object(native,'processes',return_value=[]),patch.object(runner,'request',side_effect=request):
+                 patch.object(native,'processes',return_value=[{'pid':4,'parent':0,'name':'System'}]),patch.object(runner,'request',side_effect=request):
                 with self.assertRaisesRegex(ValueError,'fixture failed'):
                     game_restart.start(b,before_launch=lambda:(_ for _ in ()).throw(ValueError('fixture failed')))
             self.assertFalse(any(route=='run' for route,args in self.calls))
@@ -92,7 +92,7 @@ class RestartTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             b,new,request=self.backend(Path(tmp))
             with patch.object(native,'alive',side_effect=lambda i:self.old_live if i['pid']==17 else True), \
-                 patch.object(native,'processes',return_value=[]),patch.object(runner,'request',side_effect=request), \
+                 patch.object(native,'processes',return_value=[{'pid':4,'parent':0,'name':'System'}]),patch.object(runner,'request',side_effect=request), \
                  patch.object(native,'terminate') as terminate:
                 game_restart.start(b)
             self.assertEqual(b.s.state['game'],new)
@@ -120,7 +120,7 @@ class RestartTests(unittest.TestCase):
                 return request(port,route,body,**kwargs)
             b.pause=lambda t:(_ for _ in ()).throw(TimeoutError('bounded stop'))
             with patch.object(native,'alive',side_effect=lambda i:self.old_live if i['pid']==17 else True), \
-                 patch.object(native,'processes',return_value=[]),patch.object(runner,'request',side_effect=stale):
+                 patch.object(native,'processes',return_value=[{'pid':4,'parent':0,'name':'System'}]),patch.object(runner,'request',side_effect=stale):
                 with self.assertRaises(TimeoutError):game_restart.start(b)
             self.assertNotIn('game',b.s.state)
             self.assertFalse(b.s.state['gameRestartTransition']['completed'])

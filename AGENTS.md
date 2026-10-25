@@ -38,6 +38,8 @@ requires its own live qualification and does not clear an old queue reservation.
 3. Run `config-check`, build the external pinned driver if missing/stale, then
    `preflight --profile <name>`. An idle MO2 restart is explicit. Never take over
    a user's running game/SteamVR or force-close unrelated processes.
+   A foreign game appearing during shutdown also blocks closing shared SteamVR;
+   retain the refusal and use the original recovery path after it safely ends.
 4. Validate the scenario locally (`skyrim_autotest.scenarios.validate`). For
    physical controls use `tool:driver` full absolute frames and bounded leases.
    DevBench direct input is a separate diagnostic backend. Publication success,

@@ -1,5 +1,31 @@
 # Validation and scope
 
+## 2026-10-25 independent0.3.4 candidate — not qualified
+
+The Root Builder candidate passed source/portable tests and installed read-only
+planning, but its bounded VR run did not reach a fresh matching DevBench API.
+None of the declared menu/Papyrus/typed-return/save-load checks ran. An owned
+game process was observed; a later Steam-created game was outside SKSE/DevBench/
+USVFS. Its relationship to the original launch and the exhaustive start count
+remain unproven. The observed lower bound is two game processes, not an exact
+attributed count. One Bridge launch request does not establish one physical start.
+
+The first cleanup refused the foreign game only after shutting down owned shared
+VR services. The later game's fatal exit followed that runtime shutdown; this
+cannot explain the initial missing API. Recovery subsequently verified tracked
+Root/source/cache/settings restoration, archived the copied profile and restored
+the source selection. This does not attest unknown write domains of the unowned
+game or convert the failed attempt into successful qualification.
+
+Version0.3.5 moves the foreign-game guard before shutdown and repeats it during
+the sequence; ownership is never inferred from time/path alone. Its regression
+tests prove call ordering and refusal, not a new live run. Original plans, unknown
+accounting and the retained qualification barrier must remain unchanged. Current
+SE1.7.104 also needs a separately compiled/qualified modern SDK/provider and exact
+normally acquired game dependencies; a VR candidate is not SE acceptance.
+
+## Historical independent extraction
+
 The extracted independent source passes 59 regression checks: original recovery,
 PID reuse, ancestry and delayed-modal checks, plus explicit configuration,
 external runtime policy, staging confinement, durable config recovery, portable

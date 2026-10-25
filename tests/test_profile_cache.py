@@ -94,7 +94,7 @@ class BorrowedMO2RecoveryTests(unittest.TestCase):
             responses = [bridge, {'busy': True}, bridge, {}, {'profile': 'Test'},
                          {'applied': True, 'current': 'Owner'}, {'profile': 'Owner'}]
             with patch.dict(runner.P.value, {'bridge_token': str(token), 'bridge_port': 1}), \
-                    patch.object(native, 'alive', return_value=True), patch.object(native, 'processes', return_value=[]), \
+                    patch.object(native, 'alive', return_value=True), patch.object(native, 'processes', return_value=[{'pid':4,'parent':0,'name':'System'}]), \
                     patch.object(runner.time, 'sleep') as sleep, \
                     patch.object(runner, 'request', side_effect=responses) as request:
                 session.bridge_profile('Owner', restoring=True)
@@ -109,7 +109,7 @@ class BorrowedMO2RecoveryTests(unittest.TestCase):
             session = runner.Session(Path(tmp), {'borrowedMO2': {'pid': 17},
                 'preflight': {'bridgeSession': bridge}})
             with patch.dict(runner.P.value, {'bridge_token': str(token), 'bridge_port': 1}), \
-                    patch.object(native, 'alive', return_value=True), patch.object(native, 'processes', return_value=[]), \
+                    patch.object(native, 'alive', return_value=True), patch.object(native, 'processes', return_value=[{'pid':4,'parent':0,'name':'System'}]), \
                     patch.object(native, 'close') as close, \
                     patch.object(runner.time, 'monotonic', side_effect=[0, 31]), \
                     patch.object(runner, 'request', side_effect=[bridge, {'busy': True}]) as request:
@@ -205,6 +205,6 @@ class BorrowedMO2RecoveryTests(unittest.TestCase):
             with patch.object(native, 'processes', return_value=processes), \
                     patch.object(native, 'alive', return_value=True), patch.object(native, 'identity', return_value=idle), \
                     patch.object(session, 'collect'), patch.object(session, 'bridge_profile') as switch:
-                with self.assertRaisesRegex(RuntimeError, 'Unexpected session before Bridge'):
+                with self.assertRaisesRegex(RuntimeError, 'Unexpected session before owned shutdown'):
                     session.cleanup()
             switch.assert_not_called()

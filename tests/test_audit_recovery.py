@@ -21,7 +21,7 @@ class CollectionRecoveryTests(unittest.TestCase):
         self.file=self.root/'original.ini'; self.file.write_bytes(b'original')
         self.session.write(self.file,b'modified')
         self.patcher=patch.object(runner,'P',self.config); self.patcher.start(); self.addCleanup(self.patcher.stop)
-        self.processes=patch.object(native,'processes',return_value=[]); self.processes.start(); self.addCleanup(self.processes.stop)
+        self.processes=patch.object(native,'processes',return_value=[{'pid':4,'parent':0,'name':'System'}]); self.processes.start(); self.addCleanup(self.processes.stop)
 
     def test_log_sharing_violation_retains_error_but_restores_files(self):
         (self.steam/'vrserver.txt').write_text('diagnostic')

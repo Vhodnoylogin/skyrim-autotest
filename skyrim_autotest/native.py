@@ -173,11 +173,24 @@ def processes():
     try:
         entry = PROCESSENTRY32W()
         entry.dwSize = C.sizeof(entry)
+        C.set_last_error(0)
         ok = K.Process32FirstW(snap, C.byref(entry))
-        while ok:
+        if not ok:
+            error = C.get_last_error()
+            if error:
+                raise C.WinError(error)
+            raise OSError('Process32FirstW failed without a Win32 error; process inventory unavailable')
+        while True:
             out.append({'pid': entry.th32ProcessID, 'parent': entry.th32ParentProcessID,
                         'name': entry.szExeFile})
-            ok = K.Process32NextW(snap, C.byref(entry))
+            C.set_last_error(0)
+            if not K.Process32NextW(snap, C.byref(entry)):
+                error = C.get_last_error()
+                if error == 18:  # ERROR_NO_MORE_FILES is the only complete end.
+                    break
+                if error:
+                    raise C.WinError(error)
+                raise OSError('Process32NextW failed without a Win32 error; partial inventory refused')
     finally:
         K.CloseHandle(snap)
     return out

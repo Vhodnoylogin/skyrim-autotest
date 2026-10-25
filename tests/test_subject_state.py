@@ -159,7 +159,7 @@ class SubjectStateTests(unittest.TestCase):
             'bodySlotFixtures':[{'slot':14,'allowSmall':True,'visible':True}],'restoration':domain.RESTORATION}
         def restart(backend,request,restart_prepare):
             restart_prepare();backend.s.state['ownedLoadTransition']={'completed':True,'afterGame':copy.deepcopy(backend.s.state['game'])};return {'lifecycle':{'worldReady':True}}
-        with patch('skyrim_autotest.owned_saves.perform',side_effect=restart),patch('skyrim_autotest.native.processes',return_value=[]):
+        with patch('skyrim_autotest.owned_saves.perform',side_effect=restart),patch('skyrim_autotest.native.processes',return_value=[{'pid':4,'parent':0,'name':'System'}]):
             first=domain.perform(b,req)
             self.assertEqual(first['subject']['settings']['language'],'english')
             self.assertEqual(first['subject']['settings']['inputHandedness'],'right')

@@ -32,7 +32,7 @@ class EditionTests(unittest.TestCase):
         (self.source / 'SkyrimPrefs.ini').write_text('[Main]\nbSaveOnTravel=1\n')
 
     def preflight(self):
-        with patch.object(runner.native, 'processes', return_value=[]):
+        with patch.object(runner.native, 'processes', return_value=[{'pid':4,'parent':0,'name':'System'}]):
             return runner.preflight('Source')
 
     def test_se_preflight_requires_neither_openvr_nor_driver_nor_vrik_higgs(self):
@@ -85,7 +85,7 @@ class EditionTests(unittest.TestCase):
         paths = [p['path'] for p in state['snapshots']]
         self.assertFalse(any('openvr' in p.lower() or 'steamvr' in p.lower() for p in paths))
         self.assertTrue(Path(state['testProfile']).is_dir())
-        with patch.object(runner.native, 'processes', return_value=[]), patch.object(session, 'collect', return_value=True):
+        with patch.object(runner.native, 'processes', return_value=[{'pid':4,'parent':0,'name':'System'}]), patch.object(session, 'collect', return_value=True):
             session.cleanup()
         self.assertTrue(state['restored'])
         self.assertEqual(config.P.mo2_ini.read_bytes(), original)

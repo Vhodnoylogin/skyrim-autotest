@@ -9,7 +9,10 @@ import unittest
 from unittest import mock
 
 from skyrim_autotest import config, native, root_builder as rb, runner
-import test_root_builder as fixtures
+if __package__:
+    from . import test_root_builder as fixtures
+else:
+    import test_root_builder as fixtures
 
 
 class RootBuilderRunnerTests(unittest.TestCase):
