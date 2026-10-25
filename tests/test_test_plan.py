@@ -62,3 +62,15 @@ class TestPlanTests(unittest.TestCase):
         report = review(p)
         self.assertEqual(report['redundantSelected'], ['normal'])
         self.assertTrue(report['needsRevision'])
+
+    def test_empty_selection_cannot_pass_even_if_author_marks_no_case_as_core(self):
+        p = plan(); p['selected'] = []
+        for case in p['cases']: case.update(core=False, critical=False)
+        self.assertTrue(review(p)['needsRevision'])
+
+    def test_recommendation_reserves_selected_tool_preparation_cost(self):
+        p = plan(); p['budgetMinutes'] = 9; p['selected'] = ['startup']
+        p['scenarios'][2]['estimatedMinutes'] = 7
+        result = review(p)
+        self.assertEqual(result['recommendedScenarioIds'], ['startup', 'normal'])
+        self.assertTrue(result['needsRevision'])

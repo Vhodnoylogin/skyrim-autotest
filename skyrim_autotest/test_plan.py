@@ -70,6 +70,8 @@ def review(plan):
     missing_critical = [k for k, c in cases.items() if c['critical'] and k not in covered]
     minutes = sum(t['estimatedMinutes'] for t in eligible)
     warnings = []
+    if not covered:
+        warnings.append('No available subject behavior is selected')
     if missing_core:
         warnings.append('Core user behavior remains uncovered')
     if missing_critical:
@@ -89,7 +91,10 @@ def review(plan):
     # Recommend marginal behavior coverage per minute, prioritizing explicit
     # core and catastrophic-risk cases. This is advice, never a launch decision.
     remaining = [t for t in tests.values() if t['role'] == 'subject' and t['available']]
-    recommended, recommendation_covered, spent = [], set(), 0
+    tooling = [t for t in eligible if t['role'] == 'tooling']
+    recommended = [t['id'] for t in tooling]
+    recommendation_covered = set()
+    spent = sum(t['estimatedMinutes'] for t in tooling)
     while remaining:
         feasible = [t for t in remaining if spent + t['estimatedMinutes'] <= budget
                     and set(t['covers']) - recommendation_covered]
@@ -118,7 +123,7 @@ def review(plan):
         'budgetMinutes': budget, 'warnings': warnings,
         'recommendedScenarioIds': recommended,
         'recommendationLimit': 'Greedy planning advice, not an optimality proof or permission to run',
-        'needsRevision': bool(missing_core or missing_critical or unavailable or minutes > budget),
+        'needsRevision': bool(not covered or missing_core or missing_critical or unavailable or minutes > budget),
         'testingPerformed': False,
     }
 

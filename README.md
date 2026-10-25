@@ -1,9 +1,12 @@
 # Skyrim Autotest
 
-Version0.3.0 adds a separate **Skyrim SE** launch path, a reproducible narrow
+Version0.3.1 adds a separate **Skyrim SE** launch path, a reproducible narrow
 DevBench1.32 compatibility build, and a vendor-neutral [AI-agent kit](agent-kit/START-HERE.md).
 `review-plan` critiques declared behavior coverage and priority without claiming
 whole-mod or executed coverage. See [current toolchain and qualification limits](docs/toolchain-refresh.md).
+
+Planning includes selected tool-preparation time in the recommendation budget;
+a plan with no selected subject behavior is explicitly incomplete.
 
 This version also includes the previously prepared [generic disposable NPC photography candidate](docs/photography.md):
 tagged actors, keyed morph readback, owned VR camera framing, original PNG custody,
@@ -50,7 +53,7 @@ frontend is optional and is not a serial prerequisite for this executor.
 Requires Windows and Python 3.11+. For a wheel:
 
 ```powershell
-python -m pip install --no-deps ./skyrim_autotest-0.3.0-py3-none-any.whl
+python -m pip install --no-deps ./skyrim_autotest-0.3.1-py3-none-any.whl
 python -m skyrim_autotest init --directory C:/TestBench/config
 ```
 
