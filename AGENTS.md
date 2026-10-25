@@ -21,6 +21,11 @@ Never create another root or directly invoke run to bypass Polygon admission.
 SE uses no VR adapter and does not support unqualified Root Builder/borrowed-profile
 or New Game UI paths. A stock1.32 version string does not prove native menu flags,
 safe Papyrus metadata, physics/contact data or a capture provider are available.
+For the exact0.3.7 SE smoke configuration read docs/se-qualified.md. The generated
+SE template alone does not stage the winning DevBench configuration. Preserve
+its other settings, stage the pinned alwaysActive:true copy through the ordinary
+snapshot/restoration mechanism, and require actual native setting/readiness and
+action readback. Do not extend the smoke's scope to untested providers or mods.
 
 For explicit VR Root Builder support read docs/root-builder.md. Pin the audited
 copy package, existing game/version cache and unique SKSEVR source bundle; use

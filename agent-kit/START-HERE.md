@@ -25,6 +25,10 @@ not Skyrim, MO2, SKSE, DevBench, drivers, models or private saves.
    in `docs/devbench-modern-se.md`. An old VR SDK DLL or the upstream version
    string alone does not establish this target. Build/qualify the exact provider;
    do not substitute an incompatible prebuilt library.
+   For the tested0.3.7 SE configuration, also read `docs/se-qualified.md`: the
+   generated template does not supply the pinned DevBench `alwaysActive:true`
+   file required by that successful smoke. Stage a copy of the effective provider
+   configuration and preserve all other settings; verify actual native readback.
    If VR uses Root Builder, read `docs/root-builder.md`: opt into the audited
    cold-owned lifecycle with exact source bundle/cache pins. A loader missing
    before autobuild is different from a missing source bundle. Never deploy it

@@ -2,13 +2,17 @@
 
 Version0.3.7 prepares background activity only in the copied SE profile and waits
 for native dataLoaded/Main Menu events before probing SKSE tasks. World readiness
-and action assertions remain separate mandatory stages. This repair is a
-candidate until its exact end-to-end SE qualification succeeds.
+and action assertions remain separate mandatory stages. Its exact SE configuration
+completed the21-step native smoke on2026-10-26; this includes a separately staged
+DevBench `alwaysActive:true` configuration. Read [qualified SE setup](docs/se-qualified.md)
+for the tested build, repeatable setup and limits; the generated template alone
+does not supply this configuration.
 
 Version0.3.6 includes the exact [modern DevBench acquisition/build recipe](docs/devbench-modern-se.md)
 for the SkyrimSE1.7.104 candidate and records its separate SDK configuration.
-The provider passed offline compilation/tests; it is not game-qualified or
-bundled in the agent kit. Existing safety guards from0.3.5 remain unchanged.
+The provider passed offline compilation/tests and the later bounded SE smoke
+described above; it is not bundled in the agent kit. Existing safety guards
+from0.3.5 remain unchanged.
 
 Version0.3.5 refuses owned-process shutdown when an unowned or unidentified game
 is present, before stopping the shared VR runtime. It rechecks between shutdown
@@ -86,16 +90,16 @@ frontend is optional and is not a serial prerequisite for this executor.
 Requires Windows and Python 3.11+. For a wheel:
 
 ```powershell
-python -m pip install --no-deps ./skyrim_autotest-0.3.6-py3-none-any.whl
+python -m pip install --no-deps ./skyrim_autotest-0.3.7-py3-none-any.whl
 python -m skyrim_autotest init --directory C:/TestBench/config
 ```
 
 For the flat game use `init --edition se --directory C:/TestBench/se`; the
 default is `--edition vr`. Separate game targets need separate MO2/config/runtime
 directories and Bridge ports. SE skips OpenVR acquisition/configuration and the
-emulator. SE startup/world loading is an offline-tested candidate, pending an
-actual qualified SKSE/AddressLibrary/DevBench installation and live run. Its
-borrowed-profile, Root Builder and New Game UI paths remain explicitly unsupported.
+emulator. Follow [qualified SE setup](docs/se-qualified.md) before running SE:
+the21-step smoke applies to the exact documented installation and provider.
+Borrowed-profile, Root Builder and New Game UI paths remain explicitly unsupported.
 
 Alternatively extract the portable ZIP and run its `run.py` by absolute path,
 from any working directory. A Python interpreter must be installed; third-party

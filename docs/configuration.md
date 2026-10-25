@@ -21,11 +21,19 @@ SE preflight rejects Root Builder installations/root mods, borrowed/reusable MO2
 profiles and VR-control configuration until those combinations are qualified.
 New Game UI is not qualified for SE: declare a cell or authorized pinned save.
 
+For the exact live-tested SE setup, including the required separately staged
+DevBench `alwaysActive:true` configuration, read [qualified SE setup](se-qualified.md).
+`init --edition se` creates a path template and does not create that provider
+configuration or install its dependencies.
+
 SE preparation sets `General/bAlwaysActive=1` in `Skyrim.ini` and
 `SkyrimCustom.ini` of the owned copied profile, retaining before/after hashes.
 The source profile remains unchanged and the copied files follow normal archive
-and removal. This prevents ordinary background pausing without requiring focus
-stealing. Before the first SKSE task probe, the executor waits on the independent
+and removal. These INI values alone did not make the first0.3.7 SE candidate
+complete its task probes. The successful configuration also staged DevBench's
+`alwaysActive:true` setting and verified its effective native readback; do not
+infer successful background execution from an INI write alone. Before the first
+SKSE task probe, the executor waits on the independent
 native event stream for contiguous `dataLoaded` and an open `Main Menu`, checking
 the owned process identity. Event gaps, resets, unexpected world transitions and
 late responses refuse admission. This startup admission is not world readiness;

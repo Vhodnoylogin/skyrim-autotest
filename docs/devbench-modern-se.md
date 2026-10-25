@@ -1,9 +1,11 @@
 # Modern DevBench candidate for SkyrimSE1.7.104
 
 This is an acquisition/build recipe, not an installation or launch command.
-The candidate compiled offline; SE application startup, gameplay readiness,
-typed calls, UI, SKEE, render and physics still need their actual independent
-qualification. Keep it separate from the older VR SDK/provider line. No foreign
+The candidate compiled offline and subsequently completed the bounded0.3.7 SE
+smoke described in [qualified SE setup](se-qualified.md). That smoke covers
+startup, world readiness, selected typed calls and the stock inventory menu;
+SKEE, render, physics and other UI providers remain unqualified. Keep it separate
+from the older VR SDK/provider line. No foreign
 source, SDK, program or binary is included in this repository or agent kit.
 
 Exact source identities:
@@ -74,7 +76,9 @@ matching PDB SHA256 is
 `609a2adee0b1b0ae66bbe5a935894054affc879450de979b87114f60cdcbe0ff`.
 PE inspection found Windows/MSVC CRT dependencies, no OpenVR/plugin import.
 Rebuilding can change binary hashes; retain/pin the actual matching DLL/PDB.
-No DLL was loaded or installed as part of this offline validation.
+No DLL was loaded or installed as part of the offline validation. The later
+native smoke used this exact DLL; its configuration and limited scope are
+recorded separately in [qualified SE setup](se-qualified.md).
 
 Actual SkyrimSE1.7.104 also needs normally acquired SKSE2.3.1 and AddressLibrary13
 for the exact runtime. The provider is frozen in Polygon's separate platform

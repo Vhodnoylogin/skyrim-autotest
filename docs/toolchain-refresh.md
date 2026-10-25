@@ -1,11 +1,18 @@
 # SE and VR toolchain review (2026-10-25)
 
+SE update2026-10-26: the exact0.3.7 configuration completed a21-step native
+smoke including world loading, selected typed calls, actual movement, stock
+inventory open/close and verified restoration. Read [qualified SE setup](se-qualified.md)
+before using the generated template: the successful run also staged DevBench's
+`alwaysActive:true` configuration. This does not qualify VR or additional providers.
+Earlier failed attempts below remain historical failures.
+
 | Component | Verified version/source | Role and limits |
 |---|---|---|
 | [DevBench](https://github.com/alandtse/devbench/releases/tag/v1.32.0) |1.32, commit938c392d5e0fc19260c65f689ff4a80fbec4007c|In-game REST/MCP engine operations, not a game launcher|
 | [Skyrim Claude Code Toolkit](https://github.com/WingedGuardian/skyrimvr-claude-toolkit/releases/tag/v3.7) |3.7 requested baseline;3.9.1 separately inspected|Development environment/CLI and agent guidance; requires an already running game|
 | [SkyrimVR Devkit](https://github.com/DubiousDuo/VR-Emulator-Driver---SkyrimVR-Devkit/releases/tag/Release_v2.0.1) |2.0.1, commit32ec30294a871683254b944b4129cbdec2591e6a|Keyboard/manual frontend and emulator diagnostics; not our unattended physical control protocol|
-| Skyrim Autotest |0.3.0 source/offline candidate|Owns exclusive processes/profile, common bootstrap, actions, evidence and independent restoration|
+| Skyrim Autotest |0.3.7; exact SE smoke scope documented separately|Owns exclusive processes/profile, common bootstrap, actions, evidence and independent restoration|
 
 DevBench1.32 retains GET `/api/tools`, GET `/api/health` and POST
 `/api/tool/<name>` with raw argument/result objects. No new result wrapper is
@@ -60,8 +67,8 @@ SE: MO2 → registered SKSE64 → owned SkyrimSE process → matching fresh DevB
 with advancing frames/task queue → native readiness contract → declared cell or
 pinned save → stable playable world → subject checks. Compatible SKSE and Address
 Library must match the actual executable; for1.7.104 the inspected sources list
-SKSE2.3.1 and AddressLibraryv13. This target is an offline-tested candidate until
-that complete installation is exercised in game. Root Builder, borrowed/reusable
+SKSE2.3.1 and AddressLibraryv13. The exact setup above has now been exercised in
+game; other builds/configurations still need qualification. Root Builder, borrowed/reusable
 MO2 and actual New Game UI transitions are deliberately refused for SE for now.
 
 Complete a new MO2 instance's initial setup before its first qualification. In
@@ -85,7 +92,8 @@ ran. The copied SE INIs also omitted `bAlwaysActive`; background pause is a
 possible additional problem, not an established explanation of the initial task
 failure. Foreground state was not captured. The guardian restored the session;
 an acknowledged queued `qqq` request does not prove its execution or an entirely
-normal session end. SE gameplay/control qualification remains unavailable.
+normal session end. That failed attempt supplied no gameplay/control qualification;
+the later0.3.7 smoke's independent scope is documented above.
 
 VR adds SteamVR/OpenVR, separate head/hand poses, physical buttons/axes and
 calibration before the same world-ready boundary. The supplied2.0.1 archive is
