@@ -1,5 +1,9 @@
 # Configuration contract (schemaVersion 1)
 
+Optional `native14_live` pins the actual modules/expected absence and freshness
+policy for executor-local read-only native14 steps. It is VR-only and requires
+separate live qualification; see [owned native14 reads](native14-live.md).
+
 `game_edition` is `vr` (legacy default) or `se`. Generate separate templates with
 `init --edition vr|se`; use separate external runtimes and MO2 installations. SE
 requires `SkyrimSE.exe`, `skse64_loader.exe`, a registered SKSE entry with that

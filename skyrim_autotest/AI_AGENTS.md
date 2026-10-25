@@ -117,8 +117,12 @@ queue, with offline review-plan and validate-native14. Native14 file checks
 preserve decimal uint64/IEEE bits; require field availability before consuming
 values. Request-site haptic records do not prove hardware delivery, and file
 validation does not establish a live provider or authorize a run. See
-docs/native14.md in the source/portable kit. `guide` prints these instructions. Fault injection requires a deliberate
-recovery-test task; its expected failed result is not a mod regression.
+docs/native14.md in the source/portable kit. `guide` prints these instructions.
+The optional executor-local native14 step additionally requires operator policy,
+the common owned game/bootstrap, module/endpoint/world attestation and fresh
+samples; see docs/native14-live.md. It is not an attachment/takeover command.
+Fault injection requires a deliberate recovery-test task; its expected failed
+result is not a mod regression.
 
 Code contributors: use Python standard library only for runtime; preserve
 process creation-time/path/ancestry ownership, shared mutex and durable snapshots.

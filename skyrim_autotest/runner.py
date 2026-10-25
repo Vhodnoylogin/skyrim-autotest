@@ -597,6 +597,17 @@ class Session:
                 raise
             self.log('tool', tool=name, args=args, result=result)
             return result
+        if name == 'native14':
+            from .native14_live import execute
+            started = time.monotonic()
+            try:
+                result = execute(self, args, deadline if deadline is not None else started + timeout)
+            except Exception as error:
+                self.log('tool-error', tool=name, args=args, error=str(error),
+                         elapsedMs=int((time.monotonic() - started) * 1000))
+                raise
+            self.log('tool', tool=name, args=args, result=result)
+            return result
         def bounded_timeout(limit):
             if deadline is None:
                 return limit

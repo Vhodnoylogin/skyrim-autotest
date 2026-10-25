@@ -1,5 +1,10 @@
 # Skyrim Autotest
 
+Version0.3.3 adds the optional owned-session `native14` read: exact endpoint and
+declared loaded-module checks, bounded fresh native samples, explicit load/body
+transition comparisons and transactional evidence tags. See [live-read contract](docs/native14-live.md).
+It does not attach to another runner or qualify a new platform without a game run.
+
 Version0.3.2 adds [read-only native14 result validation](docs/native14.md), exact
 uint64/IEEE preservation, mask-aware measurements and bounded haptic-request
 history checks. `validate-native14` checks an already collected file without a
@@ -58,7 +63,7 @@ frontend is optional and is not a serial prerequisite for this executor.
 Requires Windows and Python 3.11+. For a wheel:
 
 ```powershell
-python -m pip install --no-deps ./skyrim_autotest-0.3.2-py3-none-any.whl
+python -m pip install --no-deps ./skyrim_autotest-0.3.3-py3-none-any.whl
 python -m skyrim_autotest init --directory C:/TestBench/config
 ```
 

@@ -15,6 +15,9 @@ contract and availability masks before selecting measurements. Exact decimal
 tokens, nonfinite IEEE diagnostics and native haptic requests are not defaults,
 rendered pixels, hardware delivery or equipment transaction receipts. Offline
 file validation neither qualifies the provider nor authorizes a game run.
+For an owned live native14 read use docs/native14-live.md: operator-owned exact
+module pins, common bootstrap, endpoint/process/world guards and fresh frames.
+Never create another root or directly invoke run to bypass Polygon admission.
 SE uses no VR adapter and does not support unqualified Root Builder/borrowed-profile
 or New Game UI paths. A stock1.32 version string does not prove native menu flags,
 safe Papyrus metadata, physics/contact data or a capture provider are available.

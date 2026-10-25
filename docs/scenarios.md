@@ -1,5 +1,11 @@
 # Scenario and order contract (schemaVersion 1)
 
+The optional executor-local `native14` read is documented in
+[owned native14 reads](native14-live.md). It uses the common owned gameplay
+session, configured module pins, finite deadline and mask-checked measurements.
+It does not move startup handling into a mod scenario or qualify a platform by
+being syntactically accepted.
+
 `startMode:"new-game"` selects the identified NEW item in the actual Skyrim VR
 main menu, verifies its confirmation state, and requires fresh ordered main-menu
 close, loading-start and target-cell-loaded events before world readiness.

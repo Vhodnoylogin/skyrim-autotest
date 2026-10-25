@@ -43,12 +43,20 @@ def configure(value, base=None):
     missing = sorted(k for k in required if not value.get(k))
     if missing:
         raise ConfigurationError("Missing configuration fields: " + ", ".join(missing))
-    unknown = set(value) - PATH_KEYS - {"schemaVersion", "game_edition", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings", "allow_steam_client_restart", "boundary_collection", "fixture_actor_allowlist", "fixture_actor_base_allowlist", "photography"}
+    unknown = set(value) - PATH_KEYS - {"schemaVersion", "game_edition", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings", "allow_steam_client_restart", "boundary_collection", "fixture_actor_allowlist", "fixture_actor_base_allowlist", "photography", "native14_live"}
     if unknown:
         raise ConfigurationError("Unknown configuration fields: " + ", ".join(sorted(unknown)))
     base = Path(base or Path.cwd()).resolve()
     result = dict(value)
     result['game_edition'] = selected['edition']
+    if 'native14_live' in result:
+        if selected['edition'] != 'vr':
+            raise ConfigurationError('Native14 observations require the VR target')
+        from .native14_live import configuration
+        try:
+            result['native14_live'] = configuration(result['native14_live'])
+        except (ValueError, TypeError, KeyError) as error:
+            raise ConfigurationError('Invalid native14 observation policy: ' + str(error)) from error
     if selected['edition'] == 'se' and (result.get('root_builder_data') or result.get('reuse_test_profile')):
         raise ConfigurationError('SE Root Builder and borrowed/reusable MO2 profiles need separate qualification; keep them disabled')
     if selected['edition'] == 'se' and any(result.get(k) for k in (

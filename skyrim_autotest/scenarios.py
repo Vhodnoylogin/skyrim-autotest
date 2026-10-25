@@ -71,12 +71,20 @@ def validate(scenario):
         if step['tool'] == 'platform':
             from .platform import validate as validate_platform
             validate_platform(step.get('args', {}))
+        if step['tool'] == 'native14':
+            from .native14_live import validate_request
+            validate_request(step.get('args', {}))
         if step.get('poll'):
             args = step.get('args', {})
             readonly = (step['tool'] == 'driver' and args.get('action') == 'status') or step['tool'] == 'inspect' or (step['tool'] == 'menu' and args.get('action') in ('list', 'describe')) or (step['tool'] == 'input' and args.get('action') in ('status', 'capabilities'))
             if step['tool'] == 'platform':
                 from .platform import READS
                 readonly = step.get('args', {}).get('operation') in READS
+            if step['tool'] == 'native14':
+                if (set(step.get('args', {})) & {'tag', 'baseline', 'haptics'} or
+                        step.get('args', {}).get('transition', 'same-context') != 'same-context'):
+                    raise ValueError('Polling native14 cannot create tags or consume a named transition/interval')
+                readonly = True
             if not readonly:
                 raise ValueError('Polling is limited to known read-only inspection/status tools')
     if not assertion_count:

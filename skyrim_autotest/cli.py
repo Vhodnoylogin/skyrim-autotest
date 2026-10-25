@@ -64,10 +64,22 @@ def main(argv=None):
         value = load(args.config)
         runner.configure(value)
         if args.command == "config-check":
+            result = {"schemaVersion": 1, "configurationValid": True,
+                      "runtime": str(P.runtime), "windows": os.name == "nt"}
             if rest:
-                raise ConfigurationError("Unexpected arguments to config-check")
+                if len(rest) != 2 or rest[0] != '--scenario':
+                    raise ConfigurationError('config-check takes only optional --scenario PATH')
+                scenario = json.loads(Path(rest[1]).read_text(encoding='utf-8-sig'))
+                from .scenarios import validate
+                from .editions import target, validate_scenario
+                from .restart_budget import plan
+                validate(scenario)
+                edition = target(value)['edition']
+                validate_scenario(value, scenario, 'none' if edition == 'se' else 'file',
+                                  'devbench' if edition == 'se' else 'driver')
+                result.update(scenarioValid=True, reservedRestarts=plan(scenario)['maximum'])
             # Tokens are paths only; their contents are never read or returned here.
-            print(json.dumps({"schemaVersion": 1, "configurationValid": True, "runtime": str(P.runtime), "windows": os.name == "nt"}, indent=2))
+            print(json.dumps(result, indent=2))
             return 0
         if args.command == "status":
             return runner.main(["status", *rest])

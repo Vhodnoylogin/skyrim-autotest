@@ -48,7 +48,14 @@ def validate_mo2_loader(text, configuration):
 
 
 def validate_scenario(configuration, scenario, driver_backend, input_backend):
-    if target(configuration)['edition'] != 'se':
+    edition = target(configuration)['edition']
+    steps = [*scenario.get('steps', []), *scenario.get('postSteps', [])]
+    if any(step.get('tool') == 'native14' for step in steps):
+        if edition != 'vr':
+            raise ValueError('Native14 scenario reads require the VR target')
+        from .native14_live import configuration as native14_policy
+        native14_policy(configuration.get('native14_live'))
+    if edition != 'se':
         return
     if (scenario.get('kind') in ('vr-hand-probe', 'vr-mobility-probe') or
             scenario.get('allowBackgroundVR') or scenario.get('activationHandStartupFixture') or
