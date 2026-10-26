@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "game_edition": "se",
+  "config_directory": "C:/TestBench/se/config-040",
+  "paths": {
+    "runtime": "C:/TestBench/se/runtime-040",
+    "game": "C:/Games/Skyrim Special Edition",
+    "mo2": "C:/ModTools/MO2-SE",
+    "mo2_exe": "C:/ModTools/MO2-SE/ModOrganizer.exe",
+    "mo2_ini": "C:/ModTools/MO2-SE/ModOrganizer.ini",
+    "mods": "C:/ModTools/MO2-SE/mods",
+    "profiles": "C:/ModTools/MO2-SE/profiles",
+    "overwrite": "C:/ModTools/MO2-SE/overwrite",
+    "bridge_token": "C:/ModTools/MO2-SE/plugins/mo2aibridge/mo2aibridge-token.txt",
+    "skse_logs": "C:/Users/Owner/Documents/My Games/Skyrim Special Edition/SKSE",
+    "fixture_dir": "C:/TestBench/authorized-fixtures/se"
+  },
+  "bridge_port": 8931,
+  "required_mods": ["DevBench", "Address Library for SKSE Plugins"],
+  "dependencies": [
+    {
+      "id": "game",
+      "path": "C:/Games/Skyrim Special Edition/SkyrimSE.exe",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source": "https://store.steampowered.com/app/489830/Skyrim_Special_Edition/",
+      "kind": "pe"
+    },
+    {
+      "id": "skse",
+      "path": "C:/Games/Skyrim Special Edition/skse64_loader.exe",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source": "https://skse.silverlock.org/",
+      "kind": "pe"
+    },
+    {
+      "id": "mo2",
+      "path": "C:/ModTools/MO2-SE/ModOrganizer.exe",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source": "https://github.com/ModOrganizer2/modorganizer/releases/tag/v2.5.2",
+      "kind": "pe"
+    },
+    {
+      "id": "mo2-api-bridge",
+      "path": "C:/ModTools/MO2-SE/plugins/mo2aibridge/__init__.py",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source": "https://github.com/Vhodnoylogin/MO2-ApI-Bridge"
+    },
+    {
+      "id": "devbench",
+      "path": "C:/TestBench/acquired/se-native-startup/devbench.dll",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source": "https://github.com/Vhodnoylogin/devbench/commit/5068162637dc2b5621b7224b8eded76a0c9e3d4f",
+      "kind": "pe"
+    },
+    {
+      "id": "address-library",
+      "path": "C:/ModTools/MO2-SE/mods/Address Library for SKSE Plugins/SKSE/Plugins/versionlib-1-7-104-0.bin",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source": "https://www.nexusmods.com/skyrimspecialedition/mods/32444"
+    }
+  ],
+  "provider": {
+    "artifact": "devbench",
+    "configuration": {
+      "path": "C:/TestBench/acquired/se-provider/actual-winning-config.json",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source": "https://github.com/Vhodnoylogin/devbench/commit/5068162637dc2b5621b7224b8eded76a0c9e3d4f"
+    },
+    "capability_manifest": {
+      "path": "C:/TestBench/acquired/se-native-startup/capabilities.json",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source": "https://github.com/Vhodnoylogin/devbench/commit/5068162637dc2b5621b7224b8eded76a0c9e3d4f"
+    }
+  },
+  "configuration": {
+    "se_new_game_ui": true
+  },
+  "destination_allowlist": [
+    "SKSE/Plugins/devbench/config.json",
+    "SKSE/Plugins/devbench.dll"
+  ],
+  "staged_plugins": [
+    {
+      "source": "C:/TestBench/acquired/se-native-startup/devbench.dll",
+      "destination": "SKSE/Plugins/devbench.dll",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "command_bus": {
+    "api_url": "http://127.0.0.1:8777/v1",
+    "token_path": "C:/TestBench/private/command-adapter-token.txt"
+  }
+}

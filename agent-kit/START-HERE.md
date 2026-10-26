@@ -7,6 +7,11 @@ Python3.11+ is acquired separately. This kit contains our source and instruction
 not Skyrim, MO2, SKSE, DevBench, drivers, models or private saves.
 
 1. Read `PROMPT.txt` and `AGENTS.md`. Establish the actual requested scope.
+   For filled deployment, copy `agent-kit/setup-spec.example.json` externally,
+   fill actual paths/dependency pins, run `run.py init --spec SPEC.json`, then
+   `run.py doctor --spec SPEC.json`. See docs/setup.md. This writes only external
+   setup files; no game starts and no microphone is opened. The directory-based
+   commands below generate legacy templates only.
 2. Choose **SE** (Skyrim Special Edition/AE executable) or **VR** explicitly:
 
    ```powershell
@@ -44,8 +49,10 @@ not Skyrim, MO2, SKSE, DevBench, drivers, models or private saves.
    behavior omissions and oracles; the script cannot judge the mod's design.
 5. Prepare an assertion-bearing scenario using `docs/scenarios.md`. The generated
    SE QASmoke example proves only basic tool/world access, not the tested mod.
-   Supply subject actions and actual game-observed outcomes. SE New Game UI is
-   unqualified; choose a declared cell or authorized hash-pinned ESS/SKSE pair.
+   Supply subject actions and actual game-observed outcomes. SE New Game needs
+   the exact native-startup provider and explicit se_new_game_ui policy; see
+   docs/se-session-lifecycle.md and docs/release-0.4.md. Do not infer this native
+   capability from a stock version string or replace a pinned save fixture.
 6. Run config-check/preflight, then one authorized run, inspect the final evidence
    and verified restoration. VR additionally needs the pinned external owned
    physical adapter. Changing between targets does not waive any safety check.

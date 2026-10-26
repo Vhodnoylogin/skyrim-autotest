@@ -1302,7 +1302,7 @@ class Session:
         for item in self.state.get('checks', []):
             lines.append(f'- {item["name"]}: {item["result"]}')
         (self.dir / 'report.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
-        atomic_json(self.dir / 'result.json', {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors','heartbeatHealth','guardianRecovery')})
+        atomic_json(self.dir / 'result.json', {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors','heartbeatHealth','guardianRecovery','interactiveSession','interactiveArtifacts','interactiveActorFixtures')})
 
     def reopen_mo2(self):
         if self.state.get('reopenMO2') and self.state.get('restored'):
@@ -1526,6 +1526,9 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
             from .platform import initialize_controllers
             initialize_controllers(session, P.snapshot())
             execute(session, scenario)
+            if P.value.get('interactive_session'):
+                from .interactive import run as interactive_run
+                interactive_run(session, P.value['interactive_session'])
             from .actor_scene import finish_captures
             finish_captures(session)
             if any(sha(Path(__file__).parent / name) != digest for name, digest in state['executorHashes'].items()):

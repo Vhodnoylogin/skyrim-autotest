@@ -1,5 +1,11 @@
 # Acquire the direct startup UI compatibility candidate
 
+Current retained native status: exact executor0.3.10/provider5068162 and DLL
+89309425 passed Q4 actual New Game,27declared+1readiness checks and normal
+restoration on26October2026. This is the measured composition only. The current
+release/setup contract is in release-0.4.md; old candidate claims below retain
+their original temporal scope.
+
 The explicit SE New Game path in0.3.10 requires `devbench-startup-ui/1`.
 This is a native main-menu interface on the fenced SKSE UI task queue, not Papyrus UI.GetString before VM startup.
 It is not part of stock DevBench1.32; do not infer it from a version string.

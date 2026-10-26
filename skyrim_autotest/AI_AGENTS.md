@@ -1,67 +1,64 @@
 # AI-agent instructions: Skyrim Autotest
 
-For explicit VR Root Builder support read docs/root-builder.md. Pin the audited
-copy package, existing game/version cache and unique SKSEVR source bundle; use
-only cold-owned MO2. Never copy the loader manually to bypass preflight, change
-cache exclusions or restore the hardlinked game executable. The new lifecycle
-requires its own live qualification and does not clear an old queue reservation.
-For native14 read docs/native14.md and docs/native14-live.md: validate actual
-availability masks, exact endpoint/module pins and the owned ready game. Offline
-validation, command receipts and diagnostic history do not prove gameplay,
-rendered behavior, input consumption, equipment transactions or physics.
-Never use direct run or another runtime root to bypass Polygon admission.
-
-For either Skyrim SE or VR, read docs/toolchain-refresh.md and the distributed
-agent-kit/PROMPT.txt. Select the target explicitly (`init --edition se|vr`), keep
-independent configurations and never install VR runtime resources for SE. Use
-review-plan to critique relevant behavior and weighted planned coverage; technical
-startup assertions and unavailable checks do not count as exercised mod behavior.
-Stock DevBench1.32 needs the narrow native compatibility candidate for this
-executor's menu-readiness contract. New target/provider combinations need actual
-live qualification; offline tests alone do not prove them ready.
-
-For headset-assisted voice delivery read docs/assisted-voice.md. Use the host's
-supported heartbeat plus skyrim_autotest.voice_inbox, an exact operator thread and
-a private cursor. Do not claim continuous accompaniment from listener health or
-queued speech. A pending delivery requires prior-response/action reconciliation;
-never repeat uncertain game mutations. Keep transcripts/receipts outside Git.
-For new sessions use docs/voice-v2.md: buffered admission/dispatch, actual first
-reply, then final completion. New input must not wait for an earlier ACK. The
-active host adapter requires an explicitly initialized/upgraded v2 inbox; never
-change an existing inbox's source queue or replay old requests. Whole-utterance
-voice_listener captures independently of ASR and stores raw audio externally.
-Only final complete speech supplies requests, still requiring intent review.
-Preserve the live singleton until the owner's explicit stop/replacement transition;
-offline replay does not qualify live latency or perfect recognition. Quick status
-and screenshot replies precede lengthy analysis while game mutations retain order.
-"Give me items" means inventory by default; world spawning requires explicit
-wording/scenario. Screenshot requests use assisted_capture with spoken countdown,
-exact manual-game identity and headset output, one capture and verified actual
-file. No focus takeover, keyboard shortcut or automatic retry. Read the voice
-guide; file verification still requires viewing the actual picture.
-
-Optional companion commands (no executor --config needed):
-For buffered sessions use `voice_inbox ... admit --wait 2`, host `dispatch`, actual
-first-reply `reply`, and completion `ack`; see the v2 guide for exact arguments.
-The following `claim` example is retained for explicitly legacy v1 inboxes:
-`python -m skyrim_autotest.voice_inbox --inbox <EXTERNAL> --thread <UUID> claim --wait 30`
-returns immediately on new speech. After processing use the same module's `ack`
-with --id, --sha256 and --response-ref. For one owner-requested screenshot:
-`python -m skyrim_autotest.assisted_capture --out <EXTERNAL> --id voice-<SEQ> --identity <GAME-IDENTITY-JSON> --port <VERIFIED> --voice-output <EXACT-DEVICE>`.
-The identity file contains the existing game's {pid,birth,path}. A missing game
-is capture unavailable; neither companion starts it. Detailed voice docs and
-the Codex host adapter live in the source repository.
-For missing speech despite ASR health, use `python -m skyrim_autotest.microphone_probe`
-to enumerate shared Windows inputs, then --device <UNIQUE-FRAGMENT> --seconds 6
---output <EXTERNAL-JSON>. It saves no audio unless --wav is explicitly supplied.
-Measured signal is not human-speech qualification; coordinate actual owner speech
-with the sample, inspect headset/streaming mute/permissions, and never silently
-switch to a desktop microphone or restart the manual game.
+Release0.4 uses three logical layers: the in-game DevBench provider (upstream
+or the explicit compatibility fork), this independent external executor/API, and
+its included prompt/setup component. One runner has separate SE and VR backends.
+Read docs/release-0.4.md, docs/setup.md and docs/command-channel.md. Prefer
+init --spec/setup --spec and doctor --spec for filled external configuration;
+legacy init --directory creates templates only. Sound is separately connected:
+external ASR submits complete final text and external TTS consumes speech requests.
+No microphone, model download, audio playback or game starts implicitly.
+The command receiver preserves text/final-ASR while the agent is busy. Bind the
+actual session/provider/conversation/agent, distinguish delivery/completion and
+reconcile uncertain claims without replay. Keep one live game owner; parallel
+reception or analysis never authorizes concurrent game mutations. A connector
+cannot wake or inject into an arbitrary existing host unless that host supports it.
+Explicit interactive_session is platform-owned and separately qualified; it
+holds the existing owner after common readiness/preparation until explicit finish
+or its declared bound. It is not a second launch route or permission to replay
+queued/delivered orders. Read docs/interactive-session.md before selecting it.
+For an external whole-utterance backend, docs/asr-bridge.md describes the data-only
+JSONL forwarder. It uses a separate durable cursor, immutable source IDs and ACKs;
+it does not open audio or change the shared listener cursor. New source/session
+baselines are explicit; missing initial input waits, changed history refuses.
+Typed NPC bindings and creation witnesses are in docs/interactive-bindings.md.
+Do not adopt existing NPCs, allow raw script selectors or treat a native return
+as applied morphs/rendered appearance. Large results retain exact hashed evidence.
 
 Use this tool for autonomous, bounded Skyrim SE or VR tests after the owner has
 requested/authorized testing. Existing authorization persists; do not ask again
 for ordinary reversible launches within that scope. New fixture setup and mod
 installation must remain within the owner's requested scope.
+
+Choose `game_edition` explicitly for new configurations; absent means legacy VR.
+Read docs/toolchain-refresh.md and agent-kit/PROMPT.txt. Use review-plan to challenge
+the case inventory, relevance weights, core behavior, severe data-loss risks and
+actual-result oracles. Report planned declared-case coverage separately from
+executed coverage; never infer whole-mod coverage from a test or assertion count.
+For native14 diagnostics read docs/native14.md. Validate the real producer
+contract and availability masks before selecting measurements. Exact decimal
+tokens, nonfinite IEEE diagnostics and native haptic requests are not defaults,
+rendered pixels, hardware delivery or equipment transaction receipts. Offline
+file validation neither qualifies the provider nor authorizes a game run.
+For an owned live native14 read use docs/native14-live.md: operator-owned exact
+module pins, common bootstrap, endpoint/process/world guards and fresh frames.
+Never create another root or directly invoke run to bypass Polygon admission.
+SE uses no VR adapter and does not support unqualified Root Builder/borrowed-profile
+paths. The explicit0.3.9 se_new_game_ui candidate requires the separately reviewed
+qualification described in docs/se-session-lifecycle.md; it is not the tested
+default baseline. A stock1.32 version string does not prove native menu flags,
+safe Papyrus metadata, physics/contact data or a capture provider are available.
+For the exact0.3.7 SE smoke configuration read docs/se-qualified.md. The generated
+SE template alone does not stage the winning DevBench configuration. Preserve
+its other settings, stage the pinned alwaysActive:true copy through the ordinary
+snapshot/restoration mechanism, and require actual native setting/readiness and
+action readback. Do not extend the smoke's scope to untested providers or mods.
+
+For explicit VR Root Builder support read docs/root-builder.md. Pin the audited
+copy package, existing game/version cache and unique SKSEVR source bundle; use
+only cold-owned MO2. Never copy the loader manually to bypass preflight, change
+cache exclusions or restore the hardlinked game executable. The new lifecycle
+requires its own live qualification and does not clear an old queue reservation.
 
 1. Read README, docs/configuration.md and docs/scenarios.md. Discover the explicit
    external config; do not guess the owner's game/MO2 profile paths. `init`
@@ -103,7 +100,13 @@ installation must remain within the owner's requested scope.
    deadline and log. Started reads, unknown failures and mutations remain terminal.
    The built-in cell-readiness wait separately permits scene-only HTTP
    500/502/503/504 or structured abandoned_before_start reads within its original
-   90 seconds. Preserve every error; require stable matching scene data afterward.
+   90 seconds. Known UTF-8 serialization failures stop immediately; three
+   consecutive HTTP500 scene errors stop rather than consume the whole budget.
+   Check late blocking dialogs during save/cell transitions through the common
+   executor. Require playerLoaded and exact cell editorId/formId, never matching
+   text anywhere in a response. Text encoding diagnostics preserve unavailable
+   display fields; they do not waive subject text assertions or cell identity.
+   Preserve every error; require stable matching scene data afterward.
    Never repeat coc/load or treat a retried error as readiness. Identity/health
    errors and arbitrary scenario HTTP failures still stop the run.
    For explicit unattended physical VR scenarios, allowBackgroundVR:true may
@@ -126,16 +129,13 @@ installation must remain within the owner's requested scope.
 Commands: `python -m skyrim_autotest --config <external JSON> <command>`.
 For portable extraction use `python <absolute distribution>/run.py ...`.
 Commands are init, config-check, build-driver, preflight, run, status, recover and
-queue, with offline review-plan and validate-native14. Native14 file checks
-preserve decimal uint64/IEEE bits; require field availability before consuming
-values. Request-site haptic records do not prove hardware delivery, and file
-validation does not establish a live provider or authorize a run. See
-docs/native14.md in the source/portable kit. `guide` prints these instructions.
-The optional executor-local native14 step additionally requires operator policy,
-the common owned game/bootstrap, module/endpoint/world attestation and fresh
-samples; see docs/native14-live.md. It is not an attachment/takeover command.
-Fault injection requires a deliberate recovery-test task; its expected failed
-result is not a mod regression.
+queue. `guide` prints these instructions. Fault injection requires a deliberate
+recovery-test task; its expected failed result is not a mod regression.
+
+For Polygon semantic requests read docs/platform.md. Candidate mappings alone
+do not qualify a platform. Preserve common bootstrap and absolute step deadlines;
+never treat requested fixture values as measurements or sampled held-reference
+continuity as proof of unobserved events. Keep subject orders unchanged on tool updates.
 
 Code contributors: use Python standard library only for runtime; preserve
 process creation-time/path/ancestry ownership, shared mutex and durable snapshots.
@@ -144,3 +144,30 @@ source/programs/SDKs belong outside Git; retain acquisition pins and build recip
 Run meaningful recovery and portability tests for ownership, configuration or
 packaging changes. Do not claim fresh portable live acceptance from historical
 support-tool runs; record the independently tested build and session.
+
+Headset-assisted voice sessions use docs/voice-v2.md. Preserve ongoing live
+listener ownership; new version preparation does not stop/restart it. Buffered
+receipt/dispatch, first actual text reply and completion are distinct. Never
+execute provisional or interrupted audio, resend uncertain deliveries, or call
+an offline replay a qualified live voice session. Keep audio/models outside Git.
+
+For Polygon-owned runtime use docs/voice-operator.md and voice_operator ensure/poll.
+The development chat is not a runtime intermediary. Never message another chat
+per utterance or use the historical cross-chat adapter for this owner's sessions.
+Consume final speech directly in the operator turn; unchanged pending/quiet
+records require no status chatter and never authorize action replay.
+
+Supplementary diagnostics: see docs/boundary-collection.md. Only Polygon's
+separately qualified configuration can opt into boundary_collection. It records
+raw reads between exact adjacent settled checkpoints without changing mod orders
+or subject counts. Never insert it into a motion/race/first-frame interval or
+call response_recorded a passed subject gate. Keep all missed reads explicit.
+
+For tagged NPC photography read docs/photography.md. Generic source/mapping
+support does not qualify a live capture provider or its primary-eye projection.
+Require original resolution/UI exclusion and inspected in-game camera/shape
+evidence before platform selection. Never upscale originals, waive native
+fallback degradation, reframe a changed comparison variant, replay uncertain
+spawn/capture/setters or change a queued subject order to pin tool revisions.
+Polygon owns all live qualification and photography; this developer chat is
+neither the subject executor nor a microphone/utterance relay.

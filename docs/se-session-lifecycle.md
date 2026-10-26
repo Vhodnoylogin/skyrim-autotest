@@ -1,5 +1,11 @@
 # SE initialization and process-exit boundary candidate
 
+Current status26October2026: the exact0.3.10/provider5068162/DLL89309425
+composition passed actual Q4:27declared checks plus initial-world readiness,
+five true admissions, real native New Game and normal restoration. Historical
+candidate wording below describes prior revisions. See release-0.4.md for scope;
+this does not qualify replacement builds, rendered geometry or VR.
+
 Version0.3.10 uses the direct `devbench-startup-ui/1` native menu contract for
 explicit SE startup. It replaces the0.3.9 Papyrus UI path, which actually timed
 out on the main menu before VM initialization. The native contract is provided

@@ -58,6 +58,20 @@ channel and brief voice exceptionally. Do not replay buffered commands or use
 a developer chat as a speech relay. Before an explicitly requested screenshot,
 announce it, count down, finish the count, then capture once and verify the file.
 
+Initialization is part of this tool: prefer init --spec EXTERNAL-SPEC.json and
+doctor --spec EXTERNAL-SPEC.json over a REPLACE path template. Verify the exact
+provider/runtime manifest; offline doctor is not gameplay qualification.
+
+For ongoing communication read docs/command-channel.md. Start the independent
+receiver and bind the actual provider/conversation/agent identity. New text and
+final ASR share a durable inbox while the AI is busy. Consume commands in order;
+record receipt, actual delivery and completion separately. Do not automatically
+repeat uncertain claims or game actions. Audio recognition/playback is supplied
+by separately selected adapters, not the core. Keep one game owner and serialize
+mutations even if reception and analysis run concurrently. The host must support
+the selected CLI/HTTP/MCP connection; do not promise injection into an arbitrary
+existing idle chat without a supported host integration.
+
 Conclude with actual behavior exercised, observed results, missing coverage,
 tooling limits, evidence paths and restoration. A technically healthy startup
 alone must never be reported as successful testing of the mod.

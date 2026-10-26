@@ -1,5 +1,11 @@
 # Morph-preset semantic candidate
 
+Current retained native status: exact0.3.10/provider5068162 composition passed
+Q4, including Float-array transport, independent keyed reads and five actual true
+admissions. That does not establish asynchronous subject completion, rendered
+geometry or all catalogue/actor variants. See release-0.4.md; older candidate
+wording below describes its original revision.
+
 This 0.3.8 candidate is integrated into the semantic backend but not live-qualified.
 The working 0.3.7 SE baseline and its frozen package remain unchanged. It selects operations by
 semantic quantity/action, never by a subject mod name or caller-supplied Papyrus

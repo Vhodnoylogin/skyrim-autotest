@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skyrim-autotest"
-version = "0.3.10"
+version = "0.4.0"
 description = "Bounded Skyrim SE and VR automated tests with independent recovery"
 requires-python = ">=3.11"
 license = {text = "MIT"}

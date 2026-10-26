@@ -67,12 +67,38 @@ def main():
     verify('portable-config-check',[sys.executable,str(portable/'run.py'),'--config',str(config),'config-check'])
     verify('portable-empty-status',[sys.executable,str(portable/'run.py'),'--config',str(config),'status'])
     verify('portable-se-init',[sys.executable,str(portable/'run.py'),'init','--edition','se','--directory',str(work/'seconfig')])
+    verify('portable-setup-command',[sys.executable,str(portable/'run.py'),'setup','--help'])
+    verify('portable-doctor-command',[sys.executable,str(portable/'run.py'),'doctor','--help'])
+    verify('portable-asr-forwarder-command',[sys.executable,str(portable/'run.py'),'asr-bridge','--help'])
+    if (portable/'AGENTS.md').read_bytes() != (portable/'skyrim_autotest/AI_AGENTS.md').read_bytes():
+        raise RuntimeError('Packaged guide differs from the authoritative agent instructions')
+    checks.append('single-authoritative-agent-guide')
+    channel_config = work/'channel/command-channel.json'
+    verify('portable-channel-init',[sys.executable,str(portable/'run.py'),'--config',str(channel_config),'channel','init','--session','release-check'])
+    def channel(operation, body):
+        return json.loads(call([sys.executable,str(portable/'run.py'),'--config',str(channel_config),'channel',operation,'--json',json.dumps(body)],empty,env))
+    binding = {'provider':'package-check','conversationId':'release','agentId':'operator'}
+    channel('bind',{'sessionId':'release-check','binding':binding})
+    channel('submit',{'sessionId':'release-check','sourceId':'text-adapter','sourceEventId':'text-1','kind':'text','text':'First synthetic command'})
+    claimed=channel('next',{'sessionId':'release-check','binding':binding})['command']
+    channel('submit',{'sessionId':'release-check','sourceId':'external-asr','sourceEventId':'asr-1','kind':'asr.final','text':'Second complete synthetic utterance'})
+    if channel('status',{'sessionId':'release-check'})['commands'] != {'claimed':1,'received':1}:
+        raise RuntimeError('New ASR was not preserved independently of the busy consumer')
+    keys={'sessionId':'release-check','commandId':claimed['id'],'claimId':claimed['claimId'],'binding':binding}
+    channel('delivered',keys)
+    channel('complete',dict(keys,result={'packageCheck':True,'gameActionExecuted':False}))
+    if channel('next',{'sessionId':'release-check','binding':binding})['command']['kind'] != 'asr.final':
+        raise RuntimeError('Queued ASR did not retain its order after text completion')
+    checks.append('portable-durable-text-asr-busy-consumer')
     kit = work / 'agent-kit'
     with zipfile.ZipFile(next(dist.glob('*-agent-kit.zip'))) as archive:
         archive.extractall(kit)
     for name in ('START-HERE.md', 'PROMPT.txt', 'test-plan.example.json'):
         if (kit / name).read_bytes() != (portable / 'agent-kit' / name).read_bytes():
             raise RuntimeError('Agent kit prompt/template differs from pinned portable source')
+    if (kit/'agent-kit/setup-spec.example.json').read_bytes() != (portable/'agent-kit/setup-spec.example.json').read_bytes():
+        raise RuntimeError('Agent kit is missing the integrated deployment example')
+    checks.append('agent-kit-integrated-setup-example')
     verify('agent-kit-unrelated-cwd',[sys.executable,str(kit/'run.py'),'--version'])
     verify('agent-kit-plan-review',[sys.executable,str(kit/'run.py'),'review-plan','--plan',str(kit/'test-plan.example.json'),'--output',str(work/'plan-review.json')])
     child=subprocess.run([sys.executable,str(portable/'run.py'),'init','--directory',str(work/'config')],cwd=empty,env=env,capture_output=True,text=True,timeout=10)
@@ -91,7 +117,7 @@ def main():
         raise RuntimeError('Wheel is missing vendor-neutral agent instructions')
     if hashlib.sha256((installed/'skyrim_autotest'/adapter).read_bytes()).hexdigest() != manifest['sourceFiles'][adapter]:
         raise RuntimeError('Wheel voice host adapter missing or changed')
-    for module in ('voice_listener', 'voice_inbox', 'voice_operator'):
+    for module in ('voice_listener', 'voice_inbox', 'voice_operator', 'setup', 'asr_bridge'):
         companion='import sys;sys.path.insert(0,sys.argv[1]);from skyrim_autotest.'+module+' import main;raise SystemExit(main(["--help"]))'
         verify('wheel-isolated-'+module,[sys.executable,'-I','-c',companion,str(installed)])
     # Execute tests from the freshly extracted source, never the checkout.

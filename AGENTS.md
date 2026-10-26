@@ -1,5 +1,30 @@
 # AI-agent instructions: Skyrim Autotest
 
+Release0.4 uses three logical layers: the in-game DevBench provider (upstream
+or the explicit compatibility fork), this independent external executor/API, and
+its included prompt/setup component. One runner has separate SE and VR backends.
+Read docs/release-0.4.md, docs/setup.md and docs/command-channel.md. Prefer
+init --spec/setup --spec and doctor --spec for filled external configuration;
+legacy init --directory creates templates only. Sound is separately connected:
+external ASR submits complete final text and external TTS consumes speech requests.
+No microphone, model download, audio playback or game starts implicitly.
+The command receiver preserves text/final-ASR while the agent is busy. Bind the
+actual session/provider/conversation/agent, distinguish delivery/completion and
+reconcile uncertain claims without replay. Keep one live game owner; parallel
+reception or analysis never authorizes concurrent game mutations. A connector
+cannot wake or inject into an arbitrary existing host unless that host supports it.
+Explicit interactive_session is platform-owned and separately qualified; it
+holds the existing owner after common readiness/preparation until explicit finish
+or its declared bound. It is not a second launch route or permission to replay
+queued/delivered orders. Read docs/interactive-session.md before selecting it.
+For an external whole-utterance backend, docs/asr-bridge.md describes the data-only
+JSONL forwarder. It uses a separate durable cursor, immutable source IDs and ACKs;
+it does not open audio or change the shared listener cursor. New source/session
+baselines are explicit; missing initial input waits, changed history refuses.
+Typed NPC bindings and creation witnesses are in docs/interactive-bindings.md.
+Do not adopt existing NPCs, allow raw script selectors or treat a native return
+as applied morphs/rendered appearance. Large results retain exact hashed evidence.
+
 Use this tool for autonomous, bounded Skyrim SE or VR tests after the owner has
 requested/authorized testing. Existing authorization persists; do not ask again
 for ordinary reversible launches within that scope. New fixture setup and mod
