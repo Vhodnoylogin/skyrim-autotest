@@ -206,6 +206,39 @@ class ASRBridgeTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.bridge(after=0, state=checkout / 'cursor.json')
         self.assertEqual(self.source.read_bytes(), before)
 
+    def test_receiver_dotdot_cursor_lock_sidecar_and_source_aliases_are_refused(self):
+        value = json.loads(self.channel.read_text())
+        value['database'] = str(self.root / 'spelling' / '..' / 'commands.sqlite3')
+        value['tokenFile'] = str(self.root / 'spelling' / '..' / 'private.token')
+        self.channel.write_text(json.dumps(value))
+        for target in (self.root / 'commands.sqlite3', self.root / 'commands.sqlite3-wal', self.root / 'private.token'):
+            with self.subTest(target=target), self.assertRaisesRegex(asr_bridge.BridgeError, 'separate'):
+                self.bridge(after=0, state=target)
+        for source in (self.channel, self.root / 'private.token', self.root / 'commands.sqlite3-wal'):
+            with self.subTest(source=source), self.assertRaisesRegex(asr_bridge.BridgeError, 'separate'):
+                self.bridge(after=0, source=source)
+        value['database'] = str(self.root / 'spelling' / '..' / (self.state.name + '.lock'))
+        self.channel.write_text(json.dumps(value))
+        with self.assertRaisesRegex(asr_bridge.BridgeError, 'separate'): self.bridge(after=0)
+        self.assertFalse(self.state.exists())
+
+    def test_rebind_between_status_and_submit_creates_no_command_for_new_target(self):
+        self.write(self.row(1))
+        original = self.client.submit
+        changed = dict(self.binding, agentId='new-target')
+        def rebind_before_ingress(arguments):
+            self.bus.bind('owner-conversation', changed)
+            return original(arguments)
+        with patch.object(self.client, 'submit', side_effect=rebind_before_ingress):
+            with self.assertRaisesRegex(asr_bridge.BridgeError, 'Receiver refused'):
+                self.poll(self.bridge(after=0))
+        self.assertEqual(self.cursor(), 0)
+        self.assertEqual(self.bus.status('owner-conversation')['commands'], {})
+        self.assertEqual(self.client.requests[0]['expectedBinding'], self.binding)
+        self.assertEqual(self.bus.status('owner-conversation')['binding'], changed)
+        with self.assertRaisesRegex(asr_bridge.BridgeError, 'binding changed'): self.poll(self.bridge())
+        self.assertEqual(self.cursor(), 0)
+
     def test_source_byte_bound_precedes_parsing_and_state_creation(self):
         self.source.write_bytes(b'x' * 257)
         with patch.object(asr_bridge, 'LIMIT', 256):

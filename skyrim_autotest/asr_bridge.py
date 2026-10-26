@@ -25,6 +25,7 @@ class SourcePending(BridgeError): pass
 def _sha(data): return hashlib.sha256(data).hexdigest()
 def _json(value): return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')
 def _pin(raw): return {'bytes': len(raw), 'sha256': _sha(raw)}
+def _aliases(left, right): return left == right or left.exists() and right.exists() and os.path.samefile(left, right)
 
 
 @contextmanager
@@ -68,9 +69,10 @@ class ASRBridge:
             ((channel_config, 'channel configuration'), (source, 'ASR source'), (state, 'own cursor'))]
         self.lock = external_path(str(self.path) + '.lock', 'own cursor lock')
         cfg = load_config(self.channel)
-        protected = {self.channel, self.source, Path(cfg['database']), Path(cfg['tokenFile'])}
-        protected.update(Path(cfg['database'] + suffix) for suffix in ('-wal', '-shm', '-journal'))
-        if self.path in protected or self.lock in protected or self.path == self.lock:
+        protected = {self.channel, external_path(cfg['database'], 'receiver database'), external_path(cfg['tokenFile'], 'receiver token')}
+        protected.update(external_path(cfg['database'] + suffix, 'receiver sidecar') for suffix in ('-wal', '-shm', '-journal'))
+        if (any(_aliases(self.source, item) for item in protected) or _aliases(self.path, self.lock) or
+                any(_aliases(owned, item) for owned in (self.path, self.lock) for item in protected | {self.source})):
             raise BridgeError('Own cursor/lock must be separate from source and receiver files')
         for value in (session, source_id):
             if not isinstance(value, str) or not 1 <= len(value) <= 200 or any(ord(c) < 33 or ord(c) == 127 for c in value):
@@ -172,11 +174,13 @@ class ASRBridge:
             event = self.state['namespace'] + ':' + row['utteranceId']
             request = {'sessionId': self.session, 'sourceId': self.source_id, 'sourceEventId': event,
                 'kind': 'asr.final', 'text': row['text'], 'metadata': {'queueNamespace': self.state['namespace'],
-                    'seq': row['seq'], 'utteranceId': row['utteranceId'], 'audioSha256': row['audioSha256'], 'revision': 2}}
+                    'seq': row['seq'], 'utteranceId': row['utteranceId'], 'audioSha256': row['audioSha256'], 'revision': 2},
+                'expectedBinding': self.state['binding']}
             ack = self._receive('submit', request)
             command = ack.get('command', {}) if isinstance(ack, dict) else None
-            if (not isinstance(command, dict) or ack.get('acknowledged') is not True or any(command.get(key) != request[key] for key in request) or
-                    command.get('binding') != self.state['binding']):
+            if (not isinstance(command, dict) or ack.get('acknowledged') is not True or
+                    any(command.get(key) != request[key] for key in request if key != 'expectedBinding') or
+                    command.get('binding') != request['expectedBinding']):
                 raise BridgeError('Receiver ACK does not match this immutable final utterance/session; cursor retained')
             self.state.update(cursor=row['seq'], anchor=_pin(raw[:offsets[row['seq']]]))
             self._save(); forwarded += 1

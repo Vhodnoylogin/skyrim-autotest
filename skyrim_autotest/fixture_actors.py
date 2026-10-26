@@ -1,6 +1,6 @@
 """Single-attempt disposable NPC creation with durable same-run witnesses.
 
-No photography, inventory, console, AI/collision change, adoption or replay path.
+No photography, inventory, console, AI/collision disable, adoption or replay path.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ _SIGNATURES = {
         "SetAngle": (["float", "float", "float"], "none"),
         **{name: ([], "float") for name in ("GetPositionX", "GetPositionY", "GetPositionZ", "GetAngleZ")},
     },
-    "Actor": {"GetActorBase": ([], "actorbase"), "GetRace": ([], "race")},
+    "Actor": {"GetActorBase": ([], "actorbase"), "GetRace": ([], "race"), "SetDontMove": (["bool"], "none")},
     "ActorBase": {"GetSex": ([], "int"), "GetRace": ([], "race"), "GetWeight": ([], "float")},
 }
 
@@ -185,11 +185,11 @@ def create(session, request, deadline, policy):
         incarnation, row, _ = actor_domain.anchor(backend, PLAYER["reference"])
         if incarnation != player["incarnation"] or row["loaded3D"] is not True or session.state["ownedWorldGeneration"] != entry["worldGeneration"]:
             raise BindingError("Player anchor or owned world changed during fixture creation")
-    def invoke(function, arguments, target):
+    def invoke(function, arguments, target, script="ObjectReference"):
         entry["steps"][function] = "intent"
         save()
-        value = _native_call(backend, {"script": "ObjectReference", "function": function,
-                                       "returnType": _SIGNATURES["ObjectReference"][function][1]}, arguments, target)
+        value = _native_call(backend, {"script": script, "function": function,
+                                       "returnType": _SIGNATURES[script][function][1]}, arguments, target)
         entry["steps"][function] = "returned"
         save()
         return value
@@ -225,6 +225,11 @@ def create(session, request, deadline, policy):
             backend.pause(.1)
         entry["incarnation"] = observed["incarnation"]
         save()
+        stable_world()
+        invoke("SetDontMove", [True], ref, script="Actor")
+        stationary_actor = observe_new()
+        if stationary_actor["incarnation"] != entry["incarnation"] or stationary_actor["actor"]["loaded3D"] is not True:
+            raise BindingError("Created actor incarnation/loaded state changed before placement")
         current, _ = _pose(backend, PLAYER["reference"])
         if math.dist(current, pos) > 1:
             raise BindingError("Player moved before relative fixture placement; never repeat creation")

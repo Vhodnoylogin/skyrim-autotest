@@ -115,7 +115,8 @@ Explicitly declared member calls such as `SetDontMove(Bool)`, `EnableAI(Bool)`,
 `SetActorValue(String, Float)`, `StopCombat()`, `StopCombatAlarm()` and
 `UnequipAll()` can use the same actor witness guard if actual native metadata
 matches their frozen signatures. No fixture preparation, AI, collision, equipment
-or aggression change occurs merely by creating an actor. Supply only the exact
+or aggression change occurs merely by creating an actor; creation issues the
+one locomotion blocker described below. Supply only the exact
 separately authorized preparation commands. This route does not add an aggregate
 SKEE read: `NiOverride.GetBodyMorphs` is not an available Papyrus substitute for
 an independently qualified native aggregate provider.
@@ -153,7 +154,8 @@ stable future physics.
 
 Creation qualifies the actual native member signatures for `PlaceAtMe(Form, Int,
 Bool, Bool) -> ObjectReference`, `MoveTo(ObjectReference, Float, Float, Float,
-Bool) -> None`, `SetAngle(Float, Float, Float) -> None`, and the required getters.
+Bool) -> None`, `SetAngle(Float, Float, Float) -> None`,
+`Actor.SetDontMove(Bool) -> None`, and the required getters.
 It checks the exact owned game, disposable profile, current guarded world and fresh
 gameplay/menu readiness. The base must resolve through `inspect refs` as exactly
 the approved NPC base; actual base sex/race/weight and the loaded player are read.
@@ -165,8 +167,12 @@ force-persist false and initially-disabled false. The native returned reference
 must be a new distinct `0xFF...` reference, absent from the preceding census and
 every existing fixture record. A witnessed actor must match its base, initial
 native sex/race, observer session/load generation and runtime incarnation, and
-have loaded 3D. Only this returned reference is placed, once with `MoveTo` and
-once with `SetAngle`. Each mutation has a durable step intent. Actual position
+have loaded 3D. The executor then calls `Actor.SetDontMove(true)` once on that
+exact witnessed reference, before one `MoveTo` and one `SetAngle`. Each mutation,
+including the locomotion blocker, has its own durable intent/returned step. A lost
+setter callback leaves uncertainty and stops before placement. The route does not
+disable AI/collision, issue TAI/TCL or edit inventory. The setter callback is not an
+independent measurement of locomotion, enabled AI or collision state. Actual position
 must be within four game units and heading within one degree of the requested
 placement. Player movement before placement or a changed world/incarnation stops
 the operation; the executor does not silently recompute or repeat it.

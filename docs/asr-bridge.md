@@ -79,6 +79,8 @@ Choose a new private cursor path belonging only to this forwarder. It must diffe
 from the speech source, any existing shared voice cursor, receiver configuration,
 token, database and its sidecars. All paths are explicit and absolute, outside
 Git/distributions, with no symlink/junction/reparse ancestry.
+Receiver paths and sidecars are normalized before alias checks, including `..`
+spellings; source/cursor/lock aliases of those protected files are refused.
 
 For a new empty, reviewed capture source, `--after 0` means forward every future
 complete accepted record. If records already exist, review them and select the
@@ -123,7 +125,11 @@ sequence. It stores no recognized phrase or credential content.
 
 The event ID is the fixed queue namespace plus the immutable utterance ID; its
 text, ASR kind and audio-hash metadata remain unchanged across retries. Submission
-uses `CommandHTTPClient.submit` and verifies the durable ACK before atomically
+also carries the pinned `expectedBinding`. The receiver checks it inside the
+ingress transaction: a rebind between status sampling and submission rejects the
+new event without creating a command under the changed target. The cursor remains
+unchanged and forwarding stops for review. Submission uses
+`CommandHTTPClient.submit` and verifies the durable ACK against that exact target before atomically
 advancing the cursor. A crash or lost ACK between receiver commit and cursor save
 resubmits the same event ID; receiver deduplication returns the original command
 rather than creating a new one. Repeated words in different utterances remain

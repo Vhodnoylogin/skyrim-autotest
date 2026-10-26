@@ -98,6 +98,7 @@ ack = client.submit({
     "sessionId": "operator-session-1",
     "sourceId": "external-asr-installation-1",
     "sourceEventId": "persisted-final-segment-000042",
+    "expectedBinding": {"provider": "your-host", "conversationId": "actual-conversation-id", "agentId": "actual-agent-id"},
     "kind": "asr.final",
     "text": "Report the current test state",
     "priority": "normal",
@@ -117,6 +118,15 @@ including across sessions. A duplicate with identical canonical immutable conten
 returns the original command ID and `duplicate:true`. Changed session, text, kind,
 priority or metadata under that same ID returns a conflict. Use a new event ID for a
 new utterance; do not reset counters on restart.
+
+Use optional `expectedBinding` when the producer pins an exact target agent. New
+ingress checks it inside the same SQLite transaction as insertion; a rebind after
+an earlier status read returns conflict without receiving a command for the new
+agent. This target expectation joins immutable content only when supplied, keeping
+legacy requests/digests unchanged when absent. An exact duplicate still returns
+its original command and target after a later permitted rebind; it cannot deliver
+new work. Explicit null or changed expectations are refused. The ASR forwarder
+uses this atomic target check; the returned command exposes its target in `binding`.
 
 The server commits with SQLite FULL synchronization before replying with an ACK.
 `client.submit` retries transport loss or HTTP 503 at most three times by default,
@@ -238,7 +248,7 @@ exact loopback endpoint. Token rotation requires restarting the server.
 | --- | --- | --- |
 | `sessions` | `sessionId` | — |
 | `bind` | `sessionId`, `binding` | — |
-| `submit` | `sessionId`, `sourceId`, `sourceEventId`, `kind`, `text` | `priority`, `metadata` |
+| `submit` | `sessionId`, `sourceId`, `sourceEventId`, `kind`, `text` | `priority`, `metadata`, `expectedBinding` |
 | `next` | `sessionId`, `binding` | — |
 | `delivered`, `renew` | `sessionId`, `binding`, `commandId`, `claimId` | — |
 | `complete` | same receipt | `result` |

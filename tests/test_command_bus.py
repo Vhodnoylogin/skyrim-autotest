@@ -60,6 +60,45 @@ class CommandBusTests(unittest.TestCase):
             self.submit(sessionId="session-2")
         self.assertEqual(self.bus.status("session-2")["commands"], {})
 
+    def test_expected_binding_is_atomic_for_new_ingress_and_sticky_for_duplicates(self):
+        observed = self.bus.status("session-1")["binding"]
+        other = dict(BINDING, agentId="new-agent")
+        self.bus.bind("session-1", other)
+        before = self.bus.events("session-1")
+        with self.assertRaises(BusError) as caught:
+            self.submit(expectedBinding=observed)
+        self.assertEqual(caught.exception.status, 409)
+        self.assertEqual(self.bus.events("session-1"), before)
+        self.assertEqual(self.bus.status("session-1")["commands"], {})
+        self.bus.bind("session-1", BINDING)
+        first = self.submit(expectedBinding=BINDING)
+        command = self.claim()
+        self.delivered(command)
+        self.bus.complete("session-1", command["id"], command["claimId"], BINDING)
+        self.bus.bind("session-1", other)
+        duplicate = self.submit(expectedBinding=BINDING)
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(duplicate["command"]["id"], first["command"]["id"])
+        self.assertEqual(duplicate["command"]["binding"], BINDING)
+        self.assertEqual(duplicate["command"]["state"], "completed")
+        with self.assertRaises(BusError):
+            self.submit(expectedBinding=other)
+        self.assertEqual(sum(e["type"] == "command.received" for e in self.bus.events("session-1")["events"]), 1)
+
+    def test_absent_expected_binding_keeps_legacy_digest_and_null_is_invalid(self):
+        first = self.submit()
+        content = {"sessionId": "session-1", "sourceId": "test-input", "sourceEventId": "event-1", "kind": "text",
+                   "text": "Check the requested state", "priority": "normal", "metadata": {}}
+        expected_digest = hashlib.sha256(json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        self.assertEqual(first["command"]["digest"], expected_digest)
+        self.assertTrue(self.submit()["duplicate"])
+        before = self.bus.events("session-1")
+        with self.assertRaises(BusError):
+            self.submit("null-target", expectedBinding=None)
+        with self.assertRaises(BusError):
+            self.submit(expectedBinding=BINDING)
+        self.assertEqual(self.bus.events("session-1"), before)
+
     def test_final_asr_only_and_strict_dispatch(self):
         with self.assertRaises(BusError):
             self.submit(kind="asr.partial")

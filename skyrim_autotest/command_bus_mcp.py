@@ -18,7 +18,7 @@ MAX_LINE_BYTES = 131072
 
 
 def _property(name):
-    if name == "binding":
+    if name in ("binding", "expectedBinding"):
         return {"type": "object", "properties": {key: {"type": "string", "minLength": 1, "maxLength": 200}
                 for key in ("provider", "conversationId", "agentId")},
                 "required": ["provider", "conversationId", "agentId"], "additionalProperties": False}

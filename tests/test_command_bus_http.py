@@ -100,6 +100,31 @@ class CommandHTTPTests(unittest.TestCase):
         self.assertEqual(calls[0], calls[1])
         self.assertEqual(self.bus.status("session")["commands"], {"received": 1})
 
+    def test_status_then_rebind_race_cannot_receive_into_the_new_agent(self):
+        client = CommandHTTPClient(self.config_path)
+        expected = client.call("status", {"sessionId": "session"})["binding"]
+        other = dict(BINDING, agentId="new-agent")
+        client.call("bind", {"sessionId": "session", "binding": other})
+        status, error, _ = self.request("submit", dict(self.submission(), expectedBinding=expected))
+        self.assertEqual(status, 409)
+        self.assertEqual(error["code"], "conflict")
+        self.assertEqual(self.bus.status("session")["commands"], {})
+        self.assertFalse(any(event["type"] == "command.received" for event in self.bus.events("session")["events"]))
+
+    def test_original_target_duplicate_receipt_survives_a_later_rebind(self):
+        request = dict(self.submission(), expectedBinding=BINDING)
+        _, first, _ = self.request("submit", request)
+        command = self.bus.next("session", BINDING)["command"]
+        self.bus.delivered("session", command["id"], command["claimId"], BINDING)
+        self.bus.complete("session", command["id"], command["claimId"], BINDING)
+        self.bus.bind("session", dict(BINDING, agentId="new-agent"))
+        status, duplicate, _ = self.request("submit", request)
+        self.assertEqual(status, 200)
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(duplicate["command"]["binding"], BINDING)
+        self.assertEqual(duplicate["command"]["id"], first["command"]["id"])
+        self.assertEqual(self.bus.status("session")["commands"], {"completed": 1})
+
     def test_speech_client_claim_delivery_completion_without_audio(self):
         client = CommandHTTPClient(self.config_path)
         client.call("speech", {"sessionId": "session", "binding": BINDING, "sourceEventId": "speech-1", "text": "Ready"})

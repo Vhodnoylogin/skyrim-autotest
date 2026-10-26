@@ -31,6 +31,10 @@ class CommandMCPTests(unittest.TestCase):
         names = {tool["name"] for tool in tools}
         self.assertTrue({"command_next", "command_submit", "command_respond", "command_speech", "command_outbox_next"} <= names)
         self.assertTrue(all(tool["inputSchema"]["additionalProperties"] is False for tool in tools))
+        submit = next(tool for tool in tools if tool["name"] == "command_submit")
+        expected = submit["inputSchema"]["properties"]["expectedBinding"]
+        self.assertEqual(set(expected["required"]), {"provider", "conversationId", "agentId"})
+        self.assertNotIn("expectedBinding", submit["inputSchema"]["required"])
 
     def test_calls_use_real_bus_and_notifications_cannot_mutate(self):
         self.initialize()

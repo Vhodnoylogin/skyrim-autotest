@@ -16,7 +16,8 @@ CONTRACT = {
         "MoveTo": (["ObjectReference", "Float", "Float", "Float", "Bool"], "None"),
         "SetAngle": (["Float"] * 3, "None"), "GetPositionX": ([], "Float"), "GetPositionY": ([], "Float"),
         "GetPositionZ": ([], "Float"), "GetAngleZ": ([], "Float")},
-    "Actor": {"GetActorBase": ([], "ActorBase"), "GetRace": ([], "Race"), "SetRace": (["Race"], "None")},
+    "Actor": {"GetActorBase": ([], "ActorBase"), "GetRace": ([], "Race"), "SetRace": (["Race"], "None"),
+              "SetDontMove": (["Bool"], "None")},
     "ActorBase": {"GetSex": ([], "Int"), "GetRace": ([], "Race"), "GetWeight": ([], "Float")}}
 
 
@@ -33,6 +34,7 @@ class FixtureSession:
         self.position = {"0x00000014": [100.0, 200.0, 5.0], REF: [100.0, 200.0, 5.0]}
         self.angles = {"0x00000014": 90.0, REF: 0.0}
         self.fail_after, self.world_invalid, self.metadata_invalid = None, False, False
+        self.dont_move_metadata_invalid = False
         self.on_mutation = lambda function: None
         self.bad_position, self.actor_sex = False, 1
 
@@ -63,6 +65,8 @@ class FixtureSession:
                     for name, signature in methods.items()]
             if self.metadata_invalid:
                 rows[0]["native"] = False
+            if self.dont_move_metadata_invalid and args["script"] == "Actor":
+                next(row for row in rows if row["name"] == "SetDontMove")["params"] = [{"type": "Float"}]
             return {"name": args["script"], "memberFunctions": rows, "globalFunctions": []}
         function, target = args["function"], args.get("self", {}).get("form")
         if function == "GetActorBase":
@@ -91,6 +95,13 @@ class FixtureSession:
         elif function == "SetRace":
             self.race = args["args"][0]["form"]
             returned, returned_type = None, "None"
+        elif function == "SetDontMove":
+            if args["args"] != [True] or args["script"] != "Actor":
+                raise AssertionError("Only the exact owned locomotion blocker is permitted")
+            intent = self.saved[-1]["interactiveActorFixtures"][REQUEST["tag"]]
+            if intent["steps"].get("SetDontMove") != "intent" or intent.get("reference") != target or "incarnation" not in intent:
+                raise AssertionError("Locomotion setter happened without a durable witnessed intent")
+            returned, returned_type = None, "None"
         else:
             raise AssertionError("Unexpected mutation " + function)
         self.on_mutation(function)
@@ -114,13 +125,15 @@ class FixtureActorTests(unittest.TestCase):
 
     def test_creation_has_durable_intent_exact_once_placement_and_registry_witness(self):
         result = self.create()
-        self.assertEqual([call["function"] for call in self.session.mutations], ["PlaceAtMe", "MoveTo", "SetAngle"])
+        self.assertEqual([call["function"] for call in self.session.mutations], ["PlaceAtMe", "SetDontMove", "MoveTo", "SetAngle"])
         self.assertEqual(self.session.mutations[0]["args"], [{"form": BASE}, 1, False, False])
         self.assertEqual(result["placement"]["position"], [300.0, 150.0, 5.0])
         self.assertEqual(result["actor"]["reference"], REF)
         entry = fixture_actors.require_fixture(self.session, {"reference": REF, "base": BASE})
         self.assertEqual(entry["status"], "created")
         self.assertTrue(entry["creationWitness"]["nativeReturned"])
+        self.assertEqual(entry["steps"]["SetDontMove"], "returned")
+        self.assertFalse(any(call["function"] in ("EnableAI", "SetCollision", "RemoveAllItems", "UnequipAll") for call in self.session.mutations))
         self.assertNotIn("photography", self.session.state)
 
     def test_actual_creation_then_guarded_race_uses_same_witness(self):
@@ -136,7 +149,7 @@ class FixtureActorTests(unittest.TestCase):
             self.session.state["interactiveActorFixtures"]["M1"]["status"] = status
             with self.assertRaisesRegex(ValueError, "already attempted"):
                 self.create()
-        self.assertEqual(len(self.session.mutations), 3)
+        self.assertEqual(len(self.session.mutations), 4)
 
     def test_lost_spawn_callback_leaves_uncertainty_without_search_adoption_or_replay(self):
         self.session.fail_after = "PlaceAtMe"
@@ -151,8 +164,25 @@ class FixtureActorTests(unittest.TestCase):
     def test_lost_placement_callback_does_not_repeat_creation_move_or_set_angle(self):
         self.session.fail_after = "MoveTo"
         with self.assertRaises(TimeoutError): self.create()
-        self.assertEqual([call["function"] for call in self.session.mutations], ["PlaceAtMe", "MoveTo"])
+        self.assertEqual([call["function"] for call in self.session.mutations], ["PlaceAtMe", "SetDontMove", "MoveTo"])
         self.assertEqual(self.session.state["interactiveActorFixtures"]["M1"]["status"], "uncertain")
+
+    def test_lost_locomotion_setter_callback_stops_before_placement_without_replay(self):
+        self.session.fail_after = "SetDontMove"
+        with self.assertRaises(TimeoutError): self.create()
+        self.assertEqual([call["function"] for call in self.session.mutations], ["PlaceAtMe", "SetDontMove"])
+        entry = self.session.state["interactiveActorFixtures"]["M1"]
+        self.assertEqual(entry["status"], "uncertain")
+        self.assertEqual(entry["steps"]["SetDontMove"], "intent")
+        with self.assertRaises(ValueError): self.create()
+        self.assertEqual(len(self.session.mutations), 2)
+        self.assertFalse(any(call["function"] in ("EnableAI", "SetCollision") for call in self.session.mutations))
+
+    def test_locomotion_setter_requires_actual_bool_metadata_before_creation(self):
+        self.session.dont_move_metadata_invalid = True
+        with self.assertRaises((ValueError, AssertionError)):
+            self.create()
+        self.assertEqual(self.session.mutations, [])
 
     def test_player_static_prior_foreign_and_duplicate_references_are_refused(self):
         for ref, prior in (("0x00000014", []), ("0x00012345", []), (REF, [REF])):
@@ -185,7 +215,7 @@ class FixtureActorTests(unittest.TestCase):
         self.session.bad_position = True
         with self.assertRaisesRegex(ValueError, "placement"):
             self.create()
-        self.assertEqual(len(self.session.mutations), 3)
+        self.assertEqual(len(self.session.mutations), 4)
         self.assertEqual(self.session.state["interactiveActorFixtures"]["M1"]["status"], "uncertain")
 
     def test_metadata_and_truncated_census_fail_before_any_mutation(self):

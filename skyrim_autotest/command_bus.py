@@ -34,6 +34,7 @@ class _ExpiredClaim(BusError):
 
 APPLICATION_ID = 0x53414342  # SACB: Skyrim Autotest Command Bus.
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+_EXPECTED_UNSET = object()
 
 
 def external_path(value, name):
@@ -296,7 +297,8 @@ class CommandBus:
             self._event(con, sessionId, "session.bound", {"binding": json.loads(value)})
         return {"sessionId": sessionId, "binding": json.loads(value), "duplicate": False}
 
-    def submit(self, sessionId, sourceId, sourceEventId, kind, text, priority="normal", metadata=None):
+    def submit(self, sessionId, sourceId, sourceEventId, kind, text, priority="normal", metadata=None,
+               expectedBinding=_EXPECTED_UNSET):
         _identifier(sourceId, "sourceId")
         _identifier(sourceEventId, "sourceEventId")
         _text(text)
@@ -310,16 +312,24 @@ class CommandBus:
         metadata_json = _json(metadata)
         content = {"sessionId": sessionId, "sourceId": sourceId, "sourceEventId": sourceEventId,
                    "kind": kind, "text": text, "priority": priority, "metadata": metadata}
+        expected_json = None
+        if expectedBinding is not _EXPECTED_UNSET:
+            content["expectedBinding"] = binding_value(expectedBinding)
+            expected_json = _json(content["expectedBinding"])
         digest = hashlib.sha256(_json(content, 65536).encode("utf-8")).hexdigest()
         with self._transaction() as con:
             session = self._session(con, sessionId)
-            if session["binding"] is None:
-                raise _conflict("Bind a specific agent before accepting commands")
             old = con.execute("SELECT * FROM commands WHERE source_id=? AND source_event_id=?", (sourceId, sourceEventId)).fetchone()
             if old:
                 if old["digest"] != digest:
                     raise _conflict("Source event id was already used with different immutable content")
+                if expected_json is not None and old["binding"] != expected_json:
+                    raise _conflict("Original command target does not match expectedBinding")
                 return {"command": self._command(old), "duplicate": True, "acknowledged": True}
+            if session["binding"] is None:
+                raise _conflict("Bind a specific agent before accepting commands")
+            if expected_json is not None and session["binding"] != expected_json:
+                raise _conflict("Session binding changed before ingress; expectedBinding does not match")
             item_id = uuid.uuid4().hex
             con.execute("""INSERT INTO commands(id,session_id,binding,source_id,source_event_id,digest,
                            kind,text,priority,metadata,state,created) VALUES(?,?,?,?,?,?,?,?,?,?,'received',?)""",
@@ -597,7 +607,7 @@ class CommandBus:
 OPERATIONS = {
     "sessions": ("create_session", ("sessionId",), ()),
     "bind": ("bind", ("sessionId", "binding"), ()),
-    "submit": ("submit", ("sessionId", "sourceId", "sourceEventId", "kind", "text"), ("priority", "metadata")),
+    "submit": ("submit", ("sessionId", "sourceId", "sourceEventId", "kind", "text"), ("priority", "metadata", "expectedBinding")),
     "next": ("next", ("sessionId", "binding"), ()),
     "delivered": ("delivered", ("sessionId", "commandId", "claimId", "binding"), ()),
     "renew": ("renew", ("sessionId", "commandId", "claimId", "binding"), ()),
