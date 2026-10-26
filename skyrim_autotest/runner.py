@@ -296,6 +296,8 @@ class Session:
         self.heartbeat_failed = threading.Event()
         self.heartbeat_error = None
         self.heartbeat_thread_id = None
+        self._game_exit_tracker = None
+        self._game_exit_identity = None
         if not native.alive(self.state.get('runner')):
             from . import runner_monitor
             runner_monitor.restore(self.dir, self.state)
@@ -323,6 +325,49 @@ class Session:
         self.log('phase', name=name, deadline=self.state['deadline'])
         print(name, flush=True)
 
+    def observe_game_exit(self, stage):
+        """Diagnostic only: retain an exact owned handle, never alter recovery."""
+        game = self.state.get('game')
+        if not game:
+            return
+        try:
+            tracker = getattr(self, '_game_exit_tracker', None)
+            if tracker is not None and getattr(self, '_game_exit_identity', None) != game:
+                previous = tracker.snapshot()
+                previous.update(stage='before-game-rebind', phase=self.state.get('phase'))
+                self.state.setdefault('gameProcessObservations', []).append(previous)
+                self.log('game-process-observation', **previous)
+                tracker.close()
+                tracker = None
+                self._game_exit_tracker = None
+            if tracker is None:
+                from .process_exit import capture
+                tracker = capture(game)
+                self._game_exit_tracker = tracker
+                self._game_exit_identity = copy.deepcopy(game)
+            value = tracker.snapshot()
+            value.update(stage=stage, phase=self.state.get('phase'))
+            self.state.setdefault('gameProcessObservations', []).append(value)
+            self.log('game-process-observation', **value)
+            self.save()
+        except Exception as error:
+            self.state['gameProcessObservationError'] = type(error).__name__
+            try:
+                self.log('game-process-observation-unavailable', stage=stage, errorType=type(error).__name__)
+                self.save()
+            except Exception:
+                pass  # Diagnostics must never prevent ordinary cleanup/restoration.
+
+    def close_game_exit_tracker(self):
+        tracker = getattr(self, '_game_exit_tracker', None)
+        self._game_exit_tracker = None
+        self._game_exit_identity = None
+        if tracker is not None:
+            try:
+                result = tracker.close()
+                self.log('game-process-observer-closed', **result)
+            except Exception:
+                pass  # close() is diagnostic; never replace a restoration failure.
     def snapshot(self, path):
         path = Path(path).resolve()
         # An immutable shared game executable must never enter generic recovery,
@@ -1022,6 +1067,8 @@ class Session:
                     if not matching:
                         continue
                     self.state.update(port=port, game=matching)
+                    if getattr(self, '_game_exit_identity', None) != matching:
+                        Session.observe_game_exit(self, 'matching-game-attached')
                     self.save()
                     self.log('health', result=health)
                     frame = health.get('frame')
@@ -1129,6 +1176,16 @@ class Session:
             raise RuntimeError('Unexpected session before owned shutdown; shared runtime preserved: ' + str(foreign))
 
     def cleanup(self):
+        try:
+            Session.observe_game_exit(self, 'before-cleanup')
+            return Session._cleanup(self)
+        finally:
+            try:
+                Session.observe_game_exit(self, 'cleanup-finally')
+            finally:
+                Session.close_game_exit_tracker(self)
+
+    def _cleanup(self):
         self.phase('stop-and-restore', 150)
         if self.state.get('hardwareFrame'):
             from . import hardware
@@ -1168,6 +1225,7 @@ class Session:
                 time.sleep(.2)
             if any(native.alive(i) for i in owned):
                 raise RuntimeError(f'Owned {role} process did not exit; refusing file restoration')
+        Session.observe_game_exit(self, 'owned-processes-ended')
         if self.state.get('restoringFiles'):
             # A partial restore may already have removed generated outputs.
             # Preserve collected evidence/errors; do not overwrite its manifest
@@ -1301,8 +1359,16 @@ class Session:
                  f'Reason: {self.state.get("reason", "")}', '', '## Steps', '']
         for item in self.state.get('checks', []):
             lines.append(f'- {item["name"]}: {item["result"]}')
+        observations = self.state.get('gameProcessObservations', [])
+        if observations:
+            observed = observations[-1]
+            lines += ['', '## Game process observation',
+                      f'Status: {observed.get("status", "unavailable")}',
+                      f'Exit code: {observed.get("exitCodeHex") or "unavailable"}',
+                      f'Observed at: {observed.get("stage", "unavailable")}',
+                      'The OS observation does not determine the exit cause.']
         (self.dir / 'report.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
-        atomic_json(self.dir / 'result.json', {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors','heartbeatHealth','guardianRecovery','interactiveSession','interactiveArtifacts','interactiveActorFixtures')})
+        atomic_json(self.dir / 'result.json', {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors','heartbeatHealth','guardianRecovery','interactiveSession','interactiveArtifacts','interactiveActorFixtures','gameProcessObservations','gameProcessObservationError')})
 
     def reopen_mo2(self):
         if self.state.get('reopenMO2') and self.state.get('restored'):
