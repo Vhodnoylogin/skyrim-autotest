@@ -1,6 +1,12 @@
 # Skyrim Autotest
 
-The `feature/se-morph-presets` branch contains the unqualified 0.3.8
+Version0.3.9 on `feature/se-morph-presets` adds bounded read-only settlement of an
+exiting owned process's stale inventory row, preserves the original guardian
+recovery cause, and offers explicit SE New Game UI startup before an unchanged
+cell-based subject. These changes need their own live qualification. Read
+[session lifecycle and qualification](docs/se-session-lifecycle.md).
+
+The branch also contains the unqualified 0.3.8
 [semantic preset/link adapter](docs/morph-presets.md). The native-tested SE
 baseline remains the exact 0.3.7 configuration in [SE setup](docs/se-qualified.md).
 

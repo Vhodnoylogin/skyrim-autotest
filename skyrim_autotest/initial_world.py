@@ -51,6 +51,8 @@ class InitialWorld:
         if not gameplay_ready(scene, menus, state.get('scenario', {}).get('cell')):
             raise ValueError('Initial world is not actual gameplay')
         if self.mode == 'new-game':
+            if state.get('configuration', {}).get('game_edition') == 'se' and names != ['newGame']:
+                raise ValueError('SE New Game requires the actual unique native newGame lifecycle, not only a menu/cell transition')
             from .bootstrap import new_game_transition
             proof = state.get('newGameStarted', {})
             if (proof.get('saveLoaded') is not False or proof.get('consoleBootstrap') is not False

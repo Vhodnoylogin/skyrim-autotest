@@ -43,12 +43,15 @@ def configure(value, base=None):
     missing = sorted(k for k in required if not value.get(k))
     if missing:
         raise ConfigurationError("Missing configuration fields: " + ", ".join(missing))
-    unknown = set(value) - PATH_KEYS - {"schemaVersion", "game_edition", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings", "allow_steam_client_restart", "boundary_collection", "fixture_actor_allowlist", "fixture_actor_base_allowlist", "photography", "native14_live", "root_builder"}
+    unknown = set(value) - PATH_KEYS - {"schemaVersion", "game_edition", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings", "allow_steam_client_restart", "boundary_collection", "fixture_actor_allowlist", "fixture_actor_base_allowlist", "photography", "native14_live", "root_builder", "se_new_game_ui"}
     if unknown:
         raise ConfigurationError("Unknown configuration fields: " + ", ".join(sorted(unknown)))
     base = Path(base or Path.cwd()).resolve()
     result = dict(value)
     result['game_edition'] = selected['edition']
+    if 'se_new_game_ui' in result:
+        if type(result['se_new_game_ui']) is not bool or selected['edition'] != 'se':
+            raise ConfigurationError('se_new_game_ui is an explicit SE-only boolean startup policy')
     if 'root_builder' in result:
         from .root_builder import configuration
         try:

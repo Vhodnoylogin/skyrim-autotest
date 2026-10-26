@@ -66,5 +66,8 @@ def validate_scenario(configuration, scenario, driver_backend, input_backend):
     if any(s.get('tool') == 'platform' and s.get('args', {}).get('operation') == 'controller.perform'
            for s in scenario.get('steps', [])):
         raise ValueError('Physical VR controller operations cannot run against Skyrim SE')
-    if scenario.get('startMode') == 'new-game':
+    if configuration.get('se_new_game_ui'):
+        if not scenario.get('cell') or scenario.get('fixture'):
+            raise ValueError('SE UI New Game requires a cell and cannot substitute for a pinned save fixture')
+    elif scenario.get('startMode') == 'new-game':
         raise ValueError('SE New Game UI is not qualified; use a declared cell or pinned save fixture')

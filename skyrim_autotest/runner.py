@@ -1087,18 +1087,40 @@ class Session:
         This read never claims a process by path/time or closes a foreign game.
         Check before any shutdown, including again between owned role groups.
         """
-        foreign = []
         owned = [row['identity'] for row in self.state.get('owned', [])
                  if row.get('role') in ('game', 'loader')]
-        processes = native.processes()
-        if not isinstance(processes, list) or not processes:
-            raise RuntimeError('Process inventory unavailable; refusing owned shutdown and preserving shared runtime')
-        for row in processes:
-            if row['name'].lower() not in GAME_NAMES:
-                continue
-            identity = native.identity(row['pid'])
-            if identity is None or identity not in owned:
-                foreign.append({**row, 'identity': identity})
+        deadline = time.monotonic() + 2
+        observations = 0
+        while True:
+            foreign, unresolved = [], []
+            processes = native.processes()
+            if not isinstance(processes, list) or not processes:
+                raise RuntimeError('Process inventory unavailable; refusing owned shutdown and preserving shared runtime')
+            for row in processes:
+                if row['name'].lower() not in GAME_NAMES:
+                    continue
+                identity = native.identity(row['pid'])
+                if identity is None and any(i['pid'] == row['pid'] for i in owned):
+                    # Toolhelp's complete snapshot may outlive the process it lists.
+                    # PID membership permits observation only, never ownership/action.
+                    unresolved.append({**row, 'identity': None})
+                elif identity is None or identity not in owned:
+                    foreign.append({**row, 'identity': identity})
+            if foreign:
+                break
+            if not unresolved:
+                if observations:
+                    self.log('shutdown-identity-settled', observations=observations,
+                             basis='fresh complete inventory and exact identities; no unknown process acted on')
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or observations >= 40:
+                foreign = unresolved
+                break
+            self.log('shutdown-identity-pending', processes=unresolved,
+                     attempt=observations + 1, noProcessAction=True)
+            observations += 1
+            time.sleep(min(.05, remaining))
         if foreign:
             self.state['foreignGameShutdownRefused'] = foreign
             self.save()
@@ -1280,7 +1302,7 @@ class Session:
         for item in self.state.get('checks', []):
             lines.append(f'- {item["name"]}: {item["result"]}')
         (self.dir / 'report.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
-        atomic_json(self.dir / 'result.json', {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors','heartbeatHealth')})
+        atomic_json(self.dir / 'result.json', {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors','heartbeatHealth','guardianRecovery')})
 
     def reopen_mo2(self):
         if self.state.get('reopenMO2') and self.state.get('restored'):
@@ -1349,7 +1371,15 @@ def guardian(directory):
         try:
             with native.SessionMutex():
                 session = Session(directory)
-                session.state.update(result='failed', reason=reason)
+                # The runner can finish between the observer read and mutex claim.
+                if session.state.get('done'):
+                    return
+                previous = {'result': session.state.get('result'),
+                            'reason': session.state.get('reason'),
+                            'phase': session.state.get('phase')}
+                session.state['guardianRecovery'] = {'trigger': reason, 'prior': previous}
+                prior_reason = previous['reason'] or ''
+                session.state.update(result='failed', reason=(prior_reason + '; ' + reason).lstrip('; '))
                 session.save()
                 try:
                     session.cleanup()

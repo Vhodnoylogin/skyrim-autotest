@@ -85,7 +85,7 @@ def advance_calibration(session):
 
 
 def start_new_game(session, cell):
-    """Select the actual NEW item and confirm it through the live stock VR UI."""
+    """Select the actual NEW item through the identified stock SE/VR movie."""
     from .api_contract import validate_description
     from .runner import request
     methods = {'GetString': ['string', 'string'], 'GetInt': ['string', 'string'],
@@ -451,11 +451,16 @@ def prepare_gameplay(session, scenario):
     """Resolve the declared initial state once, without knowing a subject mod."""
     cell = scenario.get('cell')
     fixture = scenario.get('fixture')
-    new_game = scenario.get('startMode') == 'new-game'
-    if new_game and fixture:
-        raise AssertionError('New Game cannot load a save fixture')
     if not cell and not fixture:
         raise AssertionError('Gameplay scenario requires an initial cell or pinned save')
+    new_game = scenario.get('startMode') == 'new-game'
+    platform_new_game = session.state.get('configuration', {}).get('se_new_game_ui') is True
+    if platform_new_game:
+        if session.state['configuration'].get('game_edition') != 'se' or not cell or fixture:
+            raise AssertionError('SE UI New Game requires an owned cell fixture without a save')
+        new_game = True
+    if new_game and fixture:
+        raise AssertionError('New Game cannot load a save fixture')
     prepare_startup_screen(session)
     from .initial_world import InitialWorld
     initial = InitialWorld(session, 'fixture' if fixture else 'new-game' if new_game else 'cell')
@@ -463,6 +468,8 @@ def prepare_gameplay(session, scenario):
         start_new_game(session, cell)
         session.phase('gameplay-new-game-initial-world', 120)
         loaded_scene, _ = wait_gameplay_ready(session, None, True, lifecycle_poll=initial.read)
+        if platform_new_game and initial.read() != ['newGame']:
+            raise AssertionError('SE initialization lacks the actual native newGame lifecycle; no fixture cell transition or subject actions')
         session.log('gameplay-new-game-initial-world-ready', scene=loaded_scene,
                     requestedFixtureCell=cell, subjectStarted=False)
     if fixture:
@@ -503,7 +510,8 @@ def prepare_gameplay(session, scenario):
     scene, menus = wait_gameplay_ready(session, cell, False, lifecycle_poll=initial.read)
     initial.complete(scene, menus)
     session.state['gameplayBootstrap'] = {'completed': True, 'cell': cell,
-                                          'loadedFixture': bool(fixture), 'startMode': scenario.get('startMode'),
+                                          'loadedFixture': bool(fixture), 'startMode': 'new-game' if new_game else scenario.get('startMode'),
+                                          'startupSelection': 'platform' if platform_new_game else 'scenario',
                                           'scene': scene, 'menus': menus}
     session.save()
     session.log('gameplay-ready', scene=scene, menus=menus)

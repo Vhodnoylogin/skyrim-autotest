@@ -19,7 +19,9 @@ For an owned live native14 read use docs/native14-live.md: operator-owned exact
 module pins, common bootstrap, endpoint/process/world guards and fresh frames.
 Never create another root or directly invoke run to bypass Polygon admission.
 SE uses no VR adapter and does not support unqualified Root Builder/borrowed-profile
-or New Game UI paths. A stock1.32 version string does not prove native menu flags,
+paths. The explicit0.3.9 se_new_game_ui candidate requires the separately reviewed
+qualification described in docs/se-session-lifecycle.md; it is not the tested
+default baseline. A stock1.32 version string does not prove native menu flags,
 safe Papyrus metadata, physics/contact data or a capture provider are available.
 For the exact0.3.7 SE smoke configuration read docs/se-qualified.md. The generated
 SE template alone does not stage the winning DevBench configuration. Preserve
