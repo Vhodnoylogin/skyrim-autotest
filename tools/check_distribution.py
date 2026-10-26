@@ -70,6 +70,7 @@ def main():
     verify('portable-setup-command',[sys.executable,str(portable/'run.py'),'setup','--help'])
     verify('portable-doctor-command',[sys.executable,str(portable/'run.py'),'doctor','--help'])
     verify('portable-asr-forwarder-command',[sys.executable,str(portable/'run.py'),'asr-bridge','--help'])
+    verify('portable-subject-companion-command',[sys.executable,str(portable/'tools/subject_companion.py'),'--help'])
     if (portable/'AGENTS.md').read_bytes() != (portable/'skyrim_autotest/AI_AGENTS.md').read_bytes():
         raise RuntimeError('Packaged guide differs from the authoritative agent instructions')
     checks.append('single-authoritative-agent-guide')

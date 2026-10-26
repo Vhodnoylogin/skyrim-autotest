@@ -66,6 +66,9 @@ not Skyrim, MO2, SKSE, DevBench, drivers, models or private saves.
 
 Full command reference, supported boundaries and recovery are in README and docs.
 Source/offline tests do not establish live acceptance of a new game/provider build.
+For a finite origin-owned program that retains same-run NPC identities, read
+`docs/subject-companion.md`. Its standalone transport ships in this full kit;
+Polygon owns ordinary admission and independently collected case reports.
 
 For a qualified producer's already collected native14 diagnostics, use
 `validate-native14 --snapshot FILE --expected-pid PID --max-age-micros AGE`.

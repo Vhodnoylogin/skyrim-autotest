@@ -21,6 +21,9 @@ For bounded held-open owned sessions and typed disposable-NPC actions, read
 [interactive sessions](docs/interactive-session.md) and
 [explicit bindings](docs/interactive-bindings.md). These are opt-in platform
 capabilities and retain one executor/guardian; declarations require real qualification.
+For finite origin-owned checks that retain created NPC identities, the complete
+portable/agent-kit also includes a [subject companion](docs/subject-companion.md).
+Its transport preserves raw command evidence; the origin owns business assertions.
 
 Current bounded SE evidence includes the0.4.0 RC6/native-startup composition:
 actual New Game, settled QASmoke, movement, creation of one disposable NPC,

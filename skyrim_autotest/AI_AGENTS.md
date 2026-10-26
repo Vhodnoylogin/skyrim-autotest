@@ -30,6 +30,11 @@ baselines are explicit; missing initial input waits, changed history refuses.
 Typed NPC bindings and creation witnesses are in docs/interactive-bindings.md.
 Do not adopt existing NPCs, allow raw script selectors or treat a native return
 as applied morphs/rendered appearance. Large results retain exact hashed evidence.
+For finite file-backed subject programs, read docs/subject-companion.md. The
+portable/agent-kit transport uses the same owned interactive session; the origin
+supplies pinned business assertions. Preserve raw results, exact case identities
+and actual delivered-action start evidence. A tool baseline does not qualify an
+expanded subject binding policy or turn acknowledgments into passed mod checks.
 
 Use this tool for autonomous, bounded Skyrim SE or VR tests after the owner has
 requested/authorized testing. Existing authorization persists; do not ask again
