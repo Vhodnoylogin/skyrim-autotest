@@ -118,10 +118,28 @@ def guard(session, spec, deadline, policy):
 def _qualify(backend):
     for script, methods in _SIGNATURES.items():
         description = backend.call("papyrus", {"action": "describe", "script": script})
-        checked = validate_description(script, description, "memberFunctions", {name: value[0] for name, value in methods.items()})
-        for item in checked:
-            if item["native"] is not True or str(item["returnType"]).casefold() != methods[item["function"]][1]:
-                raise BindingError("Fixture primitive native return signature unavailable")
+        for function, (params, return_type) in methods.items():
+            # Stock Actor.GetActorBase is a zero-argument Papyrus read wrapper,
+            # observed native:false in the retained SE qualification metadata.
+            # This exception does not admit scripted setters or other getters.
+            read_wrapper = (script, function) == ("Actor", "GetActorBase")
+            rows = description.get("memberFunctions") if isinstance(description, dict) else None
+            matches = [row for row in rows or [] if isinstance(row, dict) and str(row.get("name", "")).casefold() == function.casefold()]
+            actual = {"script": description.get("name") if isinstance(description, dict) else None,
+                      "matches": [{"params": row.get("params"), "returnType": row.get("returnType"), "native": row.get("native")} for row in matches]}
+            expected = {"script": script, "scope": "memberFunctions", "params": params, "returnType": return_type,
+                        "native": "true or false for this stock read wrapper only" if read_wrapper else True}
+            reason = f"Fixture API metadata mismatch for {script}.{function}: actual={actual!r}; expected={expected!r}"
+            if len(matches) != 1:
+                raise BindingError(reason)
+            try:
+                item = validate_description(script, description, "memberFunctions", {function: params})[0]
+            except (AssertionError, AttributeError, TypeError) as error:
+                raise BindingError(reason) from error
+            native_flag = item["native"]
+            if (not (native_flag is True or (read_wrapper and native_flag is False)) or
+                    str(item["returnType"]).casefold() != return_type):
+                raise BindingError(reason)
 
 
 def _pose(backend, ref):

@@ -35,6 +35,7 @@ class FixtureSession:
         self.angles = {"0x00000014": 90.0, REF: 0.0}
         self.fail_after, self.world_invalid, self.metadata_invalid = None, False, False
         self.dont_move_metadata_invalid = False
+        self.metadata_overrides = {}
         self.on_mutation = lambda function: None
         self.bad_position, self.actor_sex = False, 1
 
@@ -67,6 +68,8 @@ class FixtureSession:
                 rows[0]["native"] = False
             if self.dont_move_metadata_invalid and args["script"] == "Actor":
                 next(row for row in rows if row["name"] == "SetDontMove")["params"] = [{"type": "Float"}]
+            for row in rows:
+                row.update(self.metadata_overrides.get((args["script"], row["name"]), {}))
             return {"name": args["script"], "memberFunctions": rows, "globalFunctions": []}
         function, target = args["function"], args.get("self", {}).get("form")
         if function == "GetActorBase":
@@ -183,6 +186,39 @@ class FixtureActorTests(unittest.TestCase):
         with self.assertRaises((ValueError, AssertionError)):
             self.create()
         self.assertEqual(self.session.mutations, [])
+
+    def test_actual_stock_actor_base_read_wrapper_is_qualified_without_relaxing_mutators(self):
+        # Retained RC4 SE metadata: native:false, no parameters, ActorBase return.
+        self.session.metadata_overrides[("Actor", "GetActorBase")] = {
+            "native": False, "params": [], "returnType": "ActorBase"}
+        result = self.create()
+        self.assertEqual(result["fixture"]["status"], "created")
+        self.assertEqual(result["actor"]["base"], BASE)
+        self.assertEqual([call["function"] for call in self.session.mutations], ["PlaceAtMe", "SetDontMove", "MoveTo", "SetAngle"])
+
+    def test_non_native_spawn_and_locomotion_setters_remain_rejected_with_exact_error(self):
+        for script, function in (("ObjectReference", "PlaceAtMe"), ("Actor", "SetDontMove")):
+            self.session = FixtureSession()
+            self.session.metadata_overrides[("Actor", "GetActorBase")] = {"native": False}
+            self.session.metadata_overrides[(script, function)] = {"native": False}
+            with self.subTest(function=function), self.assertRaises(ValueError) as caught:
+                self.create()
+            self.assertIn(script + "." + function, str(caught.exception))
+            self.assertIn("'native': False", str(caught.exception))
+            self.assertIn("expected=", str(caught.exception))
+            self.assertIn("'native': True", str(caught.exception))
+            self.assertEqual(self.session.mutations, [])
+
+    def test_actor_base_wrapper_exception_requires_exact_signature_and_boolean_flag(self):
+        for invalid in ({"params": [{"type": "Form"}]}, {"returnType": "Form"}, {"native": None}):
+            self.session = FixtureSession()
+            self.session.metadata_overrides[("Actor", "GetActorBase")] = {"native": False, **invalid}
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError) as caught:
+                self.create()
+            self.assertIn("Actor.GetActorBase", str(caught.exception))
+            self.assertIn("actual=", str(caught.exception))
+            self.assertIn("expected=", str(caught.exception))
+            self.assertEqual(self.session.mutations, [])
 
     def test_player_static_prior_foreign_and_duplicate_references_are_refused(self):
         for ref, prior in (("0x00000014", []), ("0x00012345", []), (REF, [REF])):
