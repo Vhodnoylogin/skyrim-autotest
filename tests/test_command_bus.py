@@ -303,13 +303,17 @@ class CommandBusTests(unittest.TestCase):
 
     def test_actual_process_exit_preserves_received_and_claimed_items(self):
         source = """import json,os,sys
+sys.path.insert(0,sys.argv[1])
 from skyrim_autotest.command_bus import CommandBus
-b=CommandBus(sys.argv[1],claim_timeout=5)
+b=CommandBus(sys.argv[2],claim_timeout=5)
 b.submit('session-1','subprocess','child-event','text','Durable child command')
-b.next('session-1',json.loads(sys.argv[2]))
+b.next('session-1',json.loads(sys.argv[3]))
 os._exit(23)
 """
-        result = subprocess.run([sys.executable, "-c", source, str(self.database), json.dumps(BINDING)], capture_output=True, timeout=15)
+        unrelated = Path(self.temp.name) / "unrelated-child-cwd"
+        unrelated.mkdir()
+        result = subprocess.run([sys.executable, "-I", "-c", source, str(PACKAGE_ROOT), str(self.database), json.dumps(BINDING)],
+                                cwd=unrelated, capture_output=True, timeout=15)
         self.assertEqual(result.returncode, 23, result.stderr.decode())
         reopened = CommandBus(self.database)
         duplicate = reopened.submit("session-1", "subprocess", "child-event", "text", "Durable child command")
