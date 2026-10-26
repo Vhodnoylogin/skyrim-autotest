@@ -1,7 +1,8 @@
 # Skyrim test kit for any AI agent
 
 Give the agent this extracted archive, `PROMPT.txt`, a description of the mod,
-and an external configuration appropriate to the actual game. The agent needs
+and an existing external configuration or an explicit deployment specification
+with actual installation paths. The agent needs
 Windows file/process/command access; no particular AI vendor or chat API is used.
 Python3.11+ is acquired separately. This kit contains our source and instructions,
 not Skyrim, MO2, SKSE, DevBench, drivers, models or private saves.
@@ -27,7 +28,9 @@ not Skyrim, MO2, SKSE, DevBench, drivers, models or private saves.
    provider: the narrow compatibility candidate must be built/qualified separately.
    Acquisition recipes and known hashes are in `dependencies.json`.
    SkyrimSE1.7.104 requires the separate modern SDK/provider candidate described
-   in `docs/devbench-modern-se.md`. An old VR SDK DLL or the upstream version
+   in `docs/devbench-modern-se.md`. For the supplied setup example's
+   `se_new_game_ui:true`, follow `docs/devbench-native-startup.md` instead: the
+   older modern-SE smoke DLL lacks this startup interface. An old VR SDK DLL or the upstream version
    string alone does not establish this target. Build/qualify the exact provider;
    do not substitute an incompatible prebuilt library.
    For the tested0.3.7 SE configuration, also read `docs/se-qualified.md`: the

@@ -20,6 +20,21 @@ requirements. No second product or duplicated runner is required.
 
 ## Retained native evidence
 
+The0.4.0 RC6 executor ee9bd5b8a94394e8c9fe230de86aa430a8f3dbe8 passed
+its bounded SE execution on26October2026 with the same provider DLL below.
+Packet SHA2563524b8ae0ea6c5fde4b72b9df3c420f5a66075db53a66e2ca0baef9e9b6c94a3
+retains10passed/3unavailable declared checks and an incomplete subject-coverage
+label; execution and restoration passed. Separate technical evidence verifies
+native New Game through Realm to QASmoke,141.493units of player XY movement,
+one same-run-created stock NPC and two actual race readbacks, reception during
+a running command, eight completed commands and owned game exit0. Collection,
+restoration and copied-profile archive/removal were independently verified.
+This is tool qualification, not CLAW morph/render acceptance. A later VR attempt
+failed before gameplay with no matching DevBench and incomplete restoration;
+VR refresh is deferred by the owner's SE-only instruction. No VR pass is claimed.
+
+Earlier retained evidence:
+
 Exact SE0.3.10/provider5068162 DLL SHA256
 8930942502a5f75d9f0c03586cd067af37373eef60f93ac656dcf8a836abf3ec
 passed Q4 on26October2026:27declared checks plus initial-world readiness, five

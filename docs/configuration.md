@@ -19,11 +19,12 @@ SteamVR, VRIK or HIGGS are required for data-only SE tests. Runtime discovery us
 the `devbench/se` mirror instead of `devbench/vr`; explicit runtime paths win.
 SE preflight rejects Root Builder installations/root mods, borrowed/reusable MO2
 profiles and VR-control configuration until those combinations are qualified.
-SE New Game UI is not part of the qualified baseline. The0.3.9 candidate offers
-explicit `se_new_game_ui:true` in the separate platform configuration for a fresh
-cell-based subject, without rewriting its order. It cannot replace a pinned save.
-This opt-in needs separate qualification of actual UI/native lifecycle, gameplay,
-subject API admission and normal teardown; see [session lifecycle](se-session-lifecycle.md).
+Explicit `se_new_game_ui:true` in the separate platform configuration supports a
+fresh cell-based subject with the pinned native-startup provider, without rewriting
+its order. It cannot replace a pinned save. Read [native startup acquisition](devbench-native-startup.md),
+[session lifecycle](se-session-lifecycle.md) and the measured composition in
+[release status](release-0.4.md). Different providers and configurations still
+require qualification of startup, gameplay, subject API admission and teardown.
 The legacy default cell route is unchanged and does not prove New Game initialization.
 
 For the exact live-tested SE setup, including the required separately staged

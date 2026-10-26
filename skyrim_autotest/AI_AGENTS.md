@@ -50,9 +50,10 @@ For an owned live native14 read use docs/native14-live.md: operator-owned exact
 module pins, common bootstrap, endpoint/process/world guards and fresh frames.
 Never create another root or directly invoke run to bypass Polygon admission.
 SE uses no VR adapter and does not support unqualified Root Builder/borrowed-profile
-paths. The explicit0.3.9 se_new_game_ui candidate requires the separately reviewed
-qualification described in docs/se-session-lifecycle.md; it is not the tested
-default baseline. A stock1.32 version string does not prove native menu flags,
+paths. Explicit se_new_game_ui:true requires the pinned native-startup provider
+in docs/devbench-native-startup.md. Read docs/se-session-lifecycle.md and the
+measured composition in docs/release-0.4.md; it does not replace a pinned save or
+change the default cell route. A stock1.32 version string does not prove native menu flags,
 safe Papyrus metadata, physics/contact data or a capture provider are available.
 For the exact0.3.7 SE smoke configuration read docs/se-qualified.md. The generated
 SE template alone does not stage the winning DevBench configuration. Preserve
@@ -68,7 +69,8 @@ requires its own live qualification and does not clear an old queue reservation.
 
 1. Read README, docs/configuration.md and docs/scenarios.md. Discover the explicit
    external config; do not guess the owner's game/MO2 profile paths. `init`
-   creates a template only, never installs mods or prepares a personal save.
+   --spec creates filled external configuration; init --directory creates legacy
+   templates. Neither installs mods or prepares a personal save.
 2. Identify subject mod, dependencies, fixture, actions and game-observed success
    criteria. Put every mutable input/output file in `extra_files`, and stage an
    optional observation plugin through `staged_plugins` with SHA-256. Keep saves,

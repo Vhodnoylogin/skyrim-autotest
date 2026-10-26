@@ -22,9 +22,11 @@ For bounded held-open owned sessions and typed disposable-NPC actions, read
 [explicit bindings](docs/interactive-bindings.md). These are opt-in platform
 capabilities and retain one executor/guardian; declarations require real qualification.
 
-Current bounded SE evidence includes the exact0.3.10/native-startup composition:
-27declared checks plus initial-world readiness, actual native New Game, five true
-admissions and normal restoration. ObserverSE104 separately passed14checks.
+Current bounded SE evidence includes the0.4.0 RC6/native-startup composition:
+actual New Game, settled QASmoke, movement, creation of one disposable NPC,
+two verified race changes, concurrent command reception and normal restoration.
+Its declared checks report10passed/3unavailable; this is not whole-mod acceptance.
+ObserverSE104 separately passed14checks.
 See [release status](docs/release-0.4.md) for current verification. Historical
 version/candidate statements below describe their original revisions, not an
 automatic qualification of replacement builds or refreshed VR.
@@ -43,7 +45,10 @@ default is `--edition vr`. Separate game targets need separate MO2/config/runtim
 directories and Bridge ports. SE skips OpenVR acquisition/configuration and the
 emulator. Follow [qualified SE setup](docs/se-qualified.md) before running SE:
 the21-step smoke applies to the exact documented installation and provider.
-Borrowed-profile, Root Builder and New Game UI paths remain explicitly unsupported.
+SE Root Builder and borrowed/reusable profiles remain unsupported. Explicit
+`se_new_game_ui:true` uses the pinned native-startup provider described in
+[native startup acquisition](docs/devbench-native-startup.md); its measured scope
+is recorded in the release status.
 
 Alternatively extract the portable ZIP and run its `run.py` by absolute path,
 from any working directory. A Python interpreter must be installed; third-party

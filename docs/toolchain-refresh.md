@@ -68,8 +68,10 @@ with advancing frames/task queue → native readiness contract → declared cell
 pinned save → stable playable world → subject checks. Compatible SKSE and Address
 Library must match the actual executable; for1.7.104 the inspected sources list
 SKSE2.3.1 and AddressLibraryv13. The exact setup above has now been exercised in
-game; other builds/configurations still need qualification. Root Builder, borrowed/reusable
-MO2 and actual New Game UI transitions are deliberately refused for SE for now.
+game; other builds/configurations still need qualification. SE Root Builder and
+borrowed/reusable MO2 remain unsupported. Explicit `se_new_game_ui:true` supports
+native New Game with the pinned startup provider; see [acquisition](devbench-native-startup.md)
+and [current measured release scope](release-0.4.md).
 
 Complete a new MO2 instance's initial setup before its first qualification. In
 MO2 2.5.2, missing `General.first_start` defaults to first startup; onboarding
