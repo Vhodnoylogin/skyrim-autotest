@@ -86,6 +86,9 @@ def advance_calibration(session):
 
 def start_new_game(session, cell):
     """Select the actual NEW item through the identified stock SE/VR movie."""
+    if session.state.get('configuration', {}).get('se_new_game_ui') is True:
+        from .startup_ui import start_new_game as direct_start
+        return direct_start(session, cell)
     from .api_contract import validate_description
     from .runner import request
     methods = {'GetString': ['string', 'string'], 'GetInt': ['string', 'string'],
@@ -155,6 +158,11 @@ def start_new_game(session, cell):
     session.log('new-game-request', selection=matches[0], before=before, afterSeq=last_seq)
     session.phase('gameplay-new-game-load', 120)
     ui('InvokeBool', root + '.onAcceptPress', False)
+    return wait_new_game_transition(session, cell, matches[0], before, last_seq)
+
+
+def wait_new_game_transition(session, cell, selection, before, last_seq):
+    from .runner import request
     end = time.monotonic() + 90
     last_logged_seq = last_seq
     while time.monotonic() < end:
@@ -183,7 +191,7 @@ def start_new_game(session, cell):
             if {'Main Menu','Loading Menu'} & set(initial_menus.get('openMenus',[])):
                 time.sleep(.5)
                 continue
-            session.state['newGameStarted'] = {'events': fresh, 'selection': matches[0],
+            session.state['newGameStarted'] = {'events': fresh, 'selection': selection,
                                               'evidenceBasis': 'Identified NEW confirmation and fresh menu/loading/cell transition',
                                               'initialScene': initial_scene, 'initialMenus': initial_menus,
                                               'requestedFixtureCell': cell,

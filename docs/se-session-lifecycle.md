@@ -1,6 +1,14 @@
 # SE initialization and process-exit boundary candidate
 
-Version0.3.9 addresses two different operational prerequisites. Neither a source
+Version0.3.10 uses the direct `devbench-startup-ui/1` native menu contract for
+explicit SE startup. It replaces the0.3.9 Papyrus UI path, which actually timed
+out on the main menu before VM initialization. The native contract is provided
+by the separately pinned owner DevBench compatibility fork; there is no silent
+Papyrus fallback. Snapshot, one checked NEW selection and one checked confirmation
+are distinct. Unknown contract/typed state and uncertain mutations stop; no replay.
+Use the [direct startup provider acquisition recipe](devbench-native-startup.md).
+
+Version0.3.9 addressed two different operational prerequisites. Neither a source
 test nor27passed ABI assertions is complete native qualification or mod acceptance.
 The frozen0.3.8 package, existing subject orders and old failed evidence stay unchanged.
 

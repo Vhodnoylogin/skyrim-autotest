@@ -1,6 +1,12 @@
 # Skyrim Autotest
 
-Version0.3.9 on `feature/se-morph-presets` adds bounded read-only settlement of an
+Version0.3.10 uses a separately pinned DevBench native startup-menu interface for
+the explicit SE New Game policy. It reads/selects/confirms the actual movie before
+Papyrus VM initialization; the0.3.9 main-menu Papyrus read timed out in qualification.
+Real native New Game and world readiness remain mandatory. Provider and executor
+source tests do not establish live acceptance; see [session lifecycle](docs/se-session-lifecycle.md).
+
+Version0.3.9 on this branch adds bounded read-only settlement of an
 exiting owned process's stale inventory row, preserves the original guardian
 recovery cause, and offers explicit SE New Game UI startup before an unchanged
 cell-based subject. These changes need their own live qualification. Read
