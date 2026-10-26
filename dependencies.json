@@ -96,7 +96,7 @@
     "source": "https://github.com/Vhodnoylogin/devbench.git",
     "commit": "d6630ddd672bef22bf2121944fb2c7b8ffec4f1c",
     "commonlibCommit": "9106d402cfc7dcbc5bf7458be6748af19d7fc914",
-    "rebuild": "python tools/build_devbench_fork.py --runtime-fixtures --build-dir D:/svb-fixture-build",
+    "rebuild": "python tools/build_devbench_fork.py --runtime-fixtures --build-dir \"D:/Skyrim VR Modding/Builds/devbench-fixture-new\"",
     "ownedIntegrationSource": "native/devbench; tools/apply_devbench_fixture_provider.py",
     "status": "Native DLL compiled offline; not installed or game-qualified. Requires separate native subject state binding for effective settings/assignment counts.",
     "note": "Use an external short Windows build path. Record actual DLL/PDB, compiler and dependency-lock hashes; do not assume bit-identical builds. No third-party source/binary bundled."

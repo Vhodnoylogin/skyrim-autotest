@@ -10,7 +10,7 @@ https://github.com/Vhodnoylogin/devbench. CommonLib remains pinned to
 using a short output path on Windows:
 
 ```powershell
-python tools/build_devbench_fork.py --runtime-fixtures --build-dir D:/svb-fixture-build
+python tools/build_devbench_fork.py --runtime-fixtures --build-dir "D:/Skyrim VR Modding/Builds/devbench-fixture-new"
 ```
 
 This is a separate opt-in candidate. The default recipe retains its previous

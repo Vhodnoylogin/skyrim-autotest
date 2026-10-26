@@ -114,9 +114,8 @@ the same explicit fields and must pass actual installed metadata checks:
 Explicitly declared member calls such as `SetDontMove(Bool)`, `EnableAI(Bool)`,
 `SetActorValue(String, Float)`, `StopCombat()`, `StopCombatAlarm()` and
 `UnequipAll()` can use the same actor witness guard if actual native metadata
-matches their frozen signatures. No fixture preparation, AI, collision, equipment
-or aggression change occurs merely by creating an actor; creation issues the
-one locomotion blocker described below. Supply only the exact
+matches their frozen signatures. Creation requests the locomotion blocker below
+without sending AI, collision, equipment or aggression setters. Supply only the exact
 separately authorized preparation commands. This route does not add an aggregate
 SKEE read: `NiOverride.GetBodyMorphs` is not an available Papyrus substitute for
 an independently qualified native aggregate provider.
