@@ -10,8 +10,8 @@ import tempfile
 import zipfile
 
 
-def call(args, cwd, env=None):
-    result = subprocess.run(args,cwd=cwd,env=env,capture_output=True,text=True,timeout=60)
+def call(args, cwd, env=None, timeout=60):
+    result = subprocess.run(args,cwd=cwd,env=env,capture_output=True,text=True,timeout=timeout)
     if result.returncode:
         raise RuntimeError(str(args) + '\n' + result.stdout + result.stderr)
     return result.stdout
@@ -42,8 +42,8 @@ def main():
     env.pop('PYTHONPATH',None)
     env['PYTHONUTF8']='1'
     checks = []
-    def verify(label,command):
-        call(command,empty,env)
+    def verify(label,command,timeout=60):
+        call(command,empty,env,timeout=timeout)
         checks.append(label)
     for name in ('RuntimeFixtures.cpp','RuntimeFixtures.h','PhotographyReadback.cpp','PhotographyReadback.h'):
         relative='native/devbench/'+name
@@ -123,7 +123,7 @@ def main():
         verify('wheel-isolated-'+module,[sys.executable,'-I','-c',companion,str(installed)])
     # Execute tests from the freshly extracted source, never the checkout.
     test='import sys,unittest;sys.path.insert(0,sys.argv[1]);suite=unittest.defaultTestLoader.discover(sys.argv[1]+"/tests");r=unittest.TextTestRunner(verbosity=1).run(suite);raise SystemExit(not r.wasSuccessful())'
-    verify('fresh-portable-regression-suite',[sys.executable,'-I','-c',test,str(portable)])
+    verify('fresh-portable-regression-suite',[sys.executable,'-I','-c',test,str(portable)],timeout=300)
     result={'schemaVersion':1,'result':'passed','checks':checks,'artifacts':manifest['artifacts'],'work':str(work)}
     (work/'checks.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')
     print(json.dumps(result,indent=2))

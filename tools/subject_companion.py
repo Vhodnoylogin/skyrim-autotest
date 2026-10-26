@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import errno
 import hashlib
 import importlib
 import importlib.machinery
@@ -18,6 +19,7 @@ from pathlib import Path
 import re
 import sys
 import time
+import traceback
 import types
 import uuid
 
@@ -25,6 +27,8 @@ MAX_JSON = 32 * 1024 * 1024
 MAX_ARTIFACT = 16 * 1024 * 1024
 MAX_STEPS = 128 * 1024 * 1024
 MAX_COMMANDS = 2048
+STATE_READ_SECONDS = .75
+STATE_READ_ATTEMPTS = 16
 OUTCOMES = {'passed': 'passed', 'mismatch': 'failed', 'unavailable': 'unavailable', 'not_run': 'not_run'}
 
 
@@ -312,12 +316,56 @@ class Companion:
             if digest(read_bytes(Path(path))) != sha256:
                 raise CompanionError('Frozen executor bytes changed')
 
+    def read_live_state(self, path, deadline=None):
+        """Retry only an owned mutable state read, never an action or pinned input."""
+        path = Path(path)
+        if path.name != 'state.json' or path.parent.parent != self.runtime / 'runs':
+            raise CompanionError('Live-state read requires the exact runtime run path')
+        end = self.clock() + STATE_READ_SECONDS
+        for bound in (deadline, self.end):
+            if bound is not None:
+                end = min(end, bound)
+        last_error = None
+        for attempt in range(1, STATE_READ_ATTEMPTS + 1):
+            if self.clock() >= end:
+                if last_error is not None:
+                    self.event('live-state-read-exhausted', operation='read-live-state', path=str(path),
+                        attempts=attempt - 1, errno=last_error.errno,
+                        winerror=getattr(last_error, 'winerror', None), diagnostic=str(last_error),
+                        traceback=''.join(traceback.format_exception(last_error)))
+                    raise last_error
+                raise CompanionError('Live-state read deadline expired; no continuation')
+            try:
+                value = decoded(read_bytes(path))
+            except PermissionError as error:
+                if error.errno != errno.EACCES and getattr(error, 'winerror', None) not in (5, 32, 33):
+                    raise
+                last_error = error
+                remaining = end - self.clock()
+                exhausted = attempt == STATE_READ_ATTEMPTS or remaining <= 0
+                self.event('live-state-read-denied', operation='read-live-state', path=str(path),
+                    errno=error.errno, winerror=getattr(error, 'winerror', None), attempt=attempt,
+                    exhausted=exhausted, diagnostic=str(error), traceback=traceback.format_exc())
+                if exhausted:
+                    raise
+                self.pause(min(.05, remaining))
+            else:
+                if self.clock() >= end:
+                    raise CompanionError('Live-state read deadline expired; no continuation')
+                if last_error is not None:
+                    self.event('live-state-read-recovered', operation='read-live-state', path=str(path),
+                               attempt=attempt)
+                if self.clock() >= end:
+                    raise CompanionError('Live-state read deadline expired; no continuation')
+                return value
+        raise last_error  # The finite attempt bound never resets an action deadline.
+
     def wait_ready(self):
         end = self.clock() + self.wait_seconds
         while self.clock() < end:
             matches = []
             for path in (self.runtime / 'runs').glob('*/state.json'):
-                value = decoded(read_bytes(path))
+                value = self.read_live_state(path, deadline=end)
                 if isinstance(value, dict) and value.get('order', {}).get('id') == self.order_id:
                     matches.append((path, value))
             if len(matches) > 1:
@@ -336,7 +384,7 @@ class Companion:
                                     'agentId': 'owned-game-executor'}
                     self.bootstrap = copy.deepcopy(state.get('gameplayBootstrap'))
                     self.executor_hashes = copy.deepcopy(state.get('executorHashes'))
-                    self.check_state(state)
+                    self.check_state(state, deadline=end)
                     remaining = state['deadline'] - self.wall() - 5
                     self.end = self.clock() + min(self.maximum, remaining)
                     if self.end <= self.clock():
@@ -346,6 +394,8 @@ class Companion:
                     self.retain('initial-channel-status', status)
                     if status.get('binding') != self.binding or status.get('commands') != {}:
                         raise CompanionError('Interactive channel is not exact, fresh and empty')
+                    if self.clock() >= min(end, self.end):
+                        raise CompanionError('Original interactive startup deadline expired; no continuation')
                     claim = self.run_dir / 'subject-companion.claim.json'
                     exclusive(claim, encoded({'orderId': self.order_id, 'attemptId': self.attempt_id,
                         'runId': self.run_id, 'report': str(self.output), 'transport': self.report['transport']}))
@@ -357,8 +407,8 @@ class Companion:
             self.pause(.1)
         raise CompanionError('No unique matching owned interactive run became ready within the wait bound')
 
-    def check_state(self, state=None, finishing=False):
-        state = decoded(read_bytes(self.state_path)) if state is None else state
+    def check_state(self, state=None, finishing=False, deadline=None):
+        state = self.read_live_state(self.state_path, deadline=deadline) if state is None else state
         metadata = state.get('interactiveSession', {})
         configuration = state.get('configuration', {})
         settings = configuration.get('interactive_session', {})
@@ -377,10 +427,10 @@ class Companion:
                                metadata.get('ready') is not True)):
             raise CompanionError('Native interactive window ended or changed')
         maximum = settings.get('maximumSeconds')
-        deadline = state.get('deadline')
+        native_deadline = state.get('deadline')
         if (type(maximum) is not int or not 1 <= maximum <= 14400 or maximum != metadata.get('maximumSeconds') or
-                type(deadline) not in (int, float) or not math.isfinite(deadline) or
-                (not finishing and deadline <= self.wall())):
+                type(native_deadline) not in (int, float) or not math.isfinite(native_deadline) or
+                (not finishing and native_deadline <= self.wall())):
             raise CompanionError('Original finite interactive deadline is unavailable')
         if (not isinstance(self.executor_hashes, dict) or not self.executor_hashes or
                 any(self.inventory.get(str(self.executor / 'skyrim_autotest' / name)) != sha256
@@ -398,10 +448,12 @@ class Companion:
                 raise CompanionError('Exact worker heartbeat is unavailable/stale')
         if self.end is not None and self.clock() >= self.end:
             raise CompanionError('Companion shared deadline expired; no continuation')
+        if deadline is not None and self.clock() >= deadline:
+            raise CompanionError('Exact completion deadline expired; never retry or reconnect')
         return state
 
-    def poll(self, finishing=False):
-        self.check_state(finishing=finishing)
+    def poll(self, finishing=False, deadline=None):
+        self.check_state(finishing=finishing, deadline=deadline)
         response = self.client.call('events', {'sessionId': self.session_id, 'afterId': self.cursor, 'limit': 500})
         terminal = None
         for event in response.get('events', []):
@@ -529,7 +581,7 @@ class Companion:
         self.save()
         return True
 
-    def unwrap(self, command_id, value, action):
+    def unwrap(self, command_id, value, action, deadline=None):
         if isinstance(value, dict) and value.get('outcome') == 'rejected':
             raise CompanionError('Native action was rejected; no tool result/assertion is available')
         if isinstance(value, dict) and value.get('outcome') == 'result-recorded':
@@ -543,7 +595,8 @@ class Companion:
             raw = read_bytes(expected, MAX_ARTIFACT)
             if len(raw) != evidence['bytes'] or digest(raw) != evidence['sha256']:
                 raise CompanionError('Raw result artifact bytes/hash differ from the completion receipt')
-            state = decoded(read_bytes(self.state_path))
+            state = self.read_live_state(self.state_path, deadline=deadline)
+            self.check_state(state=state, deadline=deadline)
             if dict(evidence, commandId=command_id) not in state.get('interactiveArtifacts', []):
                 raise CompanionError('Raw result artifact is absent from the exact run registry')
             action['artifactCopy'] = self.retain('verified-native-artifact', raw=raw)
@@ -608,7 +661,7 @@ class Companion:
             self.save()
             end = min(self.end, self.clock() + (5 if finishing else envelope['timeoutSeconds'] + 5))
             while self.clock() < end:
-                self.poll(finishing=finishing)
+                self.poll(finishing=finishing, deadline=end)
                 delivered = self.matching_event(command_id, 'command.delivered')
                 if delivered is not None:
                     self.delivered(action)
@@ -617,9 +670,11 @@ class Companion:
                     action['completion'] = self.retain('command-completed', complete)
                     if delivered is None:
                         raise CompanionError('Completion lacks distinct durable delivery')
-                    result = self.unwrap(command_id, complete['data']['result'], action)
+                    result = self.unwrap(command_id, complete['data']['result'], action, deadline=end)
                     if not self.delivered(action):
                         raise CompanionError('Completion lacks exact native action-delivered evidence')
+                    if self.clock() >= end:
+                        raise CompanionError('Exact completion deadline expired; never retry or reconnect')
                     action['status'] = 'completed'
                     if case_id is not None:
                         self.case(case_id)['evidence'].extend([action['completion'], action['rawResult']])

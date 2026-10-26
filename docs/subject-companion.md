@@ -19,6 +19,13 @@ frozen executor inventory and remaining deadline. It retains intent before the
 single ingress attempt, verifies referenced result files and never replays an
 uncertain action or reconnects to an old game session.
 
+Mutable native `state.json` reads tolerate narrowly classified access/sharing
+denials for at most 0.75 seconds and 16 attempts, further limited by the original
+startup/action/session deadline. Each denied read and recovery is logged. The
+client rereads current bytes; it never uses an old state or resubmits an action.
+Persistent denial, malformed JSON and changed ownership still stop execution.
+Pinned inputs, result artifacts and evidence retain their strict readers.
+
 `emit(record)` durably retains the origin's records. The protocol includes:
 
 - `check-start`: exact `caseId` and `role:"subject"`;

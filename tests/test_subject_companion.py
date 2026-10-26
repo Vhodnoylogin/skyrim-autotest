@@ -1,13 +1,16 @@
 """External companion transport with real durable bus, no game or microphone."""
 import copy
+import errno
 import json
 import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import time
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from skyrim_autotest.command_bus import CommandBus, dispatch
 from tools import subject_companion as tool
@@ -331,11 +334,10 @@ class CompanionTests(unittest.TestCase):
         companion = self.fixture.companion()
         tick = [0]
 
-        def clock():
+        def pause(seconds):
             tick[0] += 1
-            return tick[0]
 
-        companion.clock, companion.end, companion.pause = clock, 100, lambda seconds: None
+        companion.clock, companion.end, companion.pause = lambda: tick[0], 100, pause
         with self.assertRaisesRegex(tool.CompanionError, 'completion deadline'):
             companion.exchange(self.intent(companion))
         self.assertFalse(companion.report['subjectStarted'])
@@ -416,6 +418,245 @@ class SequencerProcessTests(unittest.TestCase):
         self.assertEqual(companion.case('case-a')['status'], 'unavailable')
         self.assertEqual(companion.case('case-a')['verdictSource'], 'transport')
         self.assertEqual(companion.case('case-b')['status'], 'not_run')
+
+
+class LiveStateReadTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.fixture = Fixture(Path(temporary.name))
+        self.path = self.fixture.run_dir / 'state.json'
+
+    def denying_reader(self, failures=1, after=None):
+        original = tool.read_bytes
+        calls = []
+        def read(path, *args, **kwargs):
+            if Path(path) == self.path:
+                calls.append(str(path))
+                if len(calls) <= failures:
+                    raise PermissionError(errno.EACCES, 'synthetic state sharing denial', str(path))
+                if after is not None:
+                    return after
+            return original(path, *args, **kwargs)
+        return read, calls
+
+    def virtual_time(self, companion):
+        now = [0.0]
+        companion.clock = lambda: now[0]
+        companion.pause = lambda duration: now.__setitem__(0, now[0] + duration)
+        companion.end = None
+        return now
+
+    def test_startup_transient_denial_recovers_without_starting_subject_or_submitting(self):
+        companion = self.fixture.companion(ready=False)
+        reader, calls = self.denying_reader(2)
+        with patch.object(tool, 'read_bytes', side_effect=reader):
+            companion.wait_ready()
+        self.assertGreaterEqual(len(calls), 3)
+        events = [json.loads(x) for x in companion.events_path.read_text(encoding='utf-8').splitlines()]
+        self.assertEqual(sum(x['kind'] == 'live-state-read-denied' for x in events), 2)
+        self.assertEqual(sum(x['kind'] == 'live-state-read-recovered' for x in events), 1)
+        self.assertFalse(companion.report['subjectStarted'])
+        self.assertFalse(any(op == 'submit' for op, _ in self.fixture.client.calls))
+
+    def test_persistent_denial_obeys_original_startup_deadline_without_claim_or_commands(self):
+        companion = self.fixture.companion(ready=False)
+        now = self.virtual_time(companion)
+        reader, calls = self.denying_reader(1000)
+        with patch.object(tool, 'read_bytes', side_effect=reader), self.assertRaises(PermissionError):
+            companion.wait_ready()
+        self.assertLessEqual(now[0], companion.wait_seconds)
+        self.assertLessEqual(len(calls), tool.STATE_READ_ATTEMPTS)
+        self.assertFalse((self.fixture.run_dir / 'subject-companion.claim.json').exists())
+        self.assertEqual(self.fixture.client.calls, [])
+
+    def test_reads_never_extend_shared_or_action_deadline(self):
+        for shared, action in ((.08, .4), (.4, .08)):
+            companion = tool.Companion(self.fixture.args('deadline-' + str(shared)), backend=self.fixture.backend)
+            now = self.virtual_time(companion)
+            companion.end = shared
+            reader, _ = self.denying_reader(1000)
+            with patch.object(tool, 'read_bytes', side_effect=reader), self.assertRaises(PermissionError):
+                companion.read_live_state(self.path, deadline=action)
+            self.assertLessEqual(now[0], min(shared, action))
+
+    def test_malformed_or_wrong_owned_identity_after_denial_is_not_retried_or_accepted(self):
+        companion = self.fixture.companion()
+        bad = copy.deepcopy(self.fixture.state)
+        bad['game']['birth'] += 1
+        for raw, expected in ((b'{invalid', json.JSONDecodeError), (tool.encoded(bad), tool.CompanionError)):
+            reader, calls = self.denying_reader(after=raw)
+            with patch.object(tool, 'read_bytes', side_effect=reader), self.assertRaises(expected):
+                companion.check_state()
+            self.assertEqual(len(calls), 2)
+        self.assertFalse(any(op == 'submit' for op, _ in self.fixture.client.calls))
+
+    def test_ended_but_still_ready_state_after_denial_never_enters_session(self):
+        companion = self.fixture.companion(ready=False)
+        ended = dict(self.fixture.state, done=True)
+        reader, calls = self.denying_reader(after=tool.encoded(ended))
+        with patch.object(tool, 'read_bytes', side_effect=reader), self.assertRaisesRegex(tool.CompanionError, 'already ended'):
+            companion.wait_ready()
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(self.fixture.client.calls, [])
+
+    def test_unclassified_or_missing_file_errors_and_nonruntime_paths_remain_immediate(self):
+        companion = self.fixture.companion(ready=False)
+        for error in (PermissionError(errno.EPERM, 'not a sharing denial'), FileNotFoundError('missing state')):
+            with patch.object(tool, 'read_bytes', side_effect=error) as reader, self.assertRaises(type(error)):
+                companion.read_live_state(self.path)
+            reader.assert_called_once()
+        with patch.object(tool, 'read_bytes') as reader, self.assertRaisesRegex(tool.CompanionError, 'exact runtime'):
+            companion.read_live_state(self.fixture.plan)
+        reader.assert_not_called()
+
+    def test_pinned_input_denial_remains_single_strict_read(self):
+        with patch.object(tool, 'read_bytes', side_effect=PermissionError(errno.EACCES, 'plan ACL')) as reader:
+            with self.assertRaises(PermissionError):
+                tool.pinned(self.fixture.plan, tool.digest(self.fixture.plan.read_bytes()))
+        reader.assert_called_once()
+
+    def test_completed_artifact_registry_read_retries_without_repeating_ingress(self):
+        self.fixture.client.mode = 'large'
+        companion = self.fixture.companion()
+        original = companion.unwrap
+        denied = []
+        def unwrap(*args, **kwargs):
+            reader, calls = self.denying_reader()
+            with patch.object(tool, 'read_bytes', side_effect=reader):
+                result = original(*args, **kwargs)
+            denied.extend(calls)
+            return result
+        with patch.object(companion, 'unwrap', side_effect=unwrap):
+            companion.emit({'kind': 'check-start', 'caseId': 'case-a', 'role': 'subject'})
+            envelope = {'schemaVersion': 1, 'operation': 'tool', 'tool': 'inspect',
+                        'args': {'kind': 'scene'}, 'timeoutSeconds': 5}
+            companion.emit({'kind': 'measurement', 'caseId': 'case-a', 'sequence': 1,
+                            'request': envelope, 'delivery': 'intent'})
+            self.assertEqual(companion.exchange(envelope), self.fixture.client.result)
+        self.assertEqual(len(denied), 2)
+        self.assertEqual(sum(op == 'submit' for op, _ in self.fixture.client.calls), 1)
+        self.assertFalse(companion.report['actionsRetried'])
+        self.assertEqual(companion.report['actions'][0]['status'], 'completed')
+
+    def test_changed_registry_owner_after_denial_cannot_supply_completed_result_or_replay(self):
+        self.fixture.client.mode = 'large'
+        companion = self.fixture.companion()
+        original = companion.unwrap
+        def unwrap(*args, **kwargs):
+            changed = copy.deepcopy(self.fixture.state)
+            changed['runner']['birth'] += 1
+            reader, _ = self.denying_reader(after=tool.encoded(changed))
+            with patch.object(tool, 'read_bytes', side_effect=reader):
+                return original(*args, **kwargs)
+        envelope = {'schemaVersion': 1, 'operation': 'tool', 'tool': 'inspect',
+                    'args': {'kind': 'scene'}, 'timeoutSeconds': 5}
+        companion.emit({'kind': 'check-start', 'caseId': 'case-a', 'role': 'subject'})
+        companion.emit({'kind': 'measurement', 'caseId': 'case-a', 'sequence': 1,
+                        'request': envelope, 'delivery': 'intent'})
+        with patch.object(companion, 'unwrap', side_effect=unwrap), self.assertRaisesRegex(tool.CompanionError, 'pins changed'):
+            companion.exchange(envelope)
+        self.assertTrue(companion.poisoned and companion.report['uncertain'])
+        self.assertNotIn('rawResult', companion.report['actions'][0])
+        with self.assertRaisesRegex(tool.CompanionError, 'no replay'):
+            companion.exchange(envelope)
+        self.assertEqual(sum(op == 'submit' for op, _ in self.fixture.client.calls), 1)
+
+    def test_supplied_state_validation_cannot_cross_original_action_deadline(self):
+        companion = self.fixture.companion()
+        now = self.virtual_time(companion)
+        companion.end = 100
+        def heartbeat(*args):
+            now[0] = 2
+            return {'healthy': True, 'at': time.time()}
+        self.fixture.backend.heartbeat = heartbeat
+        with self.assertRaisesRegex(tool.CompanionError, 'completion deadline'):
+            companion.check_state(state=self.fixture.state, deadline=1)
+
+    def test_recovery_log_cannot_admit_state_after_original_read_or_startup_bound(self):
+        companion = self.fixture.companion(ready=False)
+        now = self.virtual_time(companion)
+        reader, _ = self.denying_reader()
+        original = companion.event
+        def event(kind, **fields):
+            original(kind, **fields)
+            if kind == 'live-state-read-recovered':
+                now[0] = companion.wait_seconds + .01
+        with (patch.object(tool, 'read_bytes', side_effect=reader),
+              patch.object(companion, 'event', side_effect=event),
+              self.assertRaisesRegex(tool.CompanionError, 'read deadline')):
+            companion.wait_ready()
+        self.assertFalse((self.fixture.run_dir / 'subject-companion.claim.json').exists())
+        self.assertEqual(self.fixture.client.calls, [])
+
+    def test_channel_status_cannot_admit_client_claim_after_startup_bound(self):
+        companion = self.fixture.companion(ready=False)
+        now = self.virtual_time(companion)
+        original = self.fixture.client.call
+        def call(operation, arguments):
+            result = original(operation, arguments)
+            if operation == 'status':
+                now[0] = companion.wait_seconds + .01
+            return result
+        self.fixture.client.call = call
+        with self.assertRaisesRegex(tool.CompanionError, 'startup deadline'):
+            companion.wait_ready()
+        self.assertFalse((self.fixture.run_dir / 'subject-companion.claim.json').exists())
+        self.assertFalse(any(op == 'submit' for op, _ in self.fixture.client.calls))
+
+    def test_result_retention_crossing_action_deadline_does_not_mark_completion_or_replay(self):
+        companion = self.fixture.companion()
+        now = self.virtual_time(companion)
+        companion.end = 100
+        original = companion.unwrap
+        def unwrap(*args, **kwargs):
+            result = original(*args, **kwargs)
+            now[0] = kwargs['deadline'] + .01
+            return result
+        envelope = {'schemaVersion': 1, 'operation': 'tool', 'tool': 'inspect',
+                    'args': {'kind': 'scene'}, 'timeoutSeconds': 5}
+        companion.emit({'kind': 'check-start', 'caseId': 'case-a', 'role': 'subject'})
+        companion.emit({'kind': 'measurement', 'caseId': 'case-a', 'sequence': 1,
+                        'request': envelope, 'delivery': 'intent'})
+        with patch.object(companion, 'unwrap', side_effect=unwrap), self.assertRaisesRegex(tool.CompanionError, 'completion deadline'):
+            companion.exchange(envelope)
+        self.assertNotEqual(companion.report['actions'][0]['status'], 'completed')
+        self.assertTrue(companion.poisoned and companion.report['uncertain'])
+        self.assertEqual(sum(op == 'submit' for op, _ in self.fixture.client.calls), 1)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows file-sharing behavior')
+    def test_actual_windows_exclusive_handle_denial_recovers_without_game(self):
+        import ctypes
+        from ctypes import wintypes
+        companion = self.fixture.companion(ready=False)
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                      wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+        kernel.CreateFileW.restype = wintypes.HANDLE
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.CloseHandle.restype = wintypes.BOOL
+        handle = kernel.CreateFileW(str(self.path), 0x80000000, 0, None, 3, 0x80, None)
+        self.assertNotEqual(handle, ctypes.c_void_p(-1).value)
+        denied, released = threading.Event(), threading.Event()
+        def unlock():
+            denied.wait(2)
+            kernel.CloseHandle(handle)
+            released.set()
+        thread = threading.Thread(target=unlock)
+        thread.start()
+        original = companion.event
+        def event(kind, **fields):
+            original(kind, **fields)
+            if kind == 'live-state-read-denied':
+                denied.set()
+        try:
+            with patch.object(companion, 'event', side_effect=event):
+                self.assertEqual(companion.read_live_state(self.path)['id'], self.fixture.run_id)
+        finally:
+            denied.set()
+            thread.join(3)
+        self.assertTrue(denied.is_set() and released.is_set())
+        self.assertFalse(any(op == 'submit' for op, _ in self.fixture.client.calls))
 
 
 def export_fixture(root):
