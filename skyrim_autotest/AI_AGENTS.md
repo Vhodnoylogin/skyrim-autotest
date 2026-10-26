@@ -1,8 +1,9 @@
 # AI-agent instructions: Skyrim Autotest
 
-Keep worktrees, builds and logs beneath the configured workspace root and outside
-Git, never as loose siblings in the drive root. Use short subdirectories inside
-that workspace when a Windows compiler needs shorter paths. Preserve historical
+Keep auxiliary worktrees beneath the configured workspace root. Keep generated
+builds and logs beneath that workspace, outside source checkouts; never leave
+them in the drive root. Use short subdirectories inside that workspace when a
+Windows compiler needs shorter paths. Preserve historical
 evidence during relocation and regenerate absolute-path build caches before reuse.
 
 Release0.4 uses three logical layers: the in-game DevBench provider (upstream
