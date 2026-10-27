@@ -33,6 +33,9 @@ An explicit `se_fixture_anchor: "qasmoke-west-navmesh-v1"` with the native SE
 New Game route prepares a measured west-room QASmoke anchor before test actions.
 It leaves the default startup unchanged and verifies the loaded Dragonborn marker,
 one player relocation and stable actual position; it does not disable collisions.
+For a separately admitted diagnostic SE run, optional [crash capture](docs/crash-capture.md)
+uses an externally acquired, pinned Microsoft debugger to retain an unhandled
+exception before the process ends. It adds no game launch or action retry.
 
 Current bounded SE evidence includes the0.4.0 RC6/native-startup composition:
 actual New Game, settled QASmoke, movement, creation of one disposable NPC,

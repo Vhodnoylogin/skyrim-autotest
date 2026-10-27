@@ -1088,6 +1088,10 @@ class Session:
                         focus = {'available': False, 'error': str(error)}
                     self.log('se-startup-focus-observed', observation=focus)
                 self.complete_startup_admission(selected)
+                if self.state.get('configuration', {}).get('crash_capture'):
+                    from .crash_capture import start as start_crash_capture
+                    self.phase('startup-crash-capture', 30)
+                    start_crash_capture(self)
                 return
             time.sleep(1)
         raise Blocked('Fresh matching DevBench with advancing game frames not found')
@@ -1239,6 +1243,16 @@ class Session:
             if any(native.alive(i) for i in owned):
                 raise RuntimeError(f'Owned {role} process did not exit; refusing file restoration')
         Session.observe_game_exit(self, 'owned-processes-ended')
+        if self.state.get('crashCapture'):
+            from .crash_capture import stop as stop_crash_capture
+            try:
+                stop_crash_capture(self)
+            except Exception as error:
+                self.state['crashCaptureStopError'] = str(error)
+                self.state['result'] = 'failed'
+                self.state['reason'] = (self.state.get('reason', '') + '; crash capture completion failed: ' + str(error)).lstrip('; ')
+                self.save()
+                self.log('crash-capture-stop-error', error=str(error), restorationStillRequired=True)
         if self.state.get('restoringFiles'):
             # A partial restore may already have removed generated outputs.
             # Preserve collected evidence/errors; do not overwrite its manifest
@@ -1381,7 +1395,7 @@ class Session:
                       f'Observed at: {observed.get("stage", "unavailable")}',
                       'The OS observation does not determine the exit cause.']
         (self.dir / 'report.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
-        atomic_json(self.dir / 'result.json', {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors','heartbeatHealth','guardianRecovery','interactiveSession','interactiveArtifacts','interactiveActorFixtures','gameProcessObservations','gameProcessObservationError')})
+        atomic_json(self.dir / 'result.json', {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors','heartbeatHealth','guardianRecovery','interactiveSession','interactiveArtifacts','interactiveActorFixtures','gameProcessObservations','gameProcessObservationError','crashCapture','crashCaptureStopError')})
 
     def reopen_mo2(self):
         if self.state.get('reopenMO2') and self.state.get('restored'):

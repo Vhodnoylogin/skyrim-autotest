@@ -8,6 +8,19 @@ import tests.test_initial_world as fixtures
 
 
 class SENewGameTests(unittest.TestCase):
+    def test_optional_crash_capture_configuration_is_se_only_and_has_no_arbitrary_commands(self):
+        value = config.template('se')
+        for key in config.REQUIRED - {'openvr_paths'}: value[key] = 'C:/Fixture/'+key
+        capture = {'provider':'cdb', 'executable':'C:/Fixture/cdb.exe', 'sha256':'0'*64,
+                   'supportFiles':[{'path':'C:/Fixture/'+name, 'sha256':'0'*64}
+                                   for name in ('dbgeng.dll','dbghelp.dll')], 'maximumAttachSeconds':15}
+        before = config.P.snapshot(); self.addCleanup(lambda: setattr(config.P, 'value', before))
+        self.assertEqual(config.configure(dict(value, crash_capture=capture))['crash_capture'], capture)
+        for changes in ({'crash_capture':dict(capture, commands='g')},
+                        {'game_edition':'vr','openvr_paths':'C:/VR','crash_capture':capture}):
+            with self.subTest(changes=changes), self.assertRaises(config.ConfigurationError):
+                config.configure(dict(value, **changes))
+
     def test_fixture_anchor_is_explicit_se_new_game_only_and_scenario_is_checked_offline(self):
         value = config.template('se')
         for key in config.REQUIRED - {'openvr_paths'}: value[key] = 'C:/Fixture/'+key
