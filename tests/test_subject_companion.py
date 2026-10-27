@@ -1,6 +1,7 @@
 """External companion transport with real durable bus, no game or microphone."""
 import copy
 import errno
+import io
 import json
 import os
 from pathlib import Path
@@ -452,6 +453,125 @@ class SequencerProcessTests(unittest.TestCase):
         self.assertEqual(companion.report['sequencerProcess']['returnCode'], 7)
         self.assertFalse(companion.report['completed'])
         self.assertEqual(companion.report['status'], 'stopped')
+        self.assertEqual(companion.report['primaryError']['stage'], 'sequencer-cleanup')
+        self.assertIn('code zero', companion.report['reason'])
+
+    def test_guard_failure_survives_terminating_the_owned_sleeping_child(self):
+        ready = self.fixture.root / 'child-ready.txt'
+        self.fixture.sequencer.write_text('import time\nfrom pathlib import Path\ndef run(exchange, emit):\n'
+            ' Path(' + repr(str(ready)) + ').write_text("ready")\n time.sleep(60)\n', encoding='utf-8')
+        companion = self.fixture.companion(ready=False)
+        original = companion.check_state
+
+        def check(*args, **kwargs):
+            if ready.exists():
+                raise tool.CompanionError('Synthetic exact worker guard failed before another command')
+            return original(*args, **kwargs)
+
+        with patch.object(companion, 'check_state', side_effect=check):
+            self.assertEqual(companion.execute(), 2)
+        saved = tool.decoded(companion.output.read_bytes())
+        self.assertEqual(saved['reason'], 'Synthetic exact worker guard failed before another command')
+        self.assertEqual(saved['primaryError']['stage'], 'execute')
+        self.assertIn('raise tool.CompanionError', saved['primaryError']['traceback'])
+        self.assertTrue(saved['sequencerProcess']['stoppedByClient'])
+        self.assertEqual(saved['sequencerProcess']['cleanupError']['stage'], 'sequencer-cleanup')
+        self.assertFalse(any(operation == 'submit' for operation, _ in self.fixture.client.calls))
+
+    def test_callback_failure_stays_primary_after_the_origin_reports_its_error(self):
+        self.fixture.sequencer.write_text(self.source(), encoding='utf-8')
+        self.fixture.client.mode = 'uncertain'
+        companion = self.fixture.companion(ready=False)
+        self.assertEqual(companion.execute(), 2)
+        self.assertEqual(companion.report['primaryError']['stage'], 'callback-exchange')
+        self.assertIn('terminal', companion.report['reason'])
+        self.assertNotIn('Pinned sequencer stopped', companion.report['reason'])
+        self.assertIn('Companion callback refused', companion.report['sequencerError']['error'])
+        self.assertIn('callback', companion.report['sequencerError']['traceback'])
+        self.assertTrue(companion.report['uncertain'])
+        self.assertEqual(sum(operation == 'submit' for operation, _ in self.fixture.client.calls), 1)
+
+    def test_original_sequencer_exception_type_and_traceback_are_retained(self):
+        self.fixture.sequencer.write_text('def run(exchange, emit):\n raise ValueError("distinct origin failure")\n',
+                                          encoding='utf-8')
+        companion = self.fixture.companion(ready=False)
+        self.assertEqual(companion.execute(), 2)
+        self.assertEqual(companion.report['sequencerError']['errorType'], 'ValueError')
+        self.assertEqual(companion.report['sequencerError']['error'], 'distinct origin failure')
+        self.assertIn('raise ValueError', companion.report['sequencerError']['traceback'])
+        self.assertIn('distinct origin failure', companion.report['reason'])
+
+    def test_cli_stderr_keeps_primary_error_when_a_later_exception_escapes(self):
+        companion = self.fixture.companion()
+        companion.stop(ValueError('original callback failure'), 'callback-exchange')
+        argv = []
+        for name, value in vars(self.fixture.args()).items():
+            if name in ('maximum_seconds', 'wait_seconds'):
+                continue
+            argv.extend(['--' + name.replace('_', '-'), str(value)])
+        stderr = io.StringIO()
+        with patch.object(tool, 'Companion', return_value=companion), \
+             patch.object(companion, 'execute', side_effect=OSError('secondary terminal failure')), \
+             patch.object(sys, 'stderr', stderr):
+            self.assertEqual(tool.main(argv), 2)
+        diagnostic = json.loads(stderr.getvalue())
+        self.assertEqual(diagnostic['reason'], 'original callback failure')
+        self.assertEqual(diagnostic['errorType'], 'ValueError')
+        self.assertEqual(diagnostic['terminalError']['reason'], 'secondary terminal failure')
+
+    def test_manual_inbox_waits_over_180_logical_seconds_for_one_owner_command(self):
+        from skyrim_autotest.manual_scene import directory_commands
+        folder = self.fixture.root / 'operator-commands'
+        folder.mkdir()
+        tick = [0.0]
+        observed = []
+
+        def pause(_):
+            tick[0] += 60
+            observed.append(tick[0])
+            if tick[0] == 240:
+                (folder / '000001.json').write_text('{"sequence":1,"action":"inspect"}', encoding='utf-8')
+
+        with patch('skyrim_autotest.manual_scene.time.monotonic', side_effect=lambda: tick[0]), \
+             patch('skyrim_autotest.manual_scene.time.sleep', side_effect=pause):
+            command = next(directory_commands(folder, 600))
+        self.assertEqual(observed, [60, 120, 180, 240])
+        self.assertEqual(command, {'sequence': 1, 'action': 'inspect'})
+        self.assertEqual(self.fixture.client.calls, [])
+
+    def test_companion_remains_attached_during_240_logical_seconds_without_commands(self):
+        ready, release = self.fixture.root / 'waiting.txt', self.fixture.root / 'owner-command.txt'
+        source = self.source().replace('def run(exchange, emit):',
+            'import time\nfrom pathlib import Path\ndef run(exchange, emit):\n'
+            '    Path(' + repr(str(ready)) + ').write_text("waiting")\n'
+            '    while not Path(' + repr(str(release)) + ').exists(): time.sleep(.01)')
+        self.fixture.sequencer.write_text(source, encoding='utf-8')
+        self.fixture.plan.write_bytes(tool.encoded({'cases': [{'id': name} for name in ('case-a', 'case-b')],
+            'fixture': {'cell': 'QASmoke'}, 'bounds': {'maximumSeconds': 600, 'maximumCommands': 20}}))
+        self.fixture.state['configuration']['interactive_session']['maximumSeconds'] = 600
+        self.fixture.state['interactiveSession']['maximumSeconds'] = 600
+        self.fixture.state['deadline'] = time.time() + 600
+        self.fixture.write_state()
+        offset, released = [0], []
+        companion = tool.Companion(self.fixture.args(), backend=self.fixture.backend,
+                                   clock=lambda: time.monotonic() + offset[0])
+        original = companion.check_state
+
+        def check(*args, **kwargs):
+            if ready.exists() and not released:
+                self.assertFalse(any(operation == 'submit' for operation, _ in self.fixture.client.calls))
+                offset[0] = 240
+                original(*args, **kwargs)
+                released.append(True)
+                release.write_text('actual test owner command', encoding='utf-8')
+            return original(*args, **kwargs)
+
+        with patch.object(companion, 'check_state', side_effect=check):
+            self.assertEqual(companion.execute(), 0)
+        self.assertEqual(released, [True])
+        self.assertTrue(companion.report['completed'])
+        self.assertNotIn('primaryError', companion.report)
+        self.assertEqual(sum(operation == 'submit' for operation, _ in self.fixture.client.calls), 2)
 
     def test_long_sleeping_origin_is_bounded_and_only_helper_child_is_stopped(self):
         self.fixture.sequencer.write_text(self.source(sleeping=True), encoding='utf-8')
@@ -467,6 +587,8 @@ class SequencerProcessTests(unittest.TestCase):
         self.assertEqual(companion.case('case-a')['status'], 'unavailable')
         self.assertEqual(companion.case('case-a')['verdictSource'], 'transport')
         self.assertEqual(companion.case('case-b')['status'], 'not_run')
+        self.assertIn('deadline expired', companion.report['reason'])
+        self.assertEqual(companion.report['sequencerProcess']['cleanupError']['stage'], 'sequencer-cleanup')
 
 
 class LiveStateReadTests(unittest.TestCase):

@@ -46,6 +46,14 @@ completed program with failed checks and normal game cleanup. Lost delivery or
 unknown completion remains a technical fault. Game exit, subject outcome,
 restoration and report delivery are independent facts.
 
+A stopped report keeps its first causal failure in `primaryError` (stage, type,
+reason and traceback); the top-level reason/type refer to that same failure.
+An origin-child exception also retains its original type and traceback in
+`sequencerError`. Abnormal child cleanup is recorded separately under
+`sequencerProcess.cleanupError` and cannot replace an earlier failure. A child
+finalization failure still stops an otherwise completed program. These diagnostics
+do not authorize reconnection, replay, a second client or an extended deadline.
+
 For command arguments, run:
 
 ```powershell

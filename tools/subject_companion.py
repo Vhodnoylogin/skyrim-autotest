@@ -161,7 +161,8 @@ def sequencer_worker(connection, path, expected_sha256):
         connection.send_bytes(encoded({'kind': 'return', 'value': result}))
     except BaseException as error:
         try:
-            connection.send_bytes(encoded({'kind': 'error', 'errorType': type(error).__name__, 'error': str(error)}))
+            connection.send_bytes(encoded({'kind': 'error', 'errorType': type(error).__name__, 'error': str(error),
+                'traceback': ''.join(traceback.format_exception(type(error), error, error.__traceback__))}))
         except (OSError, EOFError):
             pass
     finally:
@@ -937,6 +938,15 @@ class Companion:
             self.save()
             raise
 
+    def stop(self, error, stage):
+        """Keep the first causal failure even when child cleanup also fails."""
+        failure = {'stage': stage, 'errorType': type(error).__name__, 'reason': str(error),
+                   'traceback': ''.join(traceback.format_exception(type(error), error, error.__traceback__))}
+        if 'primaryError' not in self.report:
+            self.report.update(primaryError=failure, reason=failure['reason'], errorType=failure['errorType'])
+        self.report.update(status='stopped', completed=False)
+        return failure
+
     def execute(self):
         self.wait_ready()
         parent, child = multiprocessing.get_context('spawn').Pipe()
@@ -965,6 +975,8 @@ class Companion:
                         returned = True
                         break
                     if kind == 'error':
+                        self.report['sequencerError'] = {key: message.get(key)
+                            for key in ('errorType', 'error', 'traceback')}
                         raise CompanionError('Pinned sequencer stopped: ' + str(message.get('error')))
                     if kind not in ('emit', 'exchange') or set(message) != {'kind', 'value'}:
                         raise CompanionError('Invalid sequencer callback protocol')
@@ -974,10 +986,13 @@ class Companion:
                     except BaseException as error:
                         # Allow the pinned origin to emit its unavailable/not_run
                         # outcomes, but never allow another exchange after failure.
+                        self.stop(error, 'callback-' + kind)
                         self.poisoned = True
                         parent.send_bytes(encoded({'ok': False, 'error': str(error)}))
                 elif not process.is_alive():
                     raise CompanionError('Sequencer exited without its durable return record')
+            if not returned and self.clock() >= self.end:
+                raise CompanionError('Companion shared deadline expired; no continuation')
             if (not returned or self.poisoned or not self.finish_completed or self.pending is not None or
                     self.finished_cases != set(self.case_ids)):
                 raise CompanionError('Sequencer/transport did not finish every declared outcome and known lifecycle')
@@ -988,7 +1003,7 @@ class Companion:
                 raise CompanionError('Event evidence differs from its complete append history')
             self.report.update(status='completed', completed=True)
         except BaseException as error:
-            self.report.update(status='stopped', reason=str(error), errorType=type(error).__name__)
+            self.stop(error, 'execute')
         finally:
             parent.close()
             child.close()
@@ -1000,8 +1015,8 @@ class Companion:
                     process.join(timeout=3)
                 self.report['sequencerProcess']['returnCode'] = process.exitcode
                 if process.exitcode != 0 or self.report['sequencerProcess']['stoppedByClient']:
-                    self.report.update(status='stopped', completed=False,
-                        reason='Owned sequencer child did not exit normally with code zero')
+                    error = CompanionError('Owned sequencer child did not exit normally with code zero')
+                    self.report['sequencerProcess']['cleanupError'] = self.stop(error, 'sequencer-cleanup')
             self.report.update(done=True, finishedAt=self.wall())
             if self.active_case is not None and self.active_case not in self.finished_cases:
                 self.case(self.active_case).update(status='unavailable', verdictSource='transport',
@@ -1026,13 +1041,21 @@ def main(argv=None):
         print(encoded({'status': companion.report['status'], 'report': str(companion.output)}).decode('utf-8'))
         return result
     except BaseException as error:
+        failure = {'errorType': type(error).__name__, 'reason': str(error)}
         if companion is not None:
-            companion.report.update(done=True, status='stopped', reason=str(error), errorType=type(error).__name__)
+            companion.stop(error, 'main')
+            companion.report.update(done=True)
             try:
                 companion.save()
             except Exception:
                 pass
-        print(encoded({'status': 'stopped', 'errorType': type(error).__name__, 'reason': str(error)}).decode('utf-8'), file=sys.stderr)
+            primary = companion.report['primaryError']
+            diagnostic = {key: primary[key] for key in ('errorType', 'reason')}
+            if diagnostic != failure:
+                diagnostic['terminalError'] = failure
+        else:
+            diagnostic = failure
+        print(encoded({'status': 'stopped', **diagnostic}).decode('utf-8'), file=sys.stderr)
         return 2
 
 
