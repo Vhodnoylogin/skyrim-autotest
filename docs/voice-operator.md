@@ -6,6 +6,16 @@ returns one repair result. Do not run the cross-chat bridge or send a message
 per utterance. No game, MO2, profile, driver, AI API, credentials or installation
 is touched by these commands. Models/Whisper/audio remain external.
 
+Capture drains WinMM on an independent thread into a bounded30second PCM queue,
+so WAV/log/control/health disk operations do not starve its3.2second native ring.
+Original capture times survive buffering. Actual native/software gaps are explicit
+failures: partial audio is retained as incomplete evidence and pending recognition
+cannot become a new executable command after capture failure.
+This source change does not update an existing healthy listener. Preserve it;
+use the ordinary verified-end/death and `ensure` path for a fresh audio session,
+retaining the old inbox/cursor without replaying old WAVs. No game restart is needed
+to select a separately prepared audio package after that safe transition.
+
 ## Owner says the manual game is running
 
 Run from the installed package or this repository:

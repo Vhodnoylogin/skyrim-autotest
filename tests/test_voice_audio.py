@@ -7,9 +7,10 @@ import threading
 import time
 import unittest
 from unittest.mock import patch
+import uuid
 import wave
 
-from skyrim_autotest.voice_audio import Utterances, BLOCK_SAMPLES, RATE, wav_blocks
+from skyrim_autotest.voice_audio import CapturedPCM, CaptureGap, Utterances, BLOCK_SAMPLES, RATE, wav_blocks
 from skyrim_autotest import voice_audio
 from skyrim_autotest.voice_listener import Session, main
 
@@ -239,6 +240,126 @@ class VoiceAudioTests(unittest.TestCase):
             with self.assertRaisesRegex(OSError, 'possible audio gap'):
                 next(voice_audio.capture(0))
         self.assertTrue(fake.closed)
+
+    def test_winmm_drainer_continues_while_disk_consumer_is_paused(self):
+        release, drained, closed = threading.Event(), threading.Event(), threading.Event()
+        def source(device, stop):
+            try:
+                yield CapturedPCM(pcm(1), 100.)
+                if not release.wait(1): raise TimeoutError('test producer barrier')
+                for index in range(24):
+                    yield CapturedPCM(pcm(index + 2), 100.2 + index * .2)
+                drained.set()
+                stop.wait(1)
+            finally:
+                closed.set()
+        with patch.object(voice_audio, '_capture_blocks', side_effect=source):
+            stream = voice_audio.capture(0, maximum_pending=32)
+            try:
+                self.assertEqual(next(stream), pcm(1))
+                release.set()
+                self.assertTrue(drained.wait(1))  #4.8seconds of PCM drained without another consumer call.
+                block = next(stream)
+                self.assertEqual(block, pcm(2))
+                self.assertEqual(block.captured_at, 100.2)
+            finally:
+                stream.close()
+        self.assertTrue(closed.is_set())
+
+    def test_bounded_capture_overflow_discards_buffered_fragments_instead_of_replaying_them(self):
+        release, closed = threading.Event(), threading.Event()
+        def source(device, stop):
+            try:
+                yield CapturedPCM(pcm(1), 100.)
+                if not release.wait(1): raise TimeoutError('test producer barrier')
+                for index in range(4): yield CapturedPCM(pcm(index + 2), 100.2 + index * .2)
+            finally:
+                closed.set()
+        with patch.object(voice_audio, '_capture_blocks', side_effect=source):
+            stream = voice_audio.capture(0, maximum_pending=2)
+            self.assertEqual(next(stream), pcm(1))
+            release.set()
+            self.assertTrue(closed.wait(1))
+            with self.assertRaisesRegex(CaptureGap, 'consumer backlog exhausted'):
+                next(stream)
+        for bound in (0, 151, True):
+            with self.subTest(bound=bound), self.assertRaises(ValueError): next(voice_audio.capture(0, bound))
+
+    def test_buffered_old_audio_keeps_capture_time_and_cannot_enter_new_owner_dialog(self):
+        session = Session(self.root / 'old-buffer', {'cli': 'cli', 'model': 'model'}, operator_thread=str(uuid.uuid4()))
+        from skyrim_autotest.voice_inbox import atomic
+        atomic(session.folder / 'conversation-request.json', {'id': uuid.uuid4().hex, 'threadId': session.operator_thread,
+            'ownerRef': 'owner-start', 'at': time.time(), 'seconds': 1800})
+        session.apply_control()
+        def asr(command, **kwargs):
+            Path(command[command.index('-of') + 1] + '.json').write_text(
+                json.dumps({'transcription': [{'text': 'обычная новая команда'}]}))
+            return subprocess.CompletedProcess(command, 0)
+        with patch('skyrim_autotest.voice_listener.subprocess.run', side_effect=asr):
+            collector = Utterances(session.folder / 'audio', session.event, pause=.9)
+            for index, block in enumerate([pcm(500)] * 2 + [pcm()] * 5):
+                collector.feed(CapturedPCM(block, session.control_started_at - 5 + index * .2))
+            session.close()
+        self.assertEqual(session.heard.read_text(), '')
+        final = json.loads(next(session.folder.glob('*.final.json')).read_text(encoding='utf-8'))
+        self.assertLess(final['captureStartedAt'], session.control_started_at)
+        self.assertLess(final['captureEndedAt'], session.control_started_at)
+        self.assertFalse(final['accepted'])
+
+    def test_capture_gap_keeps_incomplete_audio_and_suppresses_pending_asr_commands(self):
+        entered, release = threading.Event(), threading.Event()
+        def asr(command, **kwargs):
+            entered.set()
+            if not release.wait(2): raise TimeoutError('test ASR barrier')
+            Path(command[command.index('-of') + 1] + '.json').write_text(
+                json.dumps({'transcription': [{'text': 'Полигон, команда'}]}))
+            return subprocess.CompletedProcess(command, 0)
+        with patch('skyrim_autotest.voice_listener.subprocess.run', side_effect=asr) as backend:
+            session = Session(self.root / 'gap', {'cli': 'cli', 'model': 'model'})
+            collector = Utterances(session.folder / 'audio', session.event, pause=.9)
+            try:
+                for block in [pcm(500)] * 2 + [pcm()] * 5: collector.feed(block)
+                self.assertTrue(entered.wait(1))
+                collector.feed(pcm(500))
+                session.fail_capture(CaptureGap('explicit capture gap'))
+                collector.finish('capture_gap', False)
+            finally:
+                release.set()
+                session.close()
+        self.assertEqual(backend.call_count, 1)
+        self.assertEqual(session.heard.read_text(), '')
+        finals = [json.loads(path.read_text(encoding='utf-8')) for path in session.folder.glob('*.audio.json')]
+        self.assertEqual(sum(row['audioComplete'] is False and row['endpointReason'] == 'capture_gap' for row in finals), 1)
+        final = json.loads(next(session.folder.glob('*.final.json')).read_text(encoding='utf-8'))
+        self.assertFalse(final['accepted'])
+        self.assertIn('capture gap', final['admissionError'])
+        health = json.loads((session.folder / 'health.json').read_text(encoding='utf-8'))
+        self.assertFalse(health['ok'])
+        self.assertFalse(health['audioCoverageComplete'])
+        self.assertIn('"event": "capture.gap"', session.events.read_text(encoding='utf-8'))
+
+    def test_listener_gap_exit_records_fault_before_finishing_partial_utterance(self):
+        config = self.root / 'asr.json'
+        model, cli = self.root / 'model', self.root / 'cli'
+        model.touch(); cli.touch()
+        config.write_text(json.dumps({'cli': str(cli), 'model': str(model)}))
+        def broken_capture(path):
+            yield CapturedPCM(pcm(500), time.time() - .2)
+            raise CaptureGap('simulated ring gap')
+        with patch('skyrim_autotest.voice_listener.wav_blocks', side_effect=broken_capture), \
+             patch('skyrim_autotest.voice_listener.subprocess.run') as asr:
+            result = main(['--asr-config', str(config), '--session', str(self.root / 'gap-main'),
+                           '--replay-wav', str(self.root / 'unused.wav')])
+        self.assertEqual(result, 2)
+        asr.assert_not_called()
+        session = self.root / 'gap-main'
+        final = json.loads(next(session.glob('*.audio.json')).read_text(encoding='utf-8'))
+        self.assertFalse(final['audioComplete'])
+        self.assertEqual(final['endpointReason'], 'capture_gap')
+        health = json.loads((session / 'health.json').read_text(encoding='utf-8'))
+        self.assertFalse(health['ok'])
+        self.assertFalse(health['captureActive'])
+        self.assertEqual((session / 'heard.jsonl').read_text(), '')
 
     def test_existing_listener_lock_blocks_before_microphone(self):
         config = self.root / 'asr.json'
