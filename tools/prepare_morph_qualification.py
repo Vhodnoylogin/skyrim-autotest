@@ -17,7 +17,9 @@ def pin(path):
 def write(path,value):
     with path.open('x',encoding='utf-8')as f:json.dump(value,f,indent=2,ensure_ascii=False);f.write('\n')
 
-def prepare(draft_path,fixture_path,registry_path,config_path,provider_path,output):
+def prepare(draft_path,fixture_path,registry_path,config_path,provider_path,output,maximum_seconds=600):
+    if type(maximum_seconds) is not int or not 60 <= maximum_seconds <= 1200:
+        raise ValueError('Qualification window must be an integer in60..1200seconds')
     output=Path(output).resolve()
     if any((p/'.git').exists() for p in [output,*output.parents]):raise ValueError('External new output directory required')
     output.mkdir(parents=True,exist_ok=False)
@@ -65,7 +67,7 @@ def prepare(draft_path,fixture_path,registry_path,config_path,provider_path,outp
     write(output/'qualification-inputs.json',spec)
     write(output/'interactive-policy.json',{'nativeBindings':policy,'npcPersistence':True,'morphSession':settings})
     write(output/'execution-plan.json',{'schemaVersion':1,'checks':[{'name':name,'role':'subject'}for name in CASES],
-        'bounds':{'maximumSeconds':1200,'maximumCommands':256},'fixture':{'cell':'QASmoke'},
+        'bounds':{'maximumSeconds':maximum_seconds,'maximumCommands':256},'fixture':{'cell':'QASmoke'},
         'scope':'tools-only component qualification; no physics or subject-mod acceptance'})
     source=(ROOT/'skyrim_autotest/morph_qualification.py').read_text(encoding='utf-8')
     source+='\nSPEC = '+repr(spec)+'\n\ndef run(exchange,emit):\n    return run_plan(SPEC,exchange,emit)\n'
@@ -81,6 +83,8 @@ def prepare(draft_path,fixture_path,registry_path,config_path,provider_path,outp
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     for name in ('subject-draft','fixture','actor-registry','provider-config','provider-dll','output'):p.add_argument('--'+name,type=Path,required=True)
-    a=p.parse_args();result=prepare(a.subject_draft,a.fixture,a.actor_registry,a.provider_config,a.provider_dll,a.output)
+    p.add_argument('--maximum-seconds',type=int,default=600,
+        help='Finite companion window; leave time for common startup and teardown inside the operator wall limit')
+    a=p.parse_args();result=prepare(a.subject_draft,a.fixture,a.actor_registry,a.provider_config,a.provider_dll,a.output,a.maximum_seconds)
     print(json.dumps({'output':str(a.output),'fileCount':len(result['files']),'installed':False}))
 if __name__=='__main__':main()
