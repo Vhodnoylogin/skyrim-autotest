@@ -100,6 +100,61 @@ class MonitorTests(unittest.TestCase):
         pulse=monitor.snapshot(self.state);pulse['recovery']['owned']=[{'role':'steam','identity':self.ident}]
         self.write_pulse(pulse);self.assertIsNone(monitor.read(self.root,self.state))
 
+    def capture_fixture(self):
+        game={'pid':20,'birth':200,'path':'C:/Game/SkyrimSE.exe'}
+        debugger={'pid':30,'birth':300,'path':'C:/Debugger/cdb.exe'}
+        self.state.update(game=game,owned=[{'role':'game','identity':game},
+            {'role':'crash-capture','identity':debugger}],
+            configuration={'game_edition':'se','crash_capture':{'provider':'cdb','executable':debugger['path']}},
+            crashCapture={'schemaVersion':1,'provider':'cdb','debugger':debugger,'target':game})
+        return monitor.snapshot(self.state)
+
+    def test_exact_opted_in_capture_pulse_keeps_original_35_second_guardian_limit(self):
+        pulse=self.capture_fixture();self.write_pulse(pulse)
+        self.state.update(heartbeat=time.time()-100,deadline=time.time()+90)
+        timing=monitor.guardian_deadlines(self.root,self.state)
+        self.assertEqual(timing['pulse'],pulse)
+        self.assertNotIn('runner-heartbeat-expired',timing['reasons'])
+        with patch.object(monitor.time,'time',return_value=pulse['at']+35.01):
+            self.assertIn('runner-heartbeat-expired',monitor.guardian_deadlines(self.root,self.state)['reasons'])
+
+    def test_capture_role_cannot_adopt_foreign_debugger_target_or_unconfigured_tool(self):
+        pulse=self.capture_fixture();self.write_pulse(pulse)
+        original=copy.deepcopy(self.state)
+        alterations=[('missing-capture',lambda s:s.pop('crashCapture')),
+            ('foreign-debugger',lambda s:s['crashCapture']['debugger'].update(birth=301)),
+            ('foreign-target',lambda s:s['crashCapture'].update(target=dict(s['game'],birth=201))),
+            ('invalid-target',lambda s:s.update(game=None,crashCapture=dict(s['crashCapture'],target=None))),
+            ('no-owned-game',lambda s:s.update(owned=[])),
+            ('no-optin',lambda s:s['configuration'].pop('crash_capture')),
+            ('vr',lambda s:s['configuration'].update(game_edition='vr')),
+            ('foreign-executable',lambda s:s['configuration']['crash_capture'].update(executable='C:/Other/cdb.exe'))]
+        for name,alter in alterations:
+            self.state=copy.deepcopy(original);alter(self.state)
+            with self.subTest(name=name):self.assertIsNone(monitor.read(self.root,self.state))
+
+    def test_capture_identity_schema_and_unknown_roles_remain_strict(self):
+        pulse=self.capture_fixture()
+        for identity in ({'pid':True,'birth':300,'path':'C:/Debugger/cdb.exe'},
+                         {'pid':30,'birth':0,'path':'C:/Debugger/cdb.exe'},
+                         {'pid':30,'birth':300,'path':''},
+                         {'pid':30,'birth':300,'path':'C:/Debugger/cdb.exe','extra':1}):
+            bad=copy.deepcopy(pulse);bad['recovery']['owned'][-1]['identity']=identity
+            self.state['crashCapture']['debugger']=identity
+            self.write_pulse(bad)
+            with self.subTest(identity=identity):self.assertIsNone(monitor.read(self.root,self.state))
+        bad=copy.deepcopy(pulse);bad['recovery']['owned'][-1]['role']='debugger'
+        self.write_pulse(bad);self.assertIsNone(monitor.read(self.root,self.state))
+
+    def test_capture_recovery_never_adopts_a_witness_from_the_pulse(self):
+        pulse=self.capture_fixture();self.write_pulse(pulse)
+        state=copy.deepcopy(self.state);state['owned']=state['owned'][:1]
+        monitor.restore(self.root,state)
+        self.assertEqual(state['owned'][-1],pulse['recovery']['owned'][-1])
+        state=copy.deepcopy(self.state);state['owned']=state['owned'][:1];state.pop('crashCapture')
+        monitor.restore(self.root,state)
+        self.assertEqual(len(state['owned']),1)
+
     def test_driver_checkpoint_never_serializes_accumulated_subject_state(self):
         class SubjectState:
             def __deepcopy__(self,memo):raise AssertionError('Subject state traversed')

@@ -356,6 +356,55 @@ class CompanionTests(unittest.TestCase):
         self.assertIs(sys.modules['skyrim_autotest.command_bus'], existing)
         self.assertFalse((self.fixture.package / '__pycache__').exists())
 
+    def captured_heartbeat_backend(self):
+        from skyrim_autotest import runner_monitor
+        f=self.fixture;source=Path(__file__).resolve().parents[1]/'skyrim_autotest'
+        inventory={}
+        for path in f.package.glob('*.py'):
+            path.write_bytes((source/path.name).read_bytes());inventory[str(path)]=tool.digest(path.read_bytes())
+        f.manifest.write_bytes(tool.encoded({'schemaVersion':1,'files':[
+            {'path':path,'sha256':sha} for path,sha in inventory.items()]}))
+        f.state['executorHashes']={Path(path).name:sha for path,sha in inventory.items()}
+        debugger={'pid':113,'birth':1003,'path':str(f.root/'cdb.exe')}
+        f.state['configuration']['crash_capture']={'provider':'cdb','executable':debugger['path']}
+        f.state['crashCapture']={'schemaVersion':1,'provider':'cdb','debugger':debugger,'target':copy.deepcopy(f.game)}
+        f.state['owned'].append({'role':'crash-capture','identity':copy.deepcopy(debugger)})
+        f.state['heartbeat']=time.time()-100
+        f.write_state()
+        pulse=runner_monitor.snapshot(f.state)
+        (f.run_dir/'heartbeat.json').write_bytes(tool.encoded(pulse))
+        f.backend.heartbeat=tool.load_backend(f.executor,inventory).heartbeat
+        return pulse
+
+    def test_prebinding_client_uses_the_pinned_reader_for_exact_crash_capture_heartbeat(self):
+        self.captured_heartbeat_backend()
+        self.assertTrue(self.fixture.backend.heartbeat.__module__.startswith('_subject_rc6_'))
+        companion=self.fixture.companion()
+        self.assertEqual(companion.report['runId'],self.fixture.run_id)
+        self.assertEqual(companion.report['sessionId'],self.fixture.session_id)
+        self.assertFalse(companion.report['subjectStarted'])
+        self.assertEqual(companion.report['actions'],[])
+        self.assertFalse(any(operation=='submit' for operation,_ in self.fixture.client.calls))
+
+    def test_prebinding_foreign_capture_or_11_second_pulse_never_adopts_session(self):
+        pulse=self.captured_heartbeat_backend();original=copy.deepcopy(self.fixture.state)
+        for name in ('debugger','target','stale','runner'):
+            self.fixture.state=copy.deepcopy(original);current=copy.deepcopy(pulse)
+            if name=='debugger':self.fixture.state['crashCapture']['debugger']['birth']+=1
+            if name=='target':self.fixture.state['crashCapture']['target']['birth']+=1
+            if name=='stale':current['at']=time.time()-11
+            if name=='runner':current['runner']['birth']+=1
+            self.fixture.write_state()
+            (self.fixture.run_dir/'heartbeat.json').write_bytes(tool.encoded(current))
+            companion=tool.Companion(self.fixture.args(suffix=name),backend=self.fixture.backend)
+            with self.subTest(name=name),self.assertRaisesRegex(tool.CompanionError,'heartbeat'):
+                companion.wait_ready()
+            self.assertNotIn('runId',companion.report)
+            self.assertNotIn('sessionId',companion.report)
+            self.assertNotIn('binding',companion.report)
+            self.assertEqual(companion.report['actions'],[])
+        self.assertFalse(any(operation=='submit' for operation,_ in self.fixture.client.calls))
+
 
 class SequencerProcessTests(unittest.TestCase):
     def setUp(self):

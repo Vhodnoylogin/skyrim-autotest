@@ -2,10 +2,33 @@
 import copy
 import json
 import math
+import ntpath
 from pathlib import Path
 import time
 
 RECOVERY_KEYS = ('owned', 'hardwareFrame', 'hardwareOwner', 'hardwareHoldUntil', 'hardwareHoldUntilTickMs')
+
+
+def _identity(ident):
+    return (isinstance(ident,dict) and set(ident)=={'pid','birth','path'} and type(ident['pid']) is int
+            and type(ident['birth']) is int and ident['pid']>0 and ident['birth']>0
+            and isinstance(ident['path'],str) and bool(ident['path']))
+
+
+def _owned_capture(state, ident):
+    """A new role cannot authorize its own adoption from the sidecar."""
+    capture,config=state.get('crashCapture'),state.get('configuration')
+    game=state.get('game')
+    if not isinstance(capture,dict) or not isinstance(config,dict) or not _identity(game):return False
+    setting=config.get('crash_capture')
+    return (config.get('game_edition')=='se' and isinstance(setting,dict) and setting.get('provider')=='cdb'
+            and isinstance(setting.get('executable'),str) and bool(setting['executable'])
+            and ntpath.normcase(ntpath.normpath(setting['executable']))==ntpath.normcase(ntpath.normpath(ident['path']))
+            and type(capture.get('schemaVersion')) is int and capture['schemaVersion']==1 and capture.get('provider')=='cdb'
+            and capture.get('debugger')==ident and capture.get('target')==game
+            and isinstance(state.get('owned'),list)
+            and any(isinstance(row,dict) and row.get('role')=='game' and row.get('identity')==game
+                    for row in state.get('owned',[])))
 
 
 def snapshot(state, error=None):
@@ -30,11 +53,11 @@ def read(directory, state, filename='heartbeat.json'):
     owned=value['recovery'].get('owned',[])
     if not isinstance(owned,list) or len(owned)>1024:return None
     for row in owned:
-        if not isinstance(row,dict) or row.get('role') not in ('game','loader','mo2','vr'):return None
+        if not isinstance(row,dict):return None
         ident=row.get('identity')
-        if (not isinstance(ident,dict) or set(ident)!={'pid','birth','path'} or type(ident['pid']) is not int
-                or type(ident['birth']) is not int or ident['pid']<=0 or ident['birth']<=0
-                or not isinstance(ident['path'],str) or not ident['path']):return None
+        if not _identity(ident):return None
+        if row.get('role') not in ('game','loader','mo2','vr'):
+            if row.get('role')!='crash-capture' or not _owned_capture(state,ident):return None
     return value
 
 
