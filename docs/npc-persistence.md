@@ -1,5 +1,11 @@
 # Owned NPC save/load
 
+The reference inspector's `dontMove` reads the typed actor life state used by
+the SE1.7.104 `Actor.SetDontMove` native: state9 means enabled. It also returns
+`actorLifeState` and the separate `movementBlocked` animation flag. Those flags
+are not interchangeable. A hold still requires actual stationary position samples;
+neither the setter receipt nor an unrelated animation flag proves that interval.
+
 This opt-in implementation preserves six newly created NPC identities through one
 save and one load in the held interactive game's existing process. It uses the
 normal disposable MO2 profile, common save/load lifecycle and gameplay readiness

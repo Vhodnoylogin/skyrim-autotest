@@ -42,6 +42,9 @@ json Inspection(RE::Actor* actor) {
     }
     const auto* left=actor->GetEquippedObject(true);const auto* right=actor->GetEquippedObject(false);
     const auto pos=actor->GetPosition();const auto* label=actor->GetDisplayFullName();
+    // SE 1.7.104 Actor.SetDontMove sets life state 9, independently of the
+    // movement-blocked animation flag. Keep those observations distinct.
+    const auto lifeState=static_cast<std::uint32_t>(actor->AsActorState()->GetLifeState());
     const auto length=label?strnlen_s(label,513):0;if(length>512)throw ToolError(422,"Display name exceeds bound");
     auto* policy=Policy();if(!policy)throw ToolError(503,"Inspection VM policy unavailable");
     const auto h=policy->GetHandleForObject(static_cast<RE::VMTypeID>(actor->GetFormType()),actor);
@@ -56,8 +59,9 @@ json Inspection(RE::Actor* actor) {
         {"equippedRight",right?json(Hex(right->GetFormID())):json(nullptr)},
         {"equippedLeftIsWeapon",left&&left->GetFormType()==RE::FormType::Weapon},
         {"equippedRightIsWeapon",right&&right->GetFormType()==RE::FormType::Weapon},
-        {"dontMove",actor->GetActorRuntimeData().boolFlags.all(RE::Actor::BOOL_FLAGS::kMovementBlocked)},
-        {"movementObservationBasis","typed Actor runtime BOOL_FLAGS::kMovementBlocked"},
+        {"dontMove",lifeState==9},{"actorLifeState",lifeState},
+        {"movementBlocked",actor->GetActorRuntimeData().boolFlags.all(RE::Actor::BOOL_FLAGS::kMovementBlocked)},
+        {"movementObservationBasis","typed ActorState life state 9; exact SE 1.7.104 SetDontMove contract"},
         {"collisionStateObserved",false},{"collisionDisableCommandsIssued",0}};
 }
 void Release() noexcept {

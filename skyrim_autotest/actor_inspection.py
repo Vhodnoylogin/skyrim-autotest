@@ -70,24 +70,46 @@ def _expected(entry):
     return original.get("currentVmHandle"), original.get("providerSession")
 
 
-def _guard(session, entry, deadline, policy):
-    spec = {"reference": entry["reference"], "base": entry["base"]}
-    return fixture_actors.guard(session, spec, deadline, policy)
-
-
 def _sample(backend, entry, policy):
-    observation = _guard(backend.s, entry, backend.end, policy)
+    """Bracket one native identity/equipment batch without repeated full getters."""
+    session = backend.s
     spec = {"reference": entry["reference"], "base": entry["base"]}
+    game = copy.deepcopy(session.state.get("game"))
+    run_id, generation = session.state.get("id"), session.state.get("ownedWorldGeneration")
+    creation_id, incarnation = entry.get("creationId"), copy.deepcopy(entry.get("incarnation"))
+    expected_vm, expected_session = _expected(entry)
+
+    def owned():
+        current_policy = frozen_policy(session, policy)
+        if spec["base"] not in current_policy["fixtureActorBases"]:
+            raise BindingError("Inspection base is outside the frozen fixture allowlist")
+        fixture_actors.require_fixture(session, spec)
+        fixture_actors._owned(backend, game)
+        current = fixture_actors.require_fixture(session, spec)
+        if (session.state.get("id") != run_id or session.state.get("ownedWorldGeneration") != generation or
+                current.get("creationId") != creation_id or current.get("incarnation") != incarnation or
+                current.get("reference") != spec["reference"] or current.get("base") != spec["base"] or
+                _expected(current) != (expected_vm, expected_session)):
+            raise BindingError("Owned inspection world or creation identity changed across the sample")
+        backend.remaining()
+
+    def observed():
+        current, row, _ = actor_domain.anchor(backend, spec["reference"])
+        if (current != incarnation or row.get("baseForm") != spec["base"] or row.get("loaded3D") is not True):
+            raise BindingError("Actor incarnation/base/loaded state changed across native inspection")
+        return current, actor_domain.form(row.get("cellForm"))
+
+    owned()
+    before, cell = observed()
     raw = backend.call("npc_persistence", {"action": "inspection", **spec,
         "timeoutMs": max(1, min(5000, int(backend.remaining() * 1000)))})
     backend.remaining()
-    expected_vm, expected_session = _expected(entry)
     vm = raw.get("currentVmHandle") if isinstance(raw, dict) else None
     if (not isinstance(raw, dict) or raw.get("protocol") != "npc-persistence/1" or
             type(raw.get("pid")) is not int or raw["pid"] != backend.s.state["game"]["pid"] or
             raw.get("providerSession") != expected_session or not isinstance(expected_session, str) or not expected_session or
             raw.get("persistent") is not True or raw.get("currentReference") != spec["reference"] or raw.get("base") != spec["base"] or
-            type(raw.get("runtimeHandle")) is not int or raw["runtimeHandle"] != observation["incarnation"]["runtimeHandle"] or
+            type(raw.get("runtimeHandle")) is not int or raw["runtimeHandle"] != before["runtimeHandle"] or
             not isinstance(vm, str) or not re.fullmatch(r"[1-9][0-9]{0,19}", vm) or int(vm) >= 2**64 or vm != expected_vm):
         raise BindingError("Native inspection lacks the actual current owned reference/VM identity")
     name, position, slots = raw.get("displayName"), raw.get("position"), raw.get("wornArmorSlots")
@@ -102,11 +124,22 @@ def _sample(backend, entry, policy):
         raise BindingError("Complete native armor/weapon/hold inspection is unavailable")
     for item in [row["form"] for row in slots] + [raw["equippedLeft"], raw["equippedRight"]]:
         if item is not None: actor_domain.form(item)
-    after = _guard(backend.s, entry, backend.end, policy)
-    if after["incarnation"] != observation["incarnation"]:
-        raise BindingError("Actor incarnation changed across native inspection")
-    result = {"native": copy.deepcopy(raw), "actor": dict(after["actor"], displayName=name),
-              "incarnation": copy.deepcopy(after["incarnation"]), "observedAtMonotonic": time.monotonic()}
+    # The batch already supplies the actual reference/base/VM/runtime identity.
+    # Only these three current actor values are absent from that native batch.
+    sex = backend.pap("ActorBase", "GetSex", target=spec["base"])
+    if type(sex) is not int or sex not in (0, 1):
+        raise BindingError("Actual inspection actor sex is unavailable")
+    weight = actor_domain.bounded(backend.pap("ActorBase", "GetWeight", target=spec["base"]), 0, 100)
+    race = actor_domain.returned_form(backend.pap("Actor", "GetRace", target=spec["reference"]))
+    after, final_cell = observed()
+    if after != before or final_cell != cell:
+        raise BindingError("Actor incarnation or cell changed across native inspection")
+    actor = dict(spec, loaded3D=True, sex=("male", "female")[sex], weight=weight, race=race, displayName=name)
+    observation = {"actor": actor, "incarnation": after}
+    fixture_actors.require_fixture(session, spec, observation)
+    owned()
+    result = {"native": copy.deepcopy(raw), "actor": actor,
+              "incarnation": copy.deepcopy(after), "observedAtMonotonic": time.monotonic()}
     backend.s.log("actor-fixture-inspection-sample", tag=entry["tag"], sample=result, atomicSnapshot=False)
     return result
 
@@ -162,7 +195,6 @@ def execute(session, args, deadline, policy):
     entry = session.state.get("interactiveActorFixtures", {}).get(tag)
     if not isinstance(entry, dict):
         raise BindingError("Inspection fixture tag has no actual owned creation witness")
-    _guard(session, entry, deadline, policy)
     backend = Backend(session, deadline)
     state = session.state.setdefault("actorInspection", {"registry": {}, "commands": {}})
     if args["operation"] == "world.read":
