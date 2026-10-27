@@ -136,3 +136,18 @@ class ManualSceneTests(unittest.TestCase):
             manual_scene.run_plan(self.spec, backend.exchange, lambda r: None, lambda: None,
                                   lambda k, v: notices.append(k))
         self.assertNotIn('scene-ready', notices)
+
+    def test_world_control_keeps_owner_open_and_measures_actual_position(self):
+        calls, notices, records = [], [], []
+        positions = iter([[0, 0, 0], [0, 0, 0], [0, 2, 0]])
+        def exchange(e):
+            calls.append(e)
+            if e.get('tool') == 'inspect': return {'playerLoaded': True, 'position': next(positions)}
+            return {'outcome': 'owner-finished'} if e['operation'] == 'finish' else {}
+        commands = iter([{'sequence': 1, 'sourceRef': 'owner-walk', 'action': 'move', 'key': 'W', 'milliseconds': 100},
+                         {'sequence': 2, 'sourceRef': 'owner-stop', 'action': 'finish'}])
+        manual_scene.run_world_plan(exchange, records.append, lambda: next(commands),
+                                    lambda k, v: notices.append((k, v)), 'autotest-exact-owned-run')
+        self.assertEqual(notices[1][1]['positionDeltaGameUnits'], 2)
+        self.assertEqual([e['args']['action'] for e in calls if e.get('tool') == 'input'], ['capabilities', 'down', 'up'])
+        self.assertFalse(notices[0][1]['sixActorSceneReady'])

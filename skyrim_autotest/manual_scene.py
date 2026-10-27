@@ -11,6 +11,61 @@ import time
 CASE = 'owner-controlled-manual-scene'
 
 
+def run_world_plan(exchange, emit, next_command, notify, input_owner):
+    """Keep the initial world open and measure explicitly requested physical input."""
+    sequence = 0
+    emit({'kind': 'check-start', 'caseId': CASE, 'role': 'subject'})
+    def call(tool, args):
+        nonlocal sequence
+        sequence += 1
+        request = {'schemaVersion': 1, 'operation': 'tool', 'tool': tool, 'args': args, 'timeoutSeconds': 15}
+        row = {'kind': 'measurement', 'caseId': CASE, 'sequence': sequence, 'request': request}
+        emit(dict(row, delivery='intent')); raw = exchange(request)
+        emit(dict(row, delivery='completed', rawResult=raw)); return raw
+    def scene():
+        raw = call('inspect', {'kind': 'scene'})
+        pos = raw.get('position')
+        if (raw.get('playerLoaded') is not True or type(pos) is not list or len(pos) != 3 or
+                any(type(n) not in (int, float) or not math.isfinite(n) for n in pos)):
+            raise ValueError('Actual loaded world and player position unavailable')
+        return raw
+    notify('scene-ready', {'stage': 'initial-world-control', 'scene': scene(), 'actors': {},
+                          'sixActorSceneReady': False, 'awaitingOwnerCommands': True})
+    commands = 0
+    while True:
+        command = next_command(); commands += 1
+        if (type(command) is not dict or command.get('sequence') != commands or
+                not isinstance(command.get('sourceRef'), str) or not command['sourceRef'].strip()):
+            raise ValueError('Fresh sequential current owner command required')
+        action = command.get('action')
+        if action == 'finish' and set(command) == {'sequence', 'sourceRef', 'action'}:
+            emit({'kind': 'check-result', 'caseId': CASE, 'outcome': 'passed',
+                  'detail': 'Owner-ended world observations; no NPC or whole-mod verdict'})
+            sequence += 1
+            request = {'schemaVersion': 1, 'operation': 'finish'}
+            row = {'kind': 'measurement', 'caseId': None, 'sequence': sequence, 'request': request}
+            emit(dict(row, delivery='intent')); raw = exchange(request)
+            emit(dict(row, delivery='completed', rawResult=raw))
+            return {'initialWorldInspected': True, 'wholeModAccepted': False}
+        before = scene()
+        if action == 'move':
+            if (set(command) != {'sequence', 'sourceRef', 'action', 'key', 'milliseconds'} or
+                    command['key'] not in ('W', 'A', 'S', 'D', 'SPACE') or
+                    type(command['milliseconds']) is not int or not 100 <= command['milliseconds'] <= 1000):
+                raise ValueError('Only short leased gameplay keys are accepted')
+            call('input', {'action': 'capabilities'})
+            args = {'device': 'keyboard', 'key': command['key'], 'owner': input_owner}
+            call('input', dict(args, action='down', maxHoldMs=command['milliseconds']))
+            time.sleep(command['milliseconds'] / 1000)
+            call('input', dict(args, action='up'))
+        elif action != 'inspect' or set(command) != {'sequence', 'sourceRef', 'action'}:
+            raise ValueError('Only move/inspect/finish supported in initial-world control')
+        after = scene()
+        notify('command-result', {'command': command, 'before': before, 'after': after,
+               'positionDeltaGameUnits': math.dist(before['position'], after['position']),
+               'sixActorSceneReady': False, 'inputReceiptIsNotMovementProof': True})
+
+
 def run_plan(spec, exchange, emit, next_command, notify):
     actors = spec['actors']
     if (len(actors) != 6 or len({a['tag'] for a in actors}) != 6 or

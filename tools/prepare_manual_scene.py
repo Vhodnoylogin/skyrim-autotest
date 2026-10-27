@@ -21,7 +21,7 @@ def write(path, value):
         stream.write('\n')
 
 
-def prepare(base_config, scene_inputs, output, maximum_seconds=6900):
+def prepare(base_config, scene_inputs, output, maximum_seconds=6900, initial_world_only=False):
     if type(maximum_seconds) is not int or not 1 <= maximum_seconds <= 14100:
         raise ValueError('Explicit held window must fit the original outer window minus300seconds')
     output = Path(output).resolve()
@@ -35,6 +35,9 @@ def prepare(base_config, scene_inputs, output, maximum_seconds=6900):
     if len(spec['actors']) != 6:
         raise ValueError('Existing exact six-actor scene inputs required')
     config.pop('crash_capture', None)  # Optional debugger is not part of manual play.
+    cell = 'RealmLorkhan' if initial_world_only else 'QASmoke'
+    if initial_world_only:
+        config.pop('se_fixture_anchor', None)
     config['runtime'] = str(output / 'runtime')
     settings = config['interactive_session']
     settings.update(maximumSeconds=maximum_seconds, manageCommandEndpoint=True,
@@ -48,9 +51,9 @@ def prepare(base_config, scene_inputs, output, maximum_seconds=6900):
     write(output / 'execution-plan.json', {'schemaVersion': 1,
         'checks': [{'name': manual_scene.CASE, 'role': 'subject'}],
         'bounds': {'maximumSeconds': maximum_seconds, 'maximumCommands': 256},
-        'fixture': {'cell': 'QASmoke'}, 'scope': 'Owner-controlled scene and observed actions; no whole-mod acceptance'})
+        'fixture': {'cell': cell}, 'scope': 'Owner-controlled scene and observed actions; no whole-mod acceptance'})
     write(output / 'scenario.json', {'schemaVersion': 1, 'name': 'SE owner-controlled manual scene',
-        'startMode': 'new-game', 'cell': 'QASmoke', 'steps': [
+        'startMode': 'new-game', 'cell': cell, 'steps': [
             {'name': 'Read independent observation capability', 'tool': 'inspect',
              'args': {'kind': 'world_observer', 'action': 'capabilities'}, 'timeout': 30,
              'assert': [{'path': 'domains.references', 'equals': True}]}]})
@@ -59,6 +62,7 @@ def prepare(base_config, scene_inputs, output, maximum_seconds=6900):
     source = (ROOT / 'skyrim_autotest/manual_scene.py').read_text(encoding='utf-8')
     source += '\nSPEC = ' + repr(spec) + '\nCONTROLS = ' + repr(str(controls))
     source += '\nOBSERVATIONS = ' + repr(str(observations)) + '\nWINDOW = ' + repr(maximum_seconds)
+    source += '\nWORLD_ONLY = ' + repr(initial_world_only) + '\nRUNTIME = ' + repr(config['runtime'])
     source += '''
 
 def run(exchange, emit):
@@ -79,6 +83,11 @@ def run(exchange, emit):
             stream.flush(); os.fsync(stream.fileno())
         os.rename(temporary, target)
     commands = directory_commands(CONTROLS, WINDOW)
+    if WORLD_ONLY:
+        states = list((Path(RUNTIME) / 'runs').glob('*/state.json'))
+        if len(states) != 1: raise RuntimeError('Exactly one fresh native owner required')
+        state = json.loads(states[0].read_text(encoding='utf-8-sig'))
+        return run_world_plan(exchange, emit, lambda: next(commands), notify, 'autotest-' + state['id'])
     return run_plan(SPEC, exchange, emit, lambda: next(commands), notify)
 '''
     with (output / 'sequencer.py').open('x', encoding='utf-8') as stream: stream.write(source)
@@ -97,5 +106,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('base-config', 'scene-inputs', 'output'): parser.add_argument('--' + name, required=True)
     parser.add_argument('--maximum-seconds', type=int, default=6900)
+    parser.add_argument('--initial-world-only', action='store_true')
     args = parser.parse_args()
-    print(json.dumps(prepare(args.base_config, args.scene_inputs, args.output, args.maximum_seconds), indent=2))
+    print(json.dumps(prepare(args.base_config, args.scene_inputs, args.output, args.maximum_seconds, args.initial_world_only), indent=2))
