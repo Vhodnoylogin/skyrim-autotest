@@ -2,6 +2,7 @@
 from array import array
 from collections import deque
 import ctypes as C
+import json
 import math
 from pathlib import Path
 import queue
@@ -15,10 +16,17 @@ from .microphone_probe import api, check, Format, Header
 RATE = 16000
 BLOCK_SAMPLES = 3200  # 200ms; contiguous PCM16 mono
 CAPTURE_PENDING_BLOCKS = 150  # At most30seconds /960000bytes outside WinMM.
+NATIVE_BUFFER_COUNT = 128  #25.6seconds /819200bytes; capacity, not batching latency.
+WHDR_DONE = 1
 
 
 class CaptureGap(OSError):
     """Capture coverage was lost; buffered fragments must not become commands."""
+
+    def __init__(self, message, diagnostics=None):
+        self.diagnostics = diagnostics or {}
+        detail = '; capture=' + json.dumps(self.diagnostics, sort_keys=True, allow_nan=False) if self.diagnostics else ''
+        super().__init__(message + detail)
 
 
 class CapturedPCM(bytes):
@@ -29,12 +37,12 @@ class CapturedPCM(bytes):
 
 
 def _capture_blocks(device, stop):
-    """Keep 16 WinMM buffers queued. An exhausted ring is an explicit gap."""
+    """Keep a bounded native reserve; requeue every ready header before yielding."""
     mm = api()
     handle = C.c_void_p()
     fmt = Format(1, 1, RATE, RATE * 2, 2, 16, 0)
     check(mm.waveInOpen(C.byref(handle), device, C.byref(fmt), 0, 0, 0), 'shared input open')
-    buffers = [C.create_string_buffer(BLOCK_SAMPLES * 2) for _ in range(16)]
+    buffers = [C.create_string_buffer(BLOCK_SAMPLES * 2) for _ in range(NATIVE_BUFFER_COUNT)]
     headers = [Header(C.addressof(b), len(b), 0, 0, 0, 0, None, 0) for b in buffers]
     prepared = []
     try:
@@ -44,27 +52,52 @@ def _capture_blocks(device, stop):
             check(mm.waveInAddBuffer(handle, C.byref(header), C.sizeof(header)), 'queue')
         check(mm.waveInStart(handle), 'capture start')
         index = 0
-        deadline = time.monotonic() + 5
+        started = last_drained = time.monotonic()
+        drained = 0
+        deadline = started + 5
+
+        def fault(reason, message, flags=None):
+            now = time.monotonic()
+            flags = [int(h.flags) for h in headers] if flags is None else flags
+            return CaptureGap(message, {'reason': reason, 'nativeBufferCount': len(headers),
+                'blockSamples': BLOCK_SAMPLES, 'nativeReserveSeconds': len(headers) * BLOCK_SAMPLES / RATE,
+                'nextHeader': index, 'completedHeaders': sum(bool(value & WHDR_DONE) for value in flags),
+                'drainedBlocks': drained, 'drainedSamples': drained * BLOCK_SAMPLES,
+                'captureElapsedSeconds': now - started, 'sinceLastDrainSeconds': now - last_drained,
+                'headerFlags': flags, 'recordedBytes': [int(h.recorded) for h in headers],
+                'missingSamples': None, 'coverageEstablished': False})
+
         while not stop.is_set():
             header = headers[index]
-            if not header.flags & 1:
+            if not header.flags & WHDR_DONE:
                 if time.monotonic() > deadline:
-                    raise CaptureGap('Input stopped; audio coverage unavailable')
+                    raise fault('input-timeout', 'Input stopped; audio coverage unavailable')
                 time.sleep(.005)
                 continue
-            completed = sum(bool(h.flags & 1) for h in headers)
-            if completed == len(headers):
-                raise CaptureGap('Capture ring exhausted: possible audio gap, no complete command')
-            if header.recorded != BLOCK_SAMPLES * 2:
-                raise CaptureGap('Partial input block: audio coverage unavailable')
-            # WinMM supplies no hardware timestamp here. Account for completed
-            # blocks still in the ring instead of dating queued audio at use.
-            captured_at = time.time() - completed * BLOCK_SAMPLES / RATE
-            pcm = buffers[index].raw[:header.recorded]
-            check(mm.waveInAddBuffer(handle, C.byref(header), C.sizeof(header)), 'requeue')
-            index = (index + 1) % len(headers)
-            deadline = time.monotonic() + 5
-            yield CapturedPCM(pcm, captured_at)
+            batch = []
+            while headers[index].flags & WHDR_DONE and len(batch) < len(headers) and not stop.is_set():
+                flags = [int(h.flags) for h in headers]
+                completed = sum(bool(value & WHDR_DONE) for value in flags)
+                if completed == len(headers):
+                    # DONE proves return of a buffer, not a measured loss count.
+                    # With no native reserve left, continuity is unproven; fail
+                    # closed and retain timing/flags instead of guessing a cause.
+                    raise fault('native-reserve-exhausted', 'Capture ring exhausted: possible audio gap, no complete command', flags)
+                header = headers[index]
+                if header.recorded != BLOCK_SAMPLES * 2:
+                    raise fault('partial-input-block', 'Partial input block: audio coverage unavailable', flags)
+                # Host estimate only: WinMM supplies no hardware timestamp here.
+                captured_at = time.time() - completed * BLOCK_SAMPLES / RATE
+                pcm = buffers[index].raw[:header.recorded]
+                check(mm.waveInAddBuffer(handle, C.byref(header), C.sizeof(header)), 'requeue')
+                last_drained = time.monotonic()
+                drained += 1
+                index = (index + 1) % len(headers)
+                deadline = last_drained + 5
+                batch.append(CapturedPCM(pcm, captured_at))
+            for pcm in batch:
+                if stop.is_set(): break
+                yield pcm
     finally:
         mm.waveInStop(handle)
         mm.waveInReset(handle)

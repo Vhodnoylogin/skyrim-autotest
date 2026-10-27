@@ -123,6 +123,15 @@ and never automatically redelivered through direct polling.
 
 ## Boundaries and qualification
 
+The independent WinMM drainer keeps128native200ms buffers (25.6seconds,
+819200PCMbytes), requeuing a ready batch before handing blocks to the bounded
+30second software queue. Reserve capacity adds no intentional batching wait.
+Short native scheduling stalls can be absorbed; this is not a claim that the
+cause of a particular earlier ring exhaustion is known. Exhausted native reserve
+still ends capture with incomplete coverage, retaining header flags, byte counts
+and drainer timings. It never silently resumes or admits buffered fragments as
+fresh commands. A new listener uses supported exact-device/ownership checks.
+
 Polling consumes speech only while Polygon's turn is active. When it ends or the
 desktop sleeps/closes, audio/ASR may continue but replies need Polygon to resume
 through its supported host. This implementation does not provide independent

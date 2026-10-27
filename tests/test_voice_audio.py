@@ -1,5 +1,6 @@
 from array import array
 import json
+import ctypes
 from pathlib import Path
 import subprocess
 import tempfile
@@ -17,6 +18,45 @@ from skyrim_autotest.voice_listener import Session, main
 
 def pcm(value=0):
     return array('h', [value] * BLOCK_SAMPLES).tobytes()
+
+
+class NativeRing:
+    def __init__(self, complete=1, partial=False):
+        self.headers, self.queues, self.unprepared = [], 0, 0
+        self.initial_complete, self.partial, self.closed = complete, partial, False
+
+    def waveInOpen(self, handle, *args):
+        handle._obj.value = 1
+        return 0
+
+    def waveInPrepareHeader(self, handle, header, *args):
+        self.headers.append(header._obj)
+        return 0
+
+    def waveInAddBuffer(self, handle, header, *args):
+        header._obj.flags = 2 | 16
+        header._obj.recorded = 0
+        self.queues += 1
+        return 0
+
+    def complete(self, count):
+        for index, header in enumerate(self.headers[:count]):
+            ctypes.memmove(header.data, pcm(index + 1), BLOCK_SAMPLES * 2)
+            header.recorded = BLOCK_SAMPLES * 2 - (2 if self.partial else 0)
+            header.flags = 2 | voice_audio.WHDR_DONE
+
+    def waveInStart(self, *args):
+        self.complete(self.initial_complete)
+        return 0
+
+    def waveInStop(self, *args): return 0
+    def waveInReset(self, *args): return 0
+    def waveInUnprepareHeader(self, *args):
+        self.unprepared += 1
+        return 0
+    def waveInClose(self, *args):
+        self.closed = True
+        return 0
 
 
 class VoiceAudioTests(unittest.TestCase):
@@ -203,10 +243,63 @@ class VoiceAudioTests(unittest.TestCase):
         with patch.object(voice_audio, 'api', return_value=fake):
             stream = voice_audio.capture(0)
             self.assertEqual(len(next(stream)), BLOCK_SAMPLES * 2)
-            self.assertEqual(fake.calls.count('queue'), 17)
+            self.assertEqual(fake.calls.count('queue'), voice_audio.NATIVE_BUFFER_COUNT + 1)
             stream.close()
-        self.assertEqual(fake.calls.count('unprepare'), 16)
+        self.assertEqual(fake.calls.count('unprepare'), voice_audio.NATIVE_BUFFER_COUNT)
         self.assertEqual(fake.calls[-1], 'close')
+
+    def test_native_ring_returns_entire_ready_burst_before_yielding_to_consumer(self):
+        fake = NativeRing(complete=16)
+        with patch.object(voice_audio, 'api', return_value=fake), \
+             patch.object(voice_audio.time, 'time', return_value=1000.):
+            stream = voice_audio._capture_blocks(0, threading.Event())
+            try:
+                first = next(stream)
+                self.assertEqual(first, pcm(1))
+                self.assertEqual(fake.queues, voice_audio.NATIVE_BUFFER_COUNT + 16)
+                self.assertFalse(any(header.flags & voice_audio.WHDR_DONE for header in fake.headers))
+                blocks = [first] + [next(stream) for _ in range(15)]
+                self.assertEqual(blocks, [pcm(index + 1) for index in range(16)])
+                self.assertAlmostEqual(blocks[-1].captured_at - blocks[0].captured_at, 3.)
+            finally:
+                stream.close()
+        self.assertTrue(fake.closed)
+        self.assertEqual(fake.unprepared, voice_audio.NATIVE_BUFFER_COUNT)
+
+    def test_native_reserve_exhaustion_retains_header_and_drain_timing_without_replay(self):
+        fake = NativeRing()
+        now = [100.]
+        with patch.object(voice_audio, 'api', return_value=fake), \
+             patch.object(voice_audio.time, 'monotonic', side_effect=lambda: now[0]):
+            stream = voice_audio._capture_blocks(0, threading.Event())
+            self.assertEqual(next(stream), pcm(1))
+            fake.complete(voice_audio.NATIVE_BUFFER_COUNT)
+            now[0] += 26.
+            with self.assertRaisesRegex(CaptureGap, 'possible audio gap') as caught:
+                next(stream)
+        diagnostic = caught.exception.diagnostics
+        self.assertEqual(diagnostic['reason'], 'native-reserve-exhausted')
+        self.assertEqual(diagnostic['nativeBufferCount'], 128)
+        self.assertEqual(diagnostic['nativeReserveSeconds'], 25.6)
+        self.assertEqual(diagnostic['completedHeaders'], 128)
+        self.assertEqual(diagnostic['drainedBlocks'], 1)
+        self.assertEqual(diagnostic['sinceLastDrainSeconds'], 26)
+        self.assertEqual(len(diagnostic['headerFlags']), 128)
+        self.assertEqual(diagnostic['recordedBytes'], [BLOCK_SAMPLES * 2] * 128)
+        self.assertFalse(diagnostic['coverageEstablished'])
+        self.assertIsNone(diagnostic['missingSamples'])
+        self.assertIn('"reason": "native-reserve-exhausted"', str(caught.exception))
+        self.assertTrue(fake.closed)
+
+    def test_partial_native_block_records_actual_bytes_and_never_yields_audio(self):
+        fake = NativeRing(partial=True)
+        with patch.object(voice_audio, 'api', return_value=fake):
+            with self.assertRaises(CaptureGap) as caught:
+                next(voice_audio._capture_blocks(0, threading.Event()))
+        self.assertEqual(caught.exception.diagnostics['reason'], 'partial-input-block')
+        self.assertEqual(caught.exception.diagnostics['recordedBytes'][0], BLOCK_SAMPLES * 2 - 2)
+        self.assertEqual(caught.exception.diagnostics['drainedBlocks'], 0)
+        self.assertTrue(fake.closed)
 
     def test_exhausted_capture_ring_never_claims_complete_audio(self):
         class Fake:
