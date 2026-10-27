@@ -7,6 +7,36 @@ preparation steps, mutex, heartbeat, guardian and restoration. It starts no
 receiver, microphone, model, speech output, game or recovery process of its own.
 The default executor remains a bounded one-shot run when this option is absent.
 
+The SE source candidate additionally admits strict read-only
+`inspect kind=world_observer` requests over this same owned transport. This is
+not admitted into a previously frozen platform automatically. Polygon must
+separately qualify the exact Observer, SKEE/OBody providers and new executor
+candidate; updating source creates no game or subject-test authorization.
+Snapshot fields are `refs`, `nodes`, `actors`, `skee`, `obody`, `cbpc` and
+`timeoutMs`, with strict bounded subfields and no mutation/capture escape.
+`capabilities` accepts only `kind` and `action`. This additive contract is SE
+only; existing VR observations keep their separate qualified route.
+
+For example, submit the following machine command through the current run's
+ordinary command channel with `sourceId:operator.actions` and a fresh event ID:
+
+```json
+{"schemaVersion":1,"operation":"tool","tool":"inspect",
+ "args":{"kind":"world_observer","refs":["0x14"],"actors":true,
+   "skee":{"refs":["0x14"],"morphs":["Breasts","Waist"]},
+   "obody":{"refs":["0x14"],"afterSequence":0,"maximumEvents":64},"timeoutMs":1500},
+ "timeoutSeconds":2}
+```
+
+Replace actor IDs and morph names with the actual fixture. Results use the
+existing inline/artifact registry and retain raw availability/quality/epoch/loss
+fields. A delivered or recorded read does not mean complete observations or a
+passed subject assertion. Do not infer contact negatives, application/render
+completion, continuous root identity or save/load support from this read route.
+Snapshot timeout defaults to1500ms, must be100..3000ms and fit the enclosing
+command deadline. Query JSON is capped at16KiB; physics capture, setters and
+extra fields are rejected before delivery. Sound and launch handling are unchanged.
+
 The operator's separate, explicit authorization for an interactive session must
 be recorded in the ordinary platform attempt. Do not replay an old one-shot
 order to obtain a held-open game. Keep this platform setting outside schema-2

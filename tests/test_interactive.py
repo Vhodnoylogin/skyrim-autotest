@@ -124,6 +124,34 @@ class InteractiveTests(unittest.TestCase):
         self.assertEqual(len(self.session.phases), 1)
         self.assertEqual(self.bus.status(result['sessionId'])['commands'], {'completed': 2})
 
+    def test_se_observer_read_uses_existing_owned_transport_once(self):
+        args = {'kind':'world_observer','refs':['0x14'],'actors':True,
+            'skee':{'refs':['0x14'],'morphs':['Zero']},'obody':{'refs':['0x14']},'timeoutMs':100}
+        def ready():
+            if self.session.state.get('interactiveSession'):
+                self.send('observer', {'schemaVersion':1,'operation':'tool','tool':'inspect',
+                    'args':args,'timeoutSeconds':.5})
+                self.send('finish')
+        self.session.on_save = ready
+        result = self.run_loop()
+        self.assertEqual(result['reason'],'owner-finished')
+        self.assertEqual(len(self.session.calls),1)
+        self.assertEqual(self.session.calls[0][:2],('inspect',args))
+        self.assertEqual(self.session.actions,[])
+        self.assertEqual(self.bus.status(result['sessionId'])['commands'],{'completed':2})
+
+    def test_se_observer_read_cannot_smuggle_mutation_or_vr_provider(self):
+        for extra in ({'command':'save'},{'physics':{'captureAction':'start'}},{'skee':{'refs':[20],'morphs':['x'],'set':1}}):
+            args = {'kind':'world_observer','timeoutMs':100,**extra}
+            request = {'schemaVersion':1,'operation':'tool','tool':'inspect','args':args,'timeoutSeconds':1}
+            with self.assertRaises(interactive.InteractiveError):
+                interactive._request(json.dumps(request),self.settings,self.session)
+        self.session.state['configuration']['game_edition'] = 'vr'
+        with self.assertRaises(interactive.InteractiveError):
+            interactive._request(json.dumps({'schemaVersion':1,'operation':'tool','tool':'inspect',
+                'args':{'kind':'world_observer','action':'capabilities'},'timeoutSeconds':1}),self.settings,self.session)
+        self.assertEqual(self.session.calls,[])
+
     def test_one_delivered_mutation_and_duplicate_event_never_executes_twice(self):
         def ready():
             if self.session.state.get('interactiveSession'):

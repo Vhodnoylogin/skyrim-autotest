@@ -91,7 +91,13 @@ def _request(text, settings, session):
     if edition == 'se' and tool in ('driver', 'native14'):
         raise InteractiveError('VR-only tool is unavailable in this SE session')
     if tool == 'inspect':
-        if set(args) != {'kind'} or args['kind'] not in ('state', 'scene', 'mods', 'player'):
+        if args.get('kind') == 'world_observer':
+            from .observer_query import validate as validate_observer_query
+            try:
+                validate_observer_query(args, timeout, edition)
+            except ValueError as exc:
+                raise InteractiveError(str(exc)) from exc
+        elif set(args) != {'kind'} or args['kind'] not in ('state', 'scene', 'mods', 'player'):
             raise InteractiveError('Interactive inspect supports state, scene, mods or player reads only')
     elif tool == 'menu':
         if args.get('action') == 'list':
