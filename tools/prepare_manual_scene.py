@@ -21,7 +21,7 @@ def write(path, value):
         stream.write('\n')
 
 
-def prepare(base_config, scene_inputs, output, maximum_seconds=6900, initial_world_only=False):
+def prepare(base_config, scene_inputs, output, maximum_seconds=6900, initial_world_only=False, native_fixture_transfer=False):
     if type(maximum_seconds) is not int or not 1 <= maximum_seconds <= 14100:
         raise ValueError('Explicit held window must fit the original outer window minus300seconds')
     output = Path(output).resolve()
@@ -38,6 +38,9 @@ def prepare(base_config, scene_inputs, output, maximum_seconds=6900, initial_wor
     cell = 'RealmLorkhan' if initial_world_only else 'QASmoke'
     if initial_world_only:
         config.pop('se_fixture_anchor', None)
+    if native_fixture_transfer:
+        if initial_world_only: raise ValueError('Native fixture transfer and initial-world-only are mutually exclusive')
+        config['se_fixture_transition'] = 'qasmoke-marker-moveto-v1'
     config['runtime'] = str(output / 'runtime')
     settings = config['interactive_session']
     settings.update(maximumSeconds=maximum_seconds, manageCommandEndpoint=True,
@@ -107,5 +110,7 @@ if __name__ == '__main__':
     for name in ('base-config', 'scene-inputs', 'output'): parser.add_argument('--' + name, required=True)
     parser.add_argument('--maximum-seconds', type=int, default=6900)
     parser.add_argument('--initial-world-only', action='store_true')
+    parser.add_argument('--native-fixture-transfer', action='store_true')
     args = parser.parse_args()
-    print(json.dumps(prepare(args.base_config, args.scene_inputs, args.output, args.maximum_seconds, args.initial_world_only), indent=2))
+    print(json.dumps(prepare(args.base_config, args.scene_inputs, args.output, args.maximum_seconds,
+                             args.initial_world_only, args.native_fixture_transfer), indent=2))

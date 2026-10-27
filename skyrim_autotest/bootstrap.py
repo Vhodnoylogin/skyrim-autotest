@@ -509,9 +509,19 @@ def prepare_gameplay(session, scenario):
         already_in_cell = ((fixture or new_game) and loaded_scene.get('playerLoaded') is True and
                            loaded_scene.get('cell', {}).get('editorId') == cell)
         if not already_in_cell:
-            session.tool('console', {'action': 'exec', 'command': 'coc ' + cell})
-            session.log('gameplay-fixture-cell-requested', cell=cell,
-                        afterInitialNewGameWorld=bool(new_game), subjectStarted=False)
+            if session.state.get('configuration', {}).get('se_fixture_transition') is not None:
+                if not platform_new_game or cell != 'QASmoke' or fixture:
+                    raise AssertionError('Native fixture transfer requires the owned New Game QASmoke initialization')
+                from .fixture_anchor import transition_to_anchor
+                session.phase('gameplay-native-fixture-transfer', 45)
+                transition_to_anchor(session, time.monotonic() + 30, initial.read)
+                session.phase('gameplay-native-fixture-destination', 105)
+                session.log('gameplay-fixture-cell-requested', cell=cell,
+                            transport='native-marker-moveto', afterInitialNewGameWorld=True, subjectStarted=False)
+            else:
+                session.tool('console', {'action': 'exec', 'command': 'coc ' + cell})
+                session.log('gameplay-fixture-cell-requested', cell=cell,
+                            afterInitialNewGameWorld=bool(new_game), subjectStarted=False)
         elif already_in_cell:
             session.log('gameplay-cell-transition-skipped', cell=cell,
                         reason='initialized fixture/new game already loaded in declared cell')
@@ -522,7 +532,18 @@ def prepare_gameplay(session, scenario):
         # New-game scripts may post their notification only after cell loading.
         # Re-read the world after answering a classified notification.
         scene = session.tool('inspect', {'kind': 'scene'})
+    if session.state.get('fixtureTransition') is not None:
+        session.phase('gameplay-native-fixture-stabilization', 135)
     scene, menus = wait_gameplay_ready(session, cell, False, lifecycle_poll=initial.read)
+    transfer = session.state.get('fixtureTransition')
+    if transfer is not None:
+        if (transfer.get('recipe') != 'qasmoke-marker-moveto-v1' or transfer.get('status') != 'returned' or
+                transfer.get('nativeCallbackReturned') is not True or transfer.get('game') != session.state.get('game') or
+                cell != 'QASmoke' or scene.get('cell', {}).get('formId') != '0x00032AE7'):
+            raise AssertionError('Native marker transfer lacks exact owned destination evidence')
+        transfer.update(status='arrived', cellReadinessVerified=True, destinationScene=scene, destinationMenus=menus)
+        session.save()
+        session.log('fixture-transition-arrival-verified', snapshot=transfer)
     initial.complete(scene, menus)
     anchor = None
     if session.state.get('configuration', {}).get('se_fixture_anchor') is not None:

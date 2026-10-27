@@ -1,4 +1,5 @@
 import copy
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -151,3 +152,19 @@ class ManualSceneTests(unittest.TestCase):
         self.assertEqual(notices[1][1]['positionDeltaGameUnits'], 2)
         self.assertEqual([e['args']['action'] for e in calls if e.get('tool') == 'input'], ['capabilities', 'down', 'up'])
         self.assertFalse(notices[0][1]['sixActorSceneReady'])
+
+    def test_world_finish_passes_actual_companion_assertion_and_finish_contract(self):
+        from test_subject_companion import Fixture
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = Fixture(Path(temporary))
+            plan = json.loads(fixture.plan.read_text(encoding='utf-8'))
+            plan['checks'] = [{'name': manual_scene.CASE, 'role': 'subject'}]
+            plan.pop('cases', None)
+            fixture.plan.write_text(json.dumps(plan), encoding='utf-8')
+            fixture.client.result = {'playerLoaded': True, 'position': [1.0, 2.0, 3.0]}
+            companion = fixture.companion()
+            manual_scene.run_world_plan(companion.exchange, companion.emit,
+                lambda: {'sequence': 1, 'sourceRef': 'owner-stop', 'action': 'finish'},
+                lambda kind, value: None, 'autotest-exact-owned-run')
+            self.assertTrue(companion.finish_completed)
+            self.assertEqual(companion.assertions[manual_scene.CASE], ['passed'])

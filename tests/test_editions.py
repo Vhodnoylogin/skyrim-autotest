@@ -43,6 +43,15 @@ class EditionTests(unittest.TestCase):
         self.assertEqual(config.P.required_mods, ['DevBench'])
         self.assertNotIn('openvr_paths', config.P.value)
 
+    def test_qasmoke_native_transition_requires_exact_se_startup_and_anchor(self):
+        valid = dict(self.value, se_new_game_ui=True, se_fixture_anchor='qasmoke-west-navmesh-v1',
+                     se_fixture_transition='qasmoke-marker-moveto-v1')
+        self.assertEqual(config.configure(valid)['se_fixture_transition'], 'qasmoke-marker-moveto-v1')
+        for change in ({'se_new_game_ui': False}, {'se_fixture_anchor': None},
+                       {'se_fixture_transition': 'unknown'}, {'game_edition': 'vr'}):
+            with self.subTest(change=change), self.assertRaises(config.ConfigurationError):
+                config.configure(dict(valid, **change))
+
     def test_vr_default_and_discovery_paths_remain_separate(self):
         self.assertEqual(editions.target({})['executable'], 'SkyrimVR.exe')
         for edition in ('se', 'vr'):

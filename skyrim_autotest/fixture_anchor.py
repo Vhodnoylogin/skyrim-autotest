@@ -16,6 +16,7 @@ from .readiness_state import gameplay_ready
 
 
 RECIPE = "qasmoke-west-navmesh-v1"
+TRANSITION_RECIPE = "qasmoke-marker-moveto-v1"
 TARGET = {"plugin": "Dragonborn.esm", "localId": "02A1B9"}
 TARGET_POSITION = [-2633.919189453125, 1521.9630126953125, 6976.0]
 OFFSET = [-116.08081, 14.03699, 0.0]
@@ -45,6 +46,115 @@ def _qualify(backend):
             checked = validate_description(script, description, scope, {function: params})[0]
             if checked["native"] is not True or str(checked["returnType"]).casefold() != returns:
                 raise BindingError("QA anchor native metadata differs for " + script + "." + function)
+
+
+def transition_to_anchor(session, deadline, initial_read):
+    """Request one native marker transition during the initial owned New Game.
+
+    A returned callback does not establish cell loading or gameplay readiness.
+    The common bootstrap performs those observations before completing its world.
+    """
+    config = copy.deepcopy(session.state.get("configuration", {}))
+    if (config.get("se_fixture_transition") != TRANSITION_RECIPE
+            or config.get("se_fixture_anchor") != RECIPE
+            or config.get("game_edition") != "se" or config.get("se_new_game_ui") is not True):
+        raise BindingError("QA marker transition requires the explicit SE native New Game and anchor recipes")
+    bounded_deadline(deadline)
+    if not callable(initial_read):
+        raise BindingError("QA marker transition requires the current initial lifecycle reader")
+    if session.state.get("fixtureTransition") or session.state.get("fixtureAnchor"):
+        raise BindingError("QA marker transition or anchor was already attempted; never replay")
+    backend = Backend(session, deadline)
+    game = copy.deepcopy(session.state.get("game"))
+    run_id = session.state.get("id")
+    generation = session.state.get("ownedWorldGeneration", 0)
+    initial = session.state.get("initialWorldTransition")
+    if not isinstance(run_id, str) or not run_id or not isinstance(initial, dict):
+        raise BindingError("QA marker transition requires an exact initial owned run")
+
+    def owned():
+        state = session.state
+        if (state.get("id") != run_id or state.get("configuration") != config
+                or not game or state.get("game") != game or not native.alive(game)
+                or not state.get("testProfile") or type(generation) is not int or generation < 0
+                or state.get("ownedWorldGeneration", 0) != generation
+                or state.get("initialWorldTransition") is not initial
+                or initial.get("mode") != "new-game" or initial.get("completed") is not False
+                or initial.get("worldInvalidated") is True or initial.get("beforeGame") != game
+                or state.get("ownedLoadTransition") or state.get("interactiveSession")
+                or state.get("interactiveActorFixtures") or state.get("fixtureAnchor")
+                or state.get("gameplayBootstrap", {}).get("completed") is True):
+            raise BindingError("QA marker transition requires the unchanged initial owned New Game before gameplay/NPC actions")
+        backend.remaining()
+
+    def source_ready():
+        owned()
+        if initial_read() != ["newGame"]:
+            raise BindingError("QA marker transition lacks the unique actual initial New Game lifecycle")
+        owned()
+        scene = backend.call("inspect", {"kind": "scene"})
+        menus = backend.call("menu", {"action": "list", "includeFlags": True})
+        if not gameplay_ready(scene, menus) or not isinstance(scene["cell"].get("formId"), str):
+            raise BindingError("QA marker transition requires actual unblocked loaded source gameplay")
+        if scene["cell"].get("formId") == CELL or scene["cell"].get("editorId") == "QASmoke":
+            raise BindingError("QA marker transition cannot repeat an already loaded QASmoke transition")
+        return scene, menus
+
+    scene, menus = source_ready()
+    _qualify(backend)
+    target = actor_domain.form(backend.resolve(TARGET))
+    if int(target, 16) & 0xFFFFFF != int(TARGET["localId"], 16) or int(target, 16) >> 24 >= 0xFE:
+        raise BindingError("QA transition marker resolved to a foreign/dynamic reference")
+    player_inc, player_row, _ = actor_domain.anchor(backend, PLAYER["reference"])
+    target_inc, target_row, _ = actor_domain.anchor(backend, target)
+
+    def identities(current_player, current_marker, current_scene):
+        incarnation, row = current_player
+        if (incarnation != player_inc or row.get("baseForm") != PLAYER["base"]
+                or row.get("loaded3D") is not True or row.get("cellForm") != current_scene["cell"]["formId"]):
+            raise BindingError("QA transition player incarnation/base/loaded source cell changed")
+        incarnation, row = current_marker
+        position = row.get("position")
+        if (incarnation != target_inc or row.get("baseForm") != "0x0000003B" or row.get("cellForm") != CELL
+                or not isinstance(position, list) or len(position) != 3
+                or any(type(x) not in (int, float) or not math.isfinite(x) for x in position)
+                or math.dist(position, TARGET_POSITION) > .01
+                or any(incarnation[key] != player_inc[key] for key in ("sessionId", "loadGeneration"))):
+            raise BindingError("Actual Dragonborn QA transition marker identity/base/cell/position differs")
+
+    identities((player_inc, player_row), (target_inc, target_row), scene)
+    entry = {"recipe": TRANSITION_RECIPE, "status": "intent", "transitionId": uuid.uuid4().hex,
+             "runId": run_id, "game": game, "worldGenerationBefore": generation,
+             "sourceScene": scene, "sourceMenus": menus, "steps": {"MoveTo": "intent"},
+             "target": {**TARGET, "reference": target, "incarnation": target_inc,
+                        "position": target_row["position"], "loaded3D": target_row["loaded3D"]},
+             "playerIncarnation": player_inc, "offsetGameUnits": [0.0, 0.0, 0.0],
+             "nativeCallAttempted": False, "nativeCallbackReturned": False,
+             "cellReadinessVerified": False, "subjectStarted": False,
+             "basis": "native marker MoveTo alternative; original COC crash cause unproven"}
+    session.state["fixtureTransition"] = entry
+    try:
+        session.save()
+        current_scene, _ = source_ready()
+        if current_scene["cell"] != scene["cell"]:
+            raise BindingError("QA transition source cell changed before the native request")
+        identities(actor_domain.anchor(backend, PLAYER["reference"])[:2],
+                   actor_domain.anchor(backend, target)[:2], current_scene)
+        owned()
+        entry["nativeCallAttempted"] = True
+        session.save()
+        _native_call(backend, {"script": "ObjectReference", "function": "MoveTo", "returnType": "none"},
+                     [{"form": target}, 0.0, 0.0, 0.0, False], PLAYER["reference"])
+        owned()
+        entry.update(status="returned", nativeCallbackReturned=True, steps={"MoveTo": "returned"})
+        session.save()
+        session.log("fixture-transition-native-returned", snapshot=copy.deepcopy(entry))
+        return copy.deepcopy(entry)
+    except BaseException as error:
+        entry.update(status="uncertain", reason=str(error))
+        try: session.save()
+        except Exception: pass
+        raise
 
 
 def prepare_anchor(session, deadline):

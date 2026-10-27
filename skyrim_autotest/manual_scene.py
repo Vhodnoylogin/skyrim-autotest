@@ -29,7 +29,10 @@ def run_world_plan(exchange, emit, next_command, notify, input_owner):
                 any(type(n) not in (int, float) or not math.isfinite(n) for n in pos)):
             raise ValueError('Actual loaded world and player position unavailable')
         return raw
-    notify('scene-ready', {'stage': 'initial-world-control', 'scene': scene(), 'actors': {},
+    initial = scene()
+    emit({'kind': 'assertion', 'caseId': CASE, 'check': 'initial-world-loaded-position-observed',
+          'actual': initial['playerLoaded'], 'expected': True, 'outcome': 'passed'})
+    notify('scene-ready', {'stage': 'initial-world-control', 'scene': initial, 'actors': {},
                           'sixActorSceneReady': False, 'awaitingOwnerCommands': True})
     commands = 0
     while True:

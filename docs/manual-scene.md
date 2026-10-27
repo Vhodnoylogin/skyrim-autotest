@@ -39,3 +39,17 @@ before expiry; do not renew deadlines or shut down merely because setup finished
 Audio is separate: use `voice_operator` with the actual selected microphone and
 current Polygon binding, keep polling, and verify fresh recognized speech. A
 live audio queue cannot answer while the AI host is idle; keep Polygon active.
+
+For isolated movement/observation in the initial Realm of Lorkhan, pass
+`--initial-world-only`. That scene explicitly reports no prepared NPCs and stays
+open for short move/inspect commands. Its finite game owner must not be replaced
+or its frozen program edited during the session.
+
+For a new QASmoke scene, `--native-fixture-transfer` explicitly selects the
+typed native player MoveTo route to the pinned persistent Dragonborn marker.
+The common executor resolves and validates the actual unloaded marker, records
+one transition intent and invokes MoveTo once. Actual destination/menu/world
+readiness and the west-room anchor are still mandatory afterward. A native
+callback is not arrival proof. Unknown outcomes never retry or fall back to COC.
+This is an alternative to the failing unpaused COC route; it is not an engine
+null-light patch or an assertion that the original graphics defect is diagnosed.
