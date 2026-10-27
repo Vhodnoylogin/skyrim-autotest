@@ -38,6 +38,8 @@ class FixtureSession:
         self.metadata_overrides = {}
         self.on_mutation = lambda function: None
         self.bad_position, self.actor_sex = False, 1
+        self.native_identity_hook = lambda raw: None
+        self.identity_reads = 0
 
     def log(self, *args, **kwargs): self.logs.append((args, kwargs))
     def save(self): self.saved.append(copy.deepcopy(self.state))
@@ -46,6 +48,14 @@ class FixtureSession:
         self.calls.append((tool, copy.deepcopy(args)))
         if tool == "menu":
             return {"messageBoxOpen": False, "openMenus": [], "menuStates": []}
+        if tool == "npc_persistence":
+            if args["action"] != "identity": raise AssertionError("Unexpected native persistence action")
+            self.identity_reads += 1
+            raw = {"protocol": "npc-persistence/1", "pid": self.state["game"]["pid"], "providerSession": "native-session",
+                   "persistent": True, "currentReference": args["reference"], "base": args["base"],
+                   "currentVmHandle": "9001", "runtimeHandle": self.handle}
+            self.native_identity_hook(raw)
+            return raw
         if tool == "inspect":
             if args["kind"] == "scene":
                 return {"playerLoaded": True, "cell": {"editorId": "QASmoke"}}
@@ -145,6 +155,45 @@ class FixtureActorTests(unittest.TestCase):
                                                    "args": ["0x000CDD84"]}, time.monotonic() + 10, POLICY)
         self.assertEqual(result["result"]["actor"]["race"], "0x000CDD84")
         self.assertEqual([call["function"] for call in self.session.mutations].count("SetRace"), 1)
+
+    def test_explicit_persistent_creation_requires_frozen_optin_and_records_exact_native_argument(self):
+        request = dict(REQUEST, persistentForOwnedSave=True)
+        with self.assertRaisesRegex(ValueError, "opt-in"):
+            self.create(request)
+        self.assertEqual(self.session.mutations, [])
+        self.session.state["configuration"]["interactive_session"]["npcPersistence"] = True
+        result = self.create(request)
+        self.assertEqual(self.session.mutations[0]["args"], [{"form": BASE}, 1, True, False])
+        entry = fixture_actors.require_fixture(self.session, {"reference": REF, "base": BASE})
+        self.assertTrue(entry["creationWitness"]["forcePersist"])
+        self.assertEqual(entry["createdReference"], result["actor"]["reference"])
+        self.assertTrue(result["actor"]["persistentSaveWitnessAvailable"])
+        self.assertEqual(entry["nativePersistentIdentity"]["currentVmHandle"], "9001")
+        self.assertEqual(self.session.identity_reads, 2)
+
+    def test_persistent_flag_rejects_coerced_boolean_before_creation(self):
+        for value in (1, "true", None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.create(dict(REQUEST, persistentForOwnedSave=value))
+        self.assertEqual(self.session.mutations, [])
+
+    def test_requested_force_persist_with_false_actual_native_flag_never_becomes_created(self):
+        self.session.state["configuration"]["interactive_session"]["npcPersistence"] = True
+        self.session.native_identity_hook = lambda raw: raw.update(persistent=False)
+        with self.assertRaisesRegex(ValueError, "persistent native"):
+            self.create(dict(REQUEST, persistentForOwnedSave=True))
+        self.assertEqual(self.session.state["interactiveActorFixtures"]["M1"]["status"], "uncertain")
+        self.assertEqual([entry["function"] for entry in self.session.mutations], ["PlaceAtMe"])
+        with self.assertRaises(ValueError): self.create(dict(REQUEST, persistentForOwnedSave=True))
+
+    def test_changed_native_vm_across_creation_placement_is_uncertain_and_not_replayed(self):
+        self.session.state["configuration"]["interactive_session"]["npcPersistence"] = True
+        def changed(raw):
+            if self.session.identity_reads > 1: raw["currentVmHandle"] = "9002"
+        self.session.native_identity_hook = changed
+        with self.assertRaisesRegex(ValueError, "identity changed"):
+            self.create(dict(REQUEST, persistentForOwnedSave=True))
+        self.assertEqual(self.session.state["interactiveActorFixtures"]["M1"]["status"], "uncertain")
 
     def test_old_completed_or_uncertain_tag_is_never_replayed(self):
         self.create()

@@ -30,7 +30,7 @@ class InteractiveError(ValueError):
 
 def validate(settings):
     required = {'channelConfig', 'maximumSeconds', 'allowedTools', 'sourceId'}
-    if (type(settings) is not dict or not required <= set(settings) or set(settings) - required - {'nativeBindings'} or
+    if (type(settings) is not dict or not required <= set(settings) or set(settings) - required - {'nativeBindings','npcPersistence','morphSession'} or
             not isinstance(settings['channelConfig'], str) or not Path(settings['channelConfig']).is_absolute()):
         raise InteractiveError('interactive_session requires explicit channelConfig, maximumSeconds, allowedTools and sourceId')
     maximum, allowed = settings['maximumSeconds'], settings['allowedTools']
@@ -45,6 +45,12 @@ def validate(settings):
     if 'nativeBindings' in settings:
         from .interactive_bindings import validate as validate_bindings
         result['nativeBindings'] = validate_bindings(settings['nativeBindings'])
+    if 'npcPersistence' in settings:
+        if type(settings['npcPersistence']) is not bool: raise InteractiveError('npcPersistence requires an explicit boolean')
+        if settings['npcPersistence'] and not result.get('nativeBindings'): raise InteractiveError('NPC persistence requires frozen native actor bindings')
+    if 'morphSession' in settings:
+        from .morph_session import validate_config
+        result['morphSession'] = validate_config(settings['morphSession'],result.get('nativeBindings'))
     return result
 
 
@@ -83,7 +89,11 @@ def _request(text, settings, session):
     tool, args, timeout = value['tool'], value['args'], value['timeoutSeconds']
     if tool not in settings['allowedTools'] or type(args) is not dict:
         raise InteractiveError('Tool is outside the explicit interactive allowlist or args is not an object')
-    if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 30:
+    domain_request = args.get('request') if isinstance(args.get('request'),dict) else {}
+    load_request = (tool=='platform' and args.get('operation')=='object.perform' and
+        domain_request.get('domain')=='save-state' and domain_request.get('action')=='load-owned-disposable-once')
+    maximum_timeout = 90 if load_request else 30
+    if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= maximum_timeout:
         raise InteractiveError('Action timeoutSeconds must be finite in (0,30]')
     if changes_reference_world(tool, args):
         raise InteractiveError('Interactive requests cannot load, replace or delete the reference world')
@@ -129,6 +139,13 @@ def _request(text, settings, session):
         from . import platform, preset_domain
         platform.validate(args)
         operation, request = args.get('operation'), args.get('request', {})
+        from . import morph_session
+        if morph_session.validate(operation,request):
+            if edition!='se' or not settings.get('morphSession') or not settings.get('nativeBindings'):
+                raise InteractiveError('Morph domains require the explicit frozen SE morph session and actor bindings')
+            if request.get('domain')=='save-state' and not settings.get('npcPersistence'):
+                raise InteractiveError('Owned save/load requires explicit NPC persistence opt-in')
+            return value
         if not (operation in platform.READS or
                 operation == 'controller.perform' and request.get('action') in platform.ACTIONS['controller.perform'] or
                 operation == 'object.perform' and request.get('action') in preset_domain.ACTIONS):
@@ -316,10 +333,15 @@ def run(session, settings):
                     result = create(session, request['request'], deadline, settings['nativeBindings'])
                 else:
                     keyboard_owned |= request['tool'] == 'input' and request['args'].get('action') == 'down'
-                    if request['tool'] == 'platform' and request['args'].get('operation') == 'object.perform':
+                    if (request['tool'] == 'platform' and request['args'].get('operation') == 'object.perform' and
+                            not request['args'].get('request',{}).get('domain')):
                         from .fixture_actors import guard
                         guard(session, request['args']['request']['actor'], deadline, settings['nativeBindings'])
-                    result = session.tool(request['tool'], request['args'], timeout=remaining, deadline=deadline)
+                    if request['tool']=='platform': session.state['activeSemanticCommandId']=command['id']
+                    try:
+                        result = session.tool(request['tool'], request['args'], timeout=remaining, deadline=deadline)
+                    finally:
+                        session.state.pop('activeSemanticCommandId',None)
                 result = _completion_result(session, command['id'], result)
                 session.log('interactive-action-result', commandId=command['id'], result=result)
                 if time.monotonic() > deadline:

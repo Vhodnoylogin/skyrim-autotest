@@ -11,7 +11,8 @@ def prepare_required_mapping_probe(session, target):
     scenario = session.state['scenario']
     save_actions = {'save_game', 'load_game', 'restart_game'}
     steps = [*scenario.get('steps', []), *scenario.get('postSteps', [])]
-    required = bool(scenario.get('fixture')) or any(
+    npc = session.state.get('configuration',{}).get('interactive_session',{}).get('npcPersistence') is True
+    required = npc or bool(scenario.get('fixture')) or any(
         step.get('tool') == 'platform' and step.get('args', {}).get('operation') == 'input.perform'
         and step['args'].get('request', {}).get('action') in save_actions for step in steps)
     session.state['ownedSaveMappingRequired'] = required
@@ -32,6 +33,15 @@ def prepare_mapping_probe(session, target):
         raise ValueError('Save mapping probe must precede game launch')
     if target.resolve()!=Path(state['ownedSaveDirectory']).resolve():
         raise ValueError('Mapping probe outside owned save directory')
+    if state.get('configuration',{}).get('interactive_session',{}).get('npcPersistence') is True:
+        marker,nonce=uuid.uuid4().hex,uuid.uuid4().hex
+        challenge=target/('Autotest_Map_'+marker+'.probe')
+        with challenge.open('xb') as stream:stream.write(nonce.encode('ascii'))
+        state['ownedSaveMappingProbe']={'kind':'native-nonce/1','marker':marker,'nonce':nonce,
+            'path':str(challenge.resolve()),'sha256':hashlib.sha256(nonce.encode('ascii')).hexdigest(),
+            'preparedBeforeLaunch':True,'preparedAt':time.time()}
+        session.save()
+        return
     fixture=state.get('fixture',{})
     stem=fixture.get('saveStem','')
     if not stem or Path(stem).name!=stem or '/' in stem or '\\' in stem:
@@ -63,6 +73,27 @@ def verify_mo2_save_mapping(backend, target, observed):
     if not all(settings.getboolean('General',key,fallback=False) for key in ('LocalSaves','LocalSettings')):
         raise ValueError('MO2 save mapping requires owned local saves/settings')
     probe=state.get('ownedSaveMappingProbe',{})
+    if probe.get('kind')=='native-nonce/1':
+        marker,nonce=probe.get('marker'),probe.get('nonce')
+        if (not isinstance(marker,str) or not re.fullmatch(r'[0-9a-f]{32}',marker) or
+                not isinstance(nonce,str) or not re.fullmatch(r'[0-9a-f]{32}',nonce) or
+                probe.get('preparedBeforeLaunch') is not True):raise ValueError('Invalid prelaunch native nonce')
+        challenge=target/('Autotest_Map_'+marker+'.probe')
+        if (challenge.is_symlink() or Path(probe.get('path','')).resolve()!=challenge.resolve() or
+                challenge.read_bytes()!=nonce.encode('ascii') or hashlib.sha256(challenge.read_bytes()).hexdigest()!=probe['sha256']):
+            raise ValueError('Owned mapping nonce changed')
+        receipt=backend.call('npc_persistence',{'action':'mapping_probe','marker':marker,'nonce':nonce,
+            'timeoutMs':max(1,min(3000,int(backend.remaining()*1000)))})
+        expected=Path(state['configuration']['skse_logs']).parent/observed
+        if (not isinstance(receipt,dict) or receipt.get('protocol')!='npc-save-mapping/1' or
+                type(receipt.get('pid')) is not int or receipt.get('pid')!=state['game']['pid'] or
+                receipt.get('marker')!=marker or receipt.get('nonce')!=nonce or receipt.get('exactBytes')!=32 or
+                type(receipt.get('exactBytes')) is not int or
+                receipt.get('readOnly') is not True or Path(receipt.get('nativeDirectory','')).resolve()!=expected.resolve()):
+            raise ValueError('Native USVFS read did not prove owned prelaunch save mapping')
+        backend.s.log('owned-save-virtual-mapping-verified',probe=probe,nativeReceipt=receipt,
+            basis='random32-byte prelaunch owned nonce read through native default save directory')
+        return
     marker=probe.get('stem','')
     if (not re.fullmatch(r'Autotest_Map_[0-9a-f]{32}',marker) or probe.get('preparedBeforeLaunch') is not True or
             Path(probe.get('path','')).resolve()!=(target/(marker+'.ess')).resolve()):

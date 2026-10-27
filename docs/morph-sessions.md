@@ -1,0 +1,113 @@
+# Owned SE morph sessions and NPC persistence
+
+This source candidate adds semantic domains for real human presets, independent
+source-to-target measurements and one owned six-NPC save/load. It uses the same
+executor, command channel, guardian, common startup/world readiness and restored
+temporary MO2 profile. Physics and rendered geometry remain outside this contract.
+Build/offline checks alone do not establish a qualified installed platform.
+
+The three layers remain separate: DevBench supplies registered native tools;
+World Observer supplies independent read-only measurements; this external executor
+performs bounded actions, preserves evidence and maps semantic results. No mutation
+was added to World Observer. The prompt/setup/recipes ship in this distribution.
+External audio adapters remain separate and no microphone is opened here.
+
+## Frozen platform opt-in
+
+The SE configuration must opt in to `allow_owned_save_load:true`, an
+`interactive_session` with `npcPersistence:true`, and explicit `nativeBindings`.
+`morphSession` contains logical binding IDs (`status`, `error`, `assigned`,
+`humanWeight`, `beastWeight`, `clear`, `refresh`, `configure`, `race`), the exact
+three `testKeys`, optional independently pinned `providerOwnKeys` and
+`providerKeyEvidence:{sourceCommit,providerSha256}`, the actual staged
+`providerConfigSha256`, and complete `sourceMorphsBySex:{male,female}` catalogs.
+No subject-name lookup selects runtime code. Bindings use exact native metadata
+and guarded actual actors, never arbitrary scripts or raw engine memory.
+
+Additional Actor.UnequipAll and Actor.SetDontMove bindings support reference-only
+fixture inspection. The actual held bus command ID is attached by the executor;
+requests cannot supply it. Every mutation records an intent before invocation.
+A repeated/uncertain command cannot mint a new mutation or replay its native call.
+
+The platform route accepts these documented domains: actor-fixture,
+actor-fixture-identity, actor-fixture-inspection, human-preset-catalog,
+human-provider-config, human-preset, human-preset-state, actor-race, morph-link,
+actor-morph-fixture, actor-morph-link-evaluation and save-state. The full bounded
+request validation is `morph_session.validate`; domain data never contain tool
+addresses, native selectors or provider hashes in the subject order.
+
+Human presets come from OBody's actual paginated catalog and assignment API.
+The fixed configuration file is read through the running game's VFS, hashed and
+compared with the frozen prelaunch pin. This is file evidence, not a claim that
+an internal configuration object was inspected. Genuine automatic generation
+also requires a matching native OBody event after creation intent, no event loss,
+correct provider/world continuity and no prior manual generation/assignment.
+Direct GenActor cannot satisfy it and is never invoked by this adapter.
+
+SKEE aggregates, name presence and complete per-key records come from the
+independent Observer, in batches of at most32 names. Preserve zero, negative and
+available-absent values separately. A missing/truncated/stale read never becomes
+zero. Mapping uses signed sum(source*gain), clamps once, then multiplies its cap;
+weights are not multiplied twice. Subject diagnostic getters are separately
+recorded and never replace those raw source/own-key measurements. Unknown weight
+`-1` is unavailable. Peer comparisons make fresh reads, retain both baselines and
+actual changed entries; they are sampled, not atomic actor-wide snapshots.
+
+Full provider, peer and interval evidence remains in the normal result artifacts
+and step log. The durable working state retains a compact numeric/presence baseline
+with source command/label/full-result hash. A retained baseline is never labelled
+as a fresh observation. This avoids recursively copying large raw envelopes into
+the mutable state file while keeping all comparison inputs and full evidence.
+
+## Persistent references and inspection
+
+`persistentForOwnedSave:true` is allowed only with the explicit opt-in. PlaceAtMe
+uses forcePersist, then two independent native reads verify actual persistence
+and exact VM/reference identity. Names change only the created reference; no NPC
+base or base outfit is edited. Gear is unequipped through a frozen native binding;
+inventory is not deleted. Hold uses SetDontMove and reads the typed movement flag
+plus actual position samples. Slots30..61 and equipped weapon types are read
+directly. No collision-disable command is issued; this is not physical-contact
+qualification. Spoken alias files are data for the operator; raw speech is not
+executed as a machine action and this feature starts no audio process.
+
+One save/load bundle covers exactly six witnessed persistent actors. Before the
+game starts a random32-byte probe is put only in the disposable saves directory;
+the native tool must read that nonce through the actual default MO2 save alias.
+No fake ESS or personal save is needed to prove that mapping. Existing legacy
+pinned-ESS probe behavior is preserved for other configurations.
+
+Save completion requires native lifecycle evidence and an exclusive-readable
+stable ESS/SKSE pair. The authored native SKSE serialization record saves actual
+reference and VM identities. Loading invokes ResolveFormID and ResolveHandle;
+fresh VM object/reference/base and Observer world identities must agree for all
+six actors before one atomic registry rebind. Old handles are invalidated first.
+No old FF ID or matching base alone can authorize adoption.
+
+The held client admits one explicit same-process load for this exact saved tag,
+command ID, frozen configuration, pair, binding and original interactive window.
+Its special load deadline is at most90seconds and does not extend the session.
+The temporary bootstrap/phase exception is allowed only while that delivered
+load is outstanding. One completed six-actor native remap and actual common
+gameplay readiness allow one audited bootstrap update. Other world changes,
+restart, wrong identity, late/uncertain completion and a second load fail closed.
+
+## Build and qualification
+
+`tools/apply_devbench_morph_provider.py` stages authored providers into the exact
+compatible external DevBench fork. Acquire the official SKEE/OBody headers outside
+Git using the URLs/hashes recorded in the dependency recipe. Set
+`AUTOTEST_PROVIDER_API_DIR` to that verified folder for xmake. The script never
+installs or launches. Existing observer SE build instructions remain separate.
+The combined DevBench/OBody API dependency keeps its upstream license notices.
+
+`tools/prepare_morph_qualification.py --help` freezes a dedicated tool-component
+plan from supplied fixture/catalog/registry files. It creates a self-contained
+pinned sequencer for the existing subject companion, nine finite cases, explicit
+platform policy and source/input hashes. It changes no profile, order or hold.
+Only Polygon reviews current human authority, exact installation/ownership,
+recovery closure and finite launch accounting, then runs that package. The cases
+exercise catalog/real automatic events, six persistent references, names/gear/hold,
+assignment, independent signed/zero keys, typed subject/race routes, owned save/load,
+postload identity and exact cleanup. A pass qualifies these component routes;
+it is not acceptance of the subject mod, physics or every future scenario.

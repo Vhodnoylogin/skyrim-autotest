@@ -43,7 +43,9 @@ def main():
     env['PYTHONUTF8']='1'
     checks = []
     def verify(label,command,timeout=60):
-        call(command,empty,env,timeout=timeout)
+        output=call(command,empty,env,timeout=timeout)
+        if label=='fresh-portable-regression-suite':
+            (work/'full-regression.log').write_text(output,encoding='utf-8')
         checks.append(label)
     for name in ('RuntimeFixtures.cpp','RuntimeFixtures.h','PhotographyReadback.cpp','PhotographyReadback.h'):
         relative='native/devbench/'+name
@@ -122,7 +124,7 @@ def main():
         companion='import sys;sys.path.insert(0,sys.argv[1]);from skyrim_autotest.'+module+' import main;raise SystemExit(main(["--help"]))'
         verify('wheel-isolated-'+module,[sys.executable,'-I','-c',companion,str(installed)])
     # Execute tests from the freshly extracted source, never the checkout.
-    test='import sys,unittest;sys.path.insert(0,sys.argv[1]);suite=unittest.defaultTestLoader.discover(sys.argv[1]+"/tests");r=unittest.TextTestRunner(verbosity=1).run(suite);raise SystemExit(not r.wasSuccessful())'
+    test='import sys,unittest;sys.path.insert(0,sys.argv[1]);suite=unittest.defaultTestLoader.discover(sys.argv[1]+"/tests");r=unittest.TextTestRunner(stream=sys.stdout,verbosity=1).run(suite);raise SystemExit(not r.wasSuccessful())'
     verify('fresh-portable-regression-suite',[sys.executable,'-I','-c',test,str(portable)],timeout=300)
     result={'schemaVersion':1,'result':'passed','checks':checks,'artifacts':manifest['artifacts'],'work':str(work)}
     (work/'checks.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')

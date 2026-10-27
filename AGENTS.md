@@ -1,5 +1,13 @@
 # AI-agent instructions: Skyrim Autotest
 
+For explicit SE morph/persistence platforms read docs/morph-sessions.md. Only the
+frozen npcPersistence/morphSession opt-ins admit the owned six-reference save/load
+exception; raw save/world bindings and restarts remain forbidden. Require actual
+SKSE form/VM remap and common postload readiness, not old FF IDs or cached handles.
+Native mutation tools belong in the explicit DevBench fork; Observer remains read-only.
+Tool qualification is separate from subject-mod acceptance. Do not open audio or
+launch a game merely because a fixture/alias/qualification file exists.
+
 Keep auxiliary worktrees beneath the configured workspace root. Keep generated
 builds and logs beneath that workspace, outside source checkouts; never leave
 them in the drive root. Use short subdirectories inside that workspace when a

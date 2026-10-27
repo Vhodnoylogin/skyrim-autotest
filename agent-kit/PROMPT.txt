@@ -5,6 +5,11 @@ included setup/doctor route with actual paths and pins before preflight.
 Use this kit with ChatGPT, Claude or another agent that has Windows command/file
 access. Do not assume this prompt itself provides access to a computer or a game.
 
+For an explicitly frozen SE morph/NPC platform also read docs/morph-sessions.md.
+One guarded six-NPC save/load requires npcPersistence/morphSession opt-ins and
+native form/VM remap proof. Raw save bindings, old FF IDs, direct GenActor and a
+successful tool-component qualification cannot substitute for subject acceptance.
+
 Task supplied by the owner: <MOD, BUILD/LOCATION, BEHAVIOR TO CHECK, SE OR VR,
 ALLOWED EXECUTION SCOPE, TIME/ATTEMPT BUDGET, EXTERNAL CONFIGURATION OR DEPLOYMENT SPEC>.
 

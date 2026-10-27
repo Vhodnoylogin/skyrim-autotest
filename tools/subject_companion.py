@@ -263,6 +263,7 @@ class Companion:
         self.commands, self.bus_events = {}, []
         self.poisoned, self.finish_attempted, self.finish_completed = False, False, False
         self.state_path, self.run_dir, self.end = None, None, None
+        self.owned_load_attempts, self.owned_load_expected = 0, None
         self.save()
 
     def retain(self, label, value=None, raw=None):
@@ -384,6 +385,9 @@ class Companion:
                                     'agentId': 'owned-game-executor'}
                     self.bootstrap = copy.deepcopy(state.get('gameplayBootstrap'))
                     self.executor_hashes = copy.deepcopy(state.get('executorHashes'))
+                    self.frozen_configuration = copy.deepcopy(state.get('configuration'))
+                    self.native_deadline = state.get('deadline')
+                    self.world_generation = state.get('ownedWorldGeneration')
                     self.check_state(state, deadline=end)
                     remaining = state['deadline'] - self.wall() - 5
                     self.end = self.clock() + min(self.maximum, remaining)
@@ -407,29 +411,223 @@ class Companion:
             self.pause(.1)
         raise CompanionError('No unique matching owned interactive run became ready within the wait bound')
 
+    @staticmethod
+    def owned_load_request(envelope):
+        if (type(envelope) is not dict or envelope.get('operation') != 'tool' or envelope.get('tool') != 'platform' or
+                type(envelope.get('args')) is not dict):
+            return None
+        args = envelope['args']
+        req = args.get('request')
+        if (type(req) is not dict or req.get('domain') != 'save-state' or req.get('action') != 'load-owned-disposable-once'):
+            return None
+        if (set(envelope) != {'schemaVersion','operation','tool','args','timeoutSeconds'} or
+                set(args) != {'operation','request'} or args.get('operation') != 'object.perform' or
+                set(req) != {'domain','action','saveLabel','maximumLoads','processRestart'} or
+                type(req.get('maximumLoads')) is not int or req['maximumLoads'] != 1 or req.get('processRestart') is not False or
+                not isinstance(req.get('saveLabel'),str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,79}',req['saveLabel'])):
+            raise CompanionError('Owned load requires its exact bounded same-process semantic request')
+        return req
+
+    def prepare_owned_load(self, envelope, state):
+        req = self.owned_load_request(envelope)
+        if req is None:
+            return None
+        config = state.get('configuration',{})
+        settings = config.get('interactive_session',{})
+        tag = req['saveLabel']
+        record = state.get('npcPersistence',{}).get(tag,{})
+        pair = state.get('ownedSaves',{}).get(tag,{})
+        if (self.owned_load_attempts or config != self.frozen_configuration or config.get('allow_owned_save_load') is not True or
+                settings.get('npcPersistence') is not True or type(settings.get('morphSession')) is not dict or not settings['morphSession'] or
+                record.get('status') != 'saved' or record.get('loadAttempted') is not False or record.get('runId') != self.run_id or
+                record.get('saveTag') != tag or record.get('game') != self.game or record.get('worldGeneration') != self.world_generation or
+                type(self.world_generation) is not int or self.world_generation <= 0 or
+                not isinstance(record.get('bindingId'),str) or not re.fullmatch('[0-9a-f]{32}',record['bindingId']) or
+                type(record.get('fixtures')) is not dict or len(record['fixtures']) != 6 or
+                pair.get('completed') is not True or pair.get('ownedByAttempt') is not True or
+                type(pair.get('files')) is not dict or set(pair['files']) != {'ess','skse'}):
+            raise CompanionError('Owned load is not one frozen unconsumed six-NPC attempt-owned save')
+        for item in pair['files'].values():
+            if (type(item) is not dict or not isinstance(item.get('sha256'),str) or not re.fullmatch('[0-9a-f]{64}',item['sha256']) or
+                    type(item.get('bytes')) is not int or item['bytes'] <= 0):
+                raise CompanionError('Owned load pair lacks exact completed file hashes')
+        saved=record.get('savedReceipt',{})
+        rows=saved.get('actors',[]) if isinstance(saved,dict) else []
+        if (type(saved) is not dict or saved.get('protocol')!='npc-persistence/1' or type(saved.get('schemaVersion')) is not int or
+                saved['schemaVersion']!=1 or saved.get('phase')!='saved' or saved.get('bindingId')!=record['bindingId'] or
+                saved.get('runId')!=self.run_id or saved.get('saveTag')!=tag or type(saved.get('pid')) is not int or saved['pid']!=self.game['pid'] or
+                not isinstance(saved.get('providerSession'),str) or not saved['providerSession'] or
+                type(saved.get('saveOrdinal')) is not int or saved['saveOrdinal']<=0 or
+                type(saved.get('loadOrdinal')) is not int or saved['loadOrdinal']<0 or
+                not isinstance(rows,list) or len(rows)!=6 or any(type(row) is not dict for row in rows) or
+                {row.get('tag') for row in rows}!=set(record['fixtures'])):
+            raise CompanionError('Owned load requires its exact actual six-actor serialized save receipt')
+        seen_refs,seen_vm=set(),set()
+        for row in rows:
+            fixture=record['fixtures'][row['tag']]
+            ref,vm=row.get('savedReference'),row.get('savedVmHandle')
+            if (not isinstance(ref,str) or not re.fullmatch(r'0xFF[0-9A-Fa-f]{6}',ref) or ref in seen_refs or ref!=fixture.get('reference') or
+                    not isinstance(vm,str) or not re.fullmatch(r'[1-9][0-9]{0,19}',vm) or int(vm)>=2**64 or vm in seen_vm or
+                    row.get('currentReference')!=ref or row.get('currentVmHandle')!=vm or row.get('persistent') is not True or
+                    row.get('creationId')!=fixture.get('creationId') or row.get('base')!=fixture.get('base') or
+                    row.get('runtimeHandle')!=fixture.get('savedObservation',{}).get('incarnation',{}).get('runtimeHandle')):
+                raise CompanionError('Saved actor lacks an actual unique persistent serialized reference/VM identity')
+            seen_refs.add(ref);seen_vm.add(vm)
+        return {'saveTag':tag,'record':copy.deepcopy(record),'pair':copy.deepcopy(pair),
+                'history':copy.deepcopy(state.get('ownedLoadHistory',[])), 'bootstrap':copy.deepcopy(self.bootstrap)}
+
+    def owned_load_state(self, state, adopt=False):
+        """Permit only one delivered current load while retaining every other pin."""
+        expected, action = self.owned_load_expected, self.current_action
+        if (expected is None or action is None or not action.get('ownedLoad') or action.get('status') == 'completed' or
+                action.get('commandId') not in self.commands or self.commands[action['commandId']] is not action or
+                self.owned_load_request(action['envelope']) is None or not self.delivered(action)):
+            raise CompanionError('Bootstrap/world transition has no exact outstanding delivered owned load')
+        config = state.get('configuration')
+        old, tag = expected['record'], expected['saveTag']
+        record = state.get('npcPersistence',{}).get(tag,{})
+        transition = state.get('ownedLoadTransition',{})
+        history = state.get('ownedLoadHistory',[])
+        ordinal = len(expected['history'])+1
+        bootstrap = state.get('gameplayBootstrap',{})
+        window = {'phase':'interactive-session','deadline':self.native_deadline}
+        if (config != self.frozen_configuration or record.get('runId') != self.run_id or record.get('game') != self.game or
+                record.get('bindingId') != old['bindingId'] or record.get('saveTag') != tag or record.get('fixtures') != old['fixtures'] or
+                record.get('worldGeneration') != old['worldGeneration'] or record.get('loadAttempted') is not True or
+                record.get('loadCommandId') != action['commandId'] or record.get('ownedLoadOrdinal') != ordinal or
+                record.get('interactiveWindow') != window or record.get('status') not in ('load-intent','loaded') or
+                state.get('ownedSaves',{}).get(tag) != expected['pair'] or
+                transition.get('saveTag') != tag or transition.get('beforeGame') != self.game or transition.get('ordinal') != ordinal or
+                transition.get('restartRequested') is True or not isinstance(history,list) or len(history) != ordinal or
+                history[:-1] != expected['history'] or history[-1].get('saveTag') != tag or history[-1].get('ordinal') != ordinal or
+                state.get('phase') not in ('interactive-session','interactive-owned-npc-load') or
+                type(state.get('deadline')) not in (int,float) or state['deadline'] > self.native_deadline or
+                type(bootstrap) is not dict or
+                {key:value for key,value in bootstrap.items() if key not in {'completed','scene','menus','loadedOwnedSave'}} !=
+                {key:value for key,value in expected['bootstrap'].items() if key not in {'completed','scene','menus','loadedOwnedSave'}}):
+            raise CompanionError('Outstanding owned load identity/tag/ordinal/window provenance changed')
+        if transition.get('completed') is not True:
+            if record['status'] != 'load-intent' or bootstrap.get('completed') is not False or state.get('ownedWorldGeneration') != old['worldGeneration']:
+                raise CompanionError('Incomplete owned load cannot claim a ready replacement world')
+            return True
+        events = transition.get('events',[])
+        if (transition.get('afterGame') != self.game or transition.get('worldGeneration') != old['worldGeneration']+1 or
+                state.get('ownedWorldGeneration') != old['worldGeneration']+1 or bootstrap.get('completed') is not True or
+                bootstrap.get('loadedOwnedSave') != tag or bootstrap.get('scene') != transition.get('scene') or
+                not self.ready_loaded_bootstrap(bootstrap) or not isinstance(events,list) or len(events) != 2 or
+                [row.get('data',{}).get('event',row.get('data',{}).get('type')) for row in events] != ['preLoadGame','postLoadGame'] or
+                any(row.get('topic') != 'lifecycle' or type(row.get('seq')) is not int for row in events) or
+                not 0 < events[0]['seq'] < events[1]['seq']):
+            raise CompanionError('Owned load lacks ordered native completion and common actual gameplay readiness')
+        if record['status'] == 'load-intent':
+            return True  # Native world ready; the full six-actor rebind is still pending.
+        self.validate_loaded_actors(record,old,state)
+        if (state['phase'] != 'interactive-session' or state['deadline'] != self.native_deadline):
+            raise CompanionError('Completed owned load did not restore the original held window')
+        if adopt and self.matching_event(action['commandId'],'command.completed') is not None:
+            audit = {'commandId':action['commandId'],'saveTag':tag,'bindingId':old['bindingId'],
+                     'beforeWorldGeneration':old['worldGeneration'],'afterWorldGeneration':state['ownedWorldGeneration'],
+                     'beforeBootstrap':expected['bootstrap'],'afterBootstrap':copy.deepcopy(bootstrap),
+                     'originalDeadline':self.native_deadline,'actorWitnessCount':6}
+            self.report.setdefault('ownedLoads',[]).append(audit)
+            self.event('owned-load-bootstrap-adopted',**audit)
+            self.bootstrap = copy.deepcopy(bootstrap)
+            self.world_generation = state['ownedWorldGeneration']
+            action['ownedLoad']['adopted'] = True
+            self.owned_load_expected = None
+            self.save()
+        return True
+
+    def ready_loaded_bootstrap(self, bootstrap):
+        scene,menus = bootstrap.get('scene',{}),bootstrap.get('menus',{})
+        expected_cell = self.expected_cell or bootstrap.get('cell')
+        if (type(scene) is not dict or scene.get('playerLoaded') is not True or type(scene.get('cell')) is not dict or
+                scene['cell'].get('editorId') != expected_cell or type(menus) is not dict or menus.get('messageBoxOpen') is not False or
+                not isinstance(menus.get('openMenus'),list) or not isinstance(menus.get('menuStates'),list)):
+            return False
+        names,rows=menus['openMenus'],menus['menuStates']
+        if (any(not isinstance(name,str) for name in names) or len(set(names)) != len(names) or len(rows) != len(names) or
+                any(type(row) is not dict or not isinstance(row.get('name'),str) for row in rows) or {row['name'] for row in rows} != set(names)):
+            return False
+        for row in rows:
+            if (row.get('available') is not True or any(type(row.get(key)) is not bool for key in
+                    ('alwaysOpen','pausesGame','modal','usesCursor','usesMenuContext','freezeFramePause')) or
+                    row['name']=='Console' or row['pausesGame'] or row['modal'] or row['freezeFramePause'] or
+                    (not row['alwaysOpen'] and (row['usesCursor'] or row['usesMenuContext']))):
+                return False
+        return True
+
+    def validate_loaded_actors(self,record,old,state):
+        raw,saved=record.get('loadedReceipt',{}),old.get('savedReceipt',{})
+        actors=raw.get('actors',[])
+        rebindings=record.get('rebindings',{})
+        fixtures=state.get('interactiveActorFixtures',{})
+        if (raw.get('protocol')!='npc-persistence/1' or type(raw.get('schemaVersion')) is not int or raw['schemaVersion']!=1 or
+                raw.get('phase')!='loaded' or raw.get('bindingId')!=old['bindingId'] or raw.get('runId')!=self.run_id or
+                raw.get('saveTag')!=old['saveTag'] or type(raw.get('pid')) is not int or raw['pid']!=self.game['pid'] or
+                not isinstance(raw.get('providerSession'),str) or not raw['providerSession'] or raw['providerSession']!=saved.get('providerSession') or
+                type(raw.get('saveOrdinal')) is not int or raw['saveOrdinal']!=saved.get('saveOrdinal') or
+                type(raw.get('loadOrdinal')) is not int or raw['loadOrdinal']!=saved.get('loadOrdinal',-2)+1 or
+                not isinstance(actors,list) or len(actors)!=6 or any(type(row) is not dict for row in actors) or
+                {row.get('tag') for row in actors}!=set(old['fixtures']) or type(rebindings) is not dict or set(rebindings)!=set(old['fixtures']) or
+                type(fixtures) is not dict or set(fixtures)!=set(old['fixtures']) or record.get('afterWorldGeneration')!=old['worldGeneration']+1):
+            raise CompanionError('Owned load lacks the exact complete serialized native six-actor remap receipt')
+        seen_refs,seen_vm=set(),set()
+        saved_rows={row['tag']:row for row in saved.get('actors',[]) if isinstance(row,dict) and 'tag' in row}
+        for row in actors:
+            tag=row['tag'];before=old['fixtures'][tag];prior=saved_rows.get(tag,{})
+            rebound,fixture=rebindings[tag],fixtures[tag]
+            actor,inc=rebound.get('actor',{}),rebound.get('incarnation',{})
+            old_inc=before.get('savedObservation',{}).get('incarnation',{})
+            ref,vm=row.get('currentReference'),row.get('currentVmHandle')
+            witness=rebound.get('restorationWitness',{})
+            if (not isinstance(ref,str) or not re.fullmatch(r'0xFF[0-9A-Fa-f]{6}',ref) or ref in seen_refs or
+                    not isinstance(vm,str) or not re.fullmatch(r'[1-9][0-9]{0,19}',vm) or int(vm)>=2**64 or vm in seen_vm or
+                    row.get('creationId')!=before.get('creationId') or row.get('base')!=before.get('base') or
+                    row.get('savedReference')!=prior.get('savedReference') or row.get('savedVmHandle')!=prior.get('savedVmHandle') or
+                    row.get('persistent') is not True or row.get('formResolved') is not True or row.get('handleResolved') is not True or
+                    row.get('resolvedReference')!=ref or row.get('resolvedVmHandle')!=vm or
+                    actor.get('reference')!=ref or actor.get('base')!=before.get('base') or actor.get('sex')!=before.get('actor',{}).get('sex') or
+                    actor.get('loaded3D') is not True or inc.get('sessionId')!=old_inc.get('sessionId') or
+                    type(inc.get('loadGeneration')) is not int or inc['loadGeneration']<=old_inc.get('loadGeneration',10**30) or
+                    type(row.get('runtimeHandle')) is not int or row['runtimeHandle']<=0 or row['runtimeHandle']!=inc.get('runtimeHandle') or
+                    witness!={'bindingId':old['bindingId'],'saveTag':old['saveTag'],'native':row,'worldGeneration':old['worldGeneration']+1} or
+                    fixture.get('status')!='created' or fixture.get('reference')!=ref or fixture.get('creationId')!=before.get('creationId') or
+                    fixture.get('creationWitness')!=before.get('creationWitness') or fixture.get('game')!=self.game or
+                    fixture.get('worldGeneration')!=old['worldGeneration']+1 or fixture.get('actor')!=actor or fixture.get('incarnation')!=inc or
+                    fixture.get('restorationWitness')!=witness):
+                raise CompanionError('A restored actor lacks its exact saved VM/form and fresh actual-world witness')
+            seen_refs.add(ref);seen_vm.add(vm)
+
     def check_state(self, state=None, finishing=False, deadline=None):
         state = self.read_live_state(self.state_path, deadline=deadline) if state is None else state
         metadata = state.get('interactiveSession', {})
         configuration = state.get('configuration', {})
         settings = configuration.get('interactive_session', {})
+        changed_world = (state.get('gameplayBootstrap') != self.bootstrap or state.get('ownedWorldGeneration') != self.world_generation or
+                         (not finishing and state.get('phase') == 'interactive-owned-npc-load'))
         if (state.get('id') != self.run_id or state.get('order', {}).get('id') != self.order_id or
                 state.get('runner') != self.worker or state.get('game') != self.game or
                 metadata.get('sessionId') != self.session_id or metadata.get('binding') != self.binding or
                 settings.get('sourceId') != 'operator.actions' or
                 absolute(settings.get('channelConfig', ''), 'native channel') != self.channel or
-                state.get('gameplayBootstrap') != self.bootstrap or not isinstance(self.bootstrap, dict) or
+                not isinstance(self.bootstrap, dict) or
                 self.bootstrap.get('completed') is not True or state.get('executorHashes') != self.executor_hashes or
                 configuration.get('game_edition') != 'se' or
                 not any(row.get('role') == 'game' and row.get('identity') == self.game for row in state.get('owned', [])) or
                 (self.expected_cell is not None and str(self.bootstrap.get('cell', '')).casefold() != self.expected_cell.casefold())):
             raise CompanionError('Exact owned run/bootstrap/session/world pins changed')
-        if (not finishing and (state.get('done') or state.get('phase') != 'interactive-session' or
+        permitted_load = self.owned_load_state(state) if changed_world and not finishing else False
+        if (state.get('gameplayBootstrap') != self.bootstrap or state.get('ownedWorldGeneration') != self.world_generation) and not permitted_load:
+            raise CompanionError('Exact owned run/bootstrap/session/world pins changed')
+        if (not finishing and (state.get('done') or (state.get('phase') != 'interactive-session' and not permitted_load) or
                                metadata.get('ready') is not True)):
             raise CompanionError('Native interactive window ended or changed')
         maximum = settings.get('maximumSeconds')
         native_deadline = state.get('deadline')
         if (type(maximum) is not int or not 1 <= maximum <= 14400 or maximum != metadata.get('maximumSeconds') or
                 type(native_deadline) not in (int, float) or not math.isfinite(native_deadline) or
+                (not finishing and native_deadline != self.native_deadline and not permitted_load) or
                 (not finishing and native_deadline <= self.wall())):
             raise CompanionError('Original finite interactive deadline is unavailable')
         if (not isinstance(self.executor_hashes, dict) or not self.executor_hashes or
@@ -450,6 +648,8 @@ class Companion:
             raise CompanionError('Companion shared deadline expired; no continuation')
         if deadline is not None and self.clock() >= deadline:
             raise CompanionError('Exact completion deadline expired; never retry or reconnect')
+        if permitted_load:
+            self.owned_load_state(state,adopt=True)
         return state
 
     def poll(self, finishing=False, deadline=None):
@@ -609,7 +809,7 @@ class Companion:
         if self.poisoned or self.finish_attempted:
             raise CompanionError('Transport already stopped/finished; no replay or further commands')
         try:
-            self.check_state()
+            live_state = self.check_state()
             envelope = decoded(encoded(envelope))
             if (type(envelope) is not dict or type(envelope.get('schemaVersion')) is not int or
                     envelope['schemaVersion'] != 1 or envelope.get('operation') not in ('tool', 'binding', 'fixture-create', 'finish')):
@@ -619,14 +819,17 @@ class Companion:
             sequence, case_id = self.pending['sequence'], self.pending.get('caseId')
             self.pending = None
             finishing = envelope.get('operation') == 'finish'
+            load_expected = None
             if finishing:
                 if set(envelope) != {'schemaVersion', 'operation'} or envelope.get('schemaVersion') != 1:
                     raise CompanionError('Finish must use its exact existing RC6 envelope')
                 self.finish_attempted = True
             else:
+                load_expected = self.prepare_owned_load(envelope,live_state)
                 timeout = envelope.get('timeoutSeconds')
-                if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 30:
-                    raise CompanionError('Origin action timeout must be finite in (0,30]')
+                maximum_timeout = 90 if load_expected is not None else 30
+                if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= maximum_timeout:
+                    raise CompanionError('Origin action timeout must be finite within its exact command bound')
                 if timeout > self.end - self.clock():
                     raise CompanionError('Origin action deadline does not fit the remaining original window')
             source_event_id = 'subject-' + digest(encoded([self.order_id, self.attempt_id, self.run_id]))[:32] + ':' + str(sequence)
@@ -637,6 +840,11 @@ class Companion:
             action = {'sequence': sequence, 'caseId': case_id, 'sourceEventId': source_event_id,
                       'envelope': envelope, 'status': 'intent', 'request': self.retain('request-intent', request)}
             self.current_action = action
+            if load_expected is not None:
+                self.owned_load_attempts += 1
+                self.owned_load_expected = load_expected
+                action['ownedLoad'] = {'saveTag':load_expected['saveTag'],'bindingId':load_expected['record']['bindingId'],
+                    'beforeWorldGeneration':self.world_generation,'adopted':False}
             self.report['actions'].append(action)
             self.event('request-intent', sequence=sequence, caseId=case_id, sourceEventId=source_event_id,
                        envelope=envelope, request=action['request'])
@@ -659,7 +867,7 @@ class Companion:
                 self.case(case_id)['commandIds'].append(command_id)
                 self.case(case_id)['evidence'].extend([action['request'], action['ack']])
             self.save()
-            end = min(self.end, self.clock() + (5 if finishing else envelope['timeoutSeconds'] + 5))
+            end = min(self.end, self.clock() + (5 if finishing else envelope['timeoutSeconds'] + (0 if load_expected is not None else 5)))
             while self.clock() < end:
                 self.poll(finishing=finishing, deadline=end)
                 delivered = self.matching_event(command_id, 'command.delivered')
@@ -670,7 +878,16 @@ class Companion:
                     action['completion'] = self.retain('command-completed', complete)
                     if delivered is None:
                         raise CompanionError('Completion lacks distinct durable delivery')
+                    if action.get('ownedLoad'):
+                        self.check_state(deadline=end)
+                        if action['ownedLoad'].get('adopted') is not True:
+                            raise CompanionError('Owned load completion lacks its fully witnessed bootstrap adoption')
                     result = self.unwrap(command_id, complete['data']['result'], action, deadline=end)
+                    if action.get('ownedLoad') and (not isinstance(result,dict) or type(result.get('save')) is not dict or
+                            type(result['save'].get('loadedOwnedPairCount')) is not int or result['save']['loadedOwnedPairCount'] != 1 or
+                            type(result['save'].get('actorRemapWitnessCount')) is not int or result['save']['actorRemapWitnessCount'] != 6 or
+                            result['save'].get('worldReady') is not True):
+                        raise CompanionError('Owned load result lacks its completed pair/remap/readiness fields')
                     if not self.delivered(action):
                         raise CompanionError('Completion lacks exact native action-delivered evidence')
                     if self.clock() >= end:

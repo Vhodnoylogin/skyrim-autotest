@@ -682,5 +682,250 @@ def export_fixture(root):
             'run': str(fixture.run_dir), 'evidenceDirectory': str(root / 'order'), 'returncode': rc}
 
 
+class OwnedLoadClient(LocalClient):
+    """Real durable bus with explicit incomplete/world-ready/rebound producer states."""
+    def __init__(self,fixture):
+        super().__init__(fixture)
+        self.pending_load,self.load_stage=None,0
+        self.complete_load=True
+        self.load_fault=lambda state:None
+        self.lose_ack=False
+
+    def call(self,operation,arguments):
+        if operation=='events' and self.pending_load is not None and self.complete_load:
+            self.advance_load()
+        if operation!='submit':
+            return super().call(operation,arguments)
+        envelope=json.loads(arguments['text'])
+        if tool.Companion.owned_load_request(envelope) is None:
+            return super().call(operation,arguments)
+        self.calls.append((operation,copy.deepcopy(arguments)))
+        ack=dispatch(self.fixture.bus,operation,arguments)
+        command=self.fixture.bus.next(self.fixture.session_id,self.fixture.binding)['command']
+        self.fixture.bus.delivered(self.fixture.session_id,command['id'],command['claimId'],self.fixture.binding)
+        with (self.fixture.run_dir/'steps.jsonl').open('ab') as stream:
+            stream.write(tool.encoded({'kind':'interactive-action-delivered','commandId':command['id'],'request':envelope})+b'\n')
+        state=self.fixture.state
+        record=state['npcPersistence']['saved-six']
+        record.update(status='load-intent',loadAttempted=True,loadCommandId=command['id'],ownedLoadOrdinal=1,
+                      interactiveWindow={'phase':'interactive-session','deadline':state['deadline']})
+        state['phase']='interactive-owned-npc-load'
+        state['gameplayBootstrap']['completed']=False
+        state['ownedLoadTransition']={'saveTag':'saved-six','completed':False,'beforeGame':copy.deepcopy(self.fixture.game),'ordinal':1}
+        state['ownedLoadHistory']=[copy.deepcopy(state['ownedLoadTransition'])]
+        for entry in state['interactiveActorFixtures'].values():entry['status']='load-pending'
+        self.pending_load=command
+        self.load_fault(state)
+        self.fixture.write_state()
+        if self.lose_ack:raise OSError('Synthetic lost owned-load ingress ACK')
+        return ack
+
+    def advance_load(self):
+        state=self.fixture.state
+        record=state['npcPersistence']['saved-six']
+        scene={'playerLoaded':True,'cell':{'editorId':'QASmoke'}}
+        menus={'messageBoxOpen':False,'openMenus':[],'menuStates':[]}
+        if self.load_stage==0:
+            state['ownedWorldGeneration']=2
+            state['gameplayBootstrap'].update(completed=True,loadedOwnedSave='saved-six',scene=scene,menus=menus)
+            state['ownedLoadTransition'].update(completed=True,afterGame=copy.deepcopy(self.fixture.game),worldGeneration=2,scene=scene,
+                events=[{'seq':1,'topic':'lifecycle','data':{'event':'preLoadGame'}},
+                        {'seq':2,'topic':'lifecycle','data':{'event':'postLoadGame'}}],cursor=2)
+            state['ownedLoadHistory'][-1]=copy.deepcopy(state['ownedLoadTransition'])
+            self.load_stage=1
+        else:
+            receipt=copy.deepcopy(record['savedReceipt'])
+            receipt.update(phase='loaded',loadOrdinal=1)
+            rebindings,replacements={},{}
+            for index,row in enumerate(receipt['actors']):
+                old=record['fixtures'][row['tag']]
+                ref,vm=f'0xFF100{index:03X}',str(19000+index)
+                row.update(currentReference=ref,resolvedReference=ref,currentVmHandle=vm,resolvedVmHandle=vm,
+                           formResolved=True,handleResolved=True,runtimeHandle=1700+index)
+                actor=dict(old['actor'],reference=ref)
+                incarnation={'sessionId':'observer','loadGeneration':2,'runtimeHandle':1700+index}
+                witness={'saveTag':'saved-six','bindingId':record['bindingId'],'native':copy.deepcopy(row),'worldGeneration':2}
+                rebindings[row['tag']]={'actor':actor,'incarnation':incarnation,'restorationWitness':copy.deepcopy(witness)}
+                replacement=copy.deepcopy(old)
+                replacement.update(status='created',reference=ref,actor=copy.deepcopy(actor),incarnation=copy.deepcopy(incarnation),
+                                   restorationWitness=copy.deepcopy(witness),worldGeneration=2)
+                replacements[row['tag']]=replacement
+            record.update(status='loaded',loadedReceipt=receipt,rebindings=rebindings,afterWorldGeneration=2)
+            state['interactiveActorFixtures']=replacements
+            state['phase']='interactive-session'
+            state['deadline']=record['interactiveWindow']['deadline']
+            self.load_fault(state)
+            command=self.pending_load
+            self.fixture.bus.complete(self.fixture.session_id,command['id'],command['claimId'],self.fixture.binding,
+                {'save':{'loadedOwnedPairCount':1,'actorRemapWitnessCount':6,'worldReady':True}})
+            self.pending_load=None
+        self.fixture.write_state()
+
+
+class OwnedLoadCompanionTests(unittest.TestCase):
+    def setUp(self):
+        temporary=tempfile.TemporaryDirectory();self.addCleanup(temporary.cleanup)
+        self.fixture=Fixture(Path(temporary.name))
+        state=self.fixture.state
+        settings=state['configuration']['interactive_session']
+        settings.update(npcPersistence=True,morphSession={'bindings':{'reviewed':'native-role'},'testKeys':['Fixture.Test.One']},maximumSeconds=180)
+        state['configuration']['allow_owned_save_load']=True
+        state['interactiveSession']['maximumSeconds']=180
+        state['deadline']=time.time()+180
+        state['ownedWorldGeneration']=1
+        state['ownedLoadHistory']=[]
+        fixtures,rows={},[]
+        for index in range(6):
+            tag,ref,creation=f'Actor{index}',f'0xFF000{index:03X}',f'{index+1:032x}'
+            actor={'reference':ref,'base':'0x00013475','sex':'male','race':'0x00013746','weight':50,'loaded3D':True}
+            inc={'sessionId':'observer','loadGeneration':1,'runtimeHandle':700+index}
+            entry={'tag':tag,'status':'created','runId':self.fixture.run_id,'creationId':creation,'reference':ref,'createdReference':ref,
+                'base':actor['base'],'game':copy.deepcopy(self.fixture.game),'worldGeneration':1,'actor':actor,'incarnation':inc,
+                'creationWitness':{'reference':ref,'creationId':creation,'forcePersist':True},
+                'savedObservation':{'actor':copy.deepcopy(actor),'incarnation':copy.deepcopy(inc)}}
+            fixtures[tag]=entry
+            rows.append({'tag':tag,'creationId':creation,'base':actor['base'],'savedReference':ref,'currentReference':ref,
+                'savedVmHandle':str(9000+index),'currentVmHandle':str(9000+index),'runtimeHandle':700+index,'persistent':True})
+        state['interactiveActorFixtures']=copy.deepcopy(fixtures)
+        receipt={'schemaVersion':1,'protocol':'npc-persistence/1','pid':self.fixture.game['pid'],'providerSession':'native',
+            'bindingId':'b'*32,'runId':self.fixture.run_id,'saveTag':'saved-six','phase':'saved','saveOrdinal':1,'loadOrdinal':0,'actors':rows}
+        state['npcPersistence']={'saved-six':{'status':'saved','saveTag':'saved-six','bindingId':'b'*32,'runId':self.fixture.run_id,
+            'game':copy.deepcopy(self.fixture.game),'worldGeneration':1,'loadAttempted':False,'fixtures':fixtures,'savedReceipt':receipt}}
+        state['ownedSaves']={'saved-six':{'completed':True,'ownedByAttempt':True,'stem':'Autotest_saved_six',
+            'files':{'ess':{'sha256':'1'*64,'bytes':100},'skse':{'sha256':'2'*64,'bytes':100}}}}
+        plan=tool.decoded(self.fixture.plan.read_bytes());plan['bounds']['maximumSeconds']=120
+        self.fixture.plan.write_bytes(tool.encoded(plan))
+        self.fixture.client=OwnedLoadClient(self.fixture)
+        self.fixture.write_state()
+
+    def envelope(self,timeout=60,tag='saved-six'):
+        return {'schemaVersion':1,'operation':'tool','tool':'platform','timeoutSeconds':timeout,
+            'args':{'operation':'object.perform','request':{'domain':'save-state','action':'load-owned-disposable-once',
+                'saveLabel':tag,'maximumLoads':1,'processRestart':False}}}
+
+    def intent(self,companion,envelope):
+        companion.emit({'kind':'check-start','caseId':'case-a','role':'subject'})
+        companion.emit({'kind':'measurement','caseId':'case-a','sequence':1,'request':envelope,'delivery':'intent'})
+        return envelope
+
+    def test_one_legitimate_frozen_same_process_load_adopts_bootstrap_only_after_all_six_native_remaps_and_bus_completion(self):
+        companion=self.fixture.companion()
+        original_end,original_deadline=companion.end,companion.native_deadline
+        old_bootstrap=copy.deepcopy(companion.bootstrap)
+        result=companion.exchange(self.intent(companion,self.envelope()))
+        self.assertTrue(result['save']['worldReady'])
+        self.assertEqual(companion.end,original_end)
+        self.assertEqual(companion.native_deadline,original_deadline)
+        self.assertNotEqual(companion.bootstrap,old_bootstrap)
+        self.assertEqual(companion.bootstrap['loadedOwnedSave'],'saved-six')
+        self.assertEqual(companion.world_generation,2)
+        self.assertEqual(companion.owned_load_attempts,1)
+        self.assertEqual(len(companion.report['ownedLoads']),1)
+        self.assertEqual(companion.report['ownedLoads'][0]['actorWitnessCount'],6)
+        self.assertTrue(companion.report['actions'][0]['ownedLoad']['adopted'])
+        companion.check_state()
+        self.assertEqual(len(companion.report['ownedLoads']),1)
+        self.assertEqual(sum(op=='submit' for op,args in self.fixture.client.calls),1)
+        envelope=self.envelope()
+        companion.emit({'kind':'measurement','caseId':'case-a','sequence':2,'request':envelope,'delivery':'intent'})
+        with self.assertRaises(tool.CompanionError):companion.exchange(envelope)
+        self.assertEqual(sum(op=='submit' for op,args in self.fixture.client.calls),1)
+
+    def test_wrong_tag_refuses_before_submit(self):
+        companion=self.fixture.companion()
+        with self.assertRaises(tool.CompanionError):
+            companion.exchange(self.intent(companion,self.envelope(tag='unowned')))
+        self.assertFalse(any(op=='submit' for op,args in self.fixture.client.calls))
+
+    def test_disabled_load_refuses_before_submit(self):
+        self.fixture.state['configuration']['interactive_session']['npcPersistence']=False;self.fixture.write_state()
+        companion=self.fixture.companion()
+        with self.assertRaises(tool.CompanionError):companion.exchange(self.intent(companion,self.envelope()))
+        self.assertFalse(any(op=='submit' for op,args in self.fixture.client.calls))
+
+    def test_changed_frozen_configuration_refuses_before_submit(self):
+        companion=self.fixture.companion()
+        self.fixture.state['configuration']['interactive_session']['morphSession']['extra']=True;self.fixture.write_state()
+        with self.assertRaises(tool.CompanionError):companion.exchange(self.intent(companion,self.envelope()))
+        self.assertFalse(any(op=='submit' for op,args in self.fixture.client.calls))
+
+    def test_unexpected_bootstrap_change_has_no_generic_exception(self):
+        companion=self.fixture.companion()
+        self.fixture.state['gameplayBootstrap']['completed']=False;self.fixture.write_state()
+        with self.assertRaisesRegex(tool.CompanionError,'outstanding delivered owned load'):companion.check_state()
+
+    def test_pending_load_with_wrong_actual_command_or_tag_provenance_is_terminal(self):
+        companion=self.fixture.companion()
+        self.fixture.client.load_fault=lambda state:state['npcPersistence']['saved-six'].update(loadCommandId='a'*32)
+        with self.assertRaisesRegex(tool.CompanionError,'provenance changed'):
+            companion.exchange(self.intent(companion,self.envelope()))
+        self.assertTrue(companion.poisoned)
+        self.assertNotIn('ownedLoads',companion.report)
+        self.assertEqual(sum(op=='submit' for op,args in self.fixture.client.calls),1)
+
+    def test_completed_native_record_with_wrong_vm_never_adopts_or_replays(self):
+        companion=self.fixture.companion()
+        def corrupt(state):
+            record=state['npcPersistence']['saved-six']
+            if record['status']=='loaded':record['loadedReceipt']['actors'][-1]['resolvedVmHandle']='42'
+        self.fixture.client.load_fault=corrupt
+        envelope=self.intent(companion,self.envelope())
+        with self.assertRaisesRegex(tool.CompanionError,'saved VM/form'):companion.exchange(envelope)
+        with self.assertRaises(tool.CompanionError):companion.exchange(envelope)
+        self.assertNotIn('ownedLoads',companion.report)
+        self.assertEqual(sum(op=='submit' for op,args in self.fixture.client.calls),1)
+
+    def test_lost_load_ack_keeps_delivery_and_uncertainty_without_bootstrap_adoption_or_replay(self):
+        companion=self.fixture.companion();self.fixture.client.lose_ack=True
+        envelope=self.intent(companion,self.envelope())
+        with self.assertRaises(OSError):companion.exchange(envelope)
+        self.assertTrue(companion.report['subjectStarted'])
+        self.assertTrue(companion.report['uncertain'])
+        self.assertEqual(companion.owned_load_attempts,1)
+        self.assertNotIn('ownedLoads',companion.report)
+        with self.assertRaises(tool.CompanionError):companion.exchange(envelope)
+        self.assertEqual(sum(op=='submit' for op,args in self.fixture.client.calls),1)
+
+    def test_unchanged_shared_deadline_and_timed_out_load_are_terminal(self):
+        companion=self.fixture.companion();self.fixture.client.complete_load=False
+        original_end=companion.end
+        envelope=self.intent(companion,self.envelope(timeout=.1))
+        with self.assertRaisesRegex(tool.CompanionError,'completion deadline'):companion.exchange(envelope)
+        self.assertEqual(companion.end,original_end)
+        self.assertTrue(companion.report['uncertain'])
+        with self.assertRaises(tool.CompanionError):companion.exchange(envelope)
+        self.assertEqual(sum(op=='submit' for op,args in self.fixture.client.calls),1)
+
+    def test_only_exact_owned_load_receives_long_timeout_and_never_a_restart_or_changed_deadline(self):
+        companion=self.fixture.companion()
+        envelope=self.envelope();envelope['args']['request']['processRestart']=True
+        with self.assertRaises(tool.CompanionError):companion.exchange(self.intent(companion,envelope))
+        self.assertFalse(any(op=='submit' for op,args in self.fixture.client.calls))
+
+    def test_native_deadline_extension_during_owned_load_is_rejected(self):
+        companion=self.fixture.companion()
+        self.fixture.client.load_fault=lambda state:state.update(deadline=state['deadline']+1)
+        with self.assertRaisesRegex(tool.CompanionError,'provenance changed'):
+            companion.exchange(self.intent(companion,self.envelope()))
+        self.assertNotIn('ownedLoads',companion.report)
+
+    def test_postload_heartbeat_failure_prevents_bootstrap_adoption(self):
+        companion=self.fixture.companion()
+        def stale(state):
+            if state['npcPersistence']['saved-six']['status']=='loaded':self.fixture.pulse_age=999
+        self.fixture.client.load_fault=stale
+        with self.assertRaisesRegex(tool.CompanionError,'heartbeat'):
+            companion.exchange(self.intent(companion,self.envelope()))
+        self.assertNotIn('ownedLoads',companion.report)
+
+    def test_missing_serialized_saved_vm_is_refused_before_delivery(self):
+        self.fixture.state['npcPersistence']['saved-six']['savedReceipt']['actors'][0].pop('savedVmHandle')
+        self.fixture.write_state()
+        companion=self.fixture.companion()
+        with self.assertRaisesRegex(tool.CompanionError,'serialized reference/VM'):
+            companion.exchange(self.intent(companion,self.envelope()))
+        self.assertFalse(any(op=='submit' for op,args in self.fixture.client.calls))
+
+
 if __name__ == '__main__':
     unittest.main()

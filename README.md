@@ -25,6 +25,11 @@ For finite origin-owned checks that retain created NPC identities, the complete
 portable/agent-kit also includes a [subject companion](docs/subject-companion.md).
 Its transport preserves raw command evidence; the origin owns business assertions.
 
+The SE source candidate adds [morph sessions and owned NPC persistence](docs/morph-sessions.md):
+real OBody control/catalog, independent SKEE vectors, reference names/equipment,
+and a strictly guarded same-process save/load with native form/VM remapping.
+These additions require exact installed Polygon qualification before admission.
+
 Current bounded SE evidence includes the0.4.0 RC6/native-startup composition:
 actual New Game, settled QASmoke, movement, creation of one disposable NPC,
 two verified race changes, concurrent command reception and normal restoration.

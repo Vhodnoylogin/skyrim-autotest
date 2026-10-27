@@ -44,6 +44,8 @@ def validate(args):
     req = args.get('request', {})
     if not isinstance(req, dict):
         raise ValueError('Semantic request must be an object')
+    from . import morph_session
+    if morph_session.validate(operation,req): return
     from . import preset_domain
     if preset_domain.validate(operation, req): return
     from . import grip_exchange
@@ -876,6 +878,10 @@ def execute(session, args, deadline):
         raise ValueError('Common gameplay bootstrap must precede semantic actions')
     backend = Backend(session, deadline)
     op, req = args['operation'], args.get('request', {})
+    from . import morph_session
+    if morph_session.validate(op,req):
+        policy=session.state.get('configuration',{}).get('interactive_session',{}).get('nativeBindings')
+        return morph_session.execute(session,args,deadline,policy)
     if op == 'state.read':
         scene = backend.call('inspect', {'kind': 'scene'})
         menus = backend.call('menu', {'action': 'list', 'includeFlags': True})
