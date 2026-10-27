@@ -14,6 +14,13 @@ only after actual identity/name/gear/hold/position/preset readbacks. This is sce
 readiness, not rendered-body correctness or whole-mod acceptance. There are no
 automatic transformations, save/load or physics tests after setup.
 
+The six-person layout explicitly uses `prepared-qasmoke-anchor-v1`: its origin
+and heading come from the completed common QA anchor, and each NPC moves once
+relative to the actual persistent marker. Player movement or camera rotation
+during setup cannot shift this layout. Current player/cell/world and marker
+identity/position remain guarded, with unchanged NPC placement tolerances and
+no retry after an unknown mutation. Generic player-relative creation is unchanged.
+
 Polygon keeps its active operator turn and external microphone listener. Human
 speech/text is interpreted by that operator, never directly by the sequencer.
 Resolve an unambiguous current fixture name to its exact tag before publishing

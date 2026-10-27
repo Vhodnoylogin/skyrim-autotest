@@ -150,7 +150,7 @@ def run_plan(spec, exchange, emit, next_command, notify):
         require('no-missing-presets', configuration['config']['missingExpectedPresetCount'], 0)
         for a in actors:
             domain('object.perform', {'domain': 'actor-fixture', 'action': 'create', 'base': a['base'],
-                   'placement': a['placement'], 'persistence': 'save-load-witness-required',
+                   'placement': dict(a['placement'], basis='prepared-qasmoke-anchor-v1'), 'persistence': 'save-load-witness-required',
                    'maximumCreations': 6, 'actor': {'fixtureTag': a['tag']}})
             raw = identity(a)
             require(a['tag'] + '-base', raw['actor']['baseFormId'], a['base']['formId'])

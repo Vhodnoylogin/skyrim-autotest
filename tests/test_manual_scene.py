@@ -79,6 +79,9 @@ class ManualSceneTests(unittest.TestCase):
     def test_ready_precedes_commands_and_no_automatic_transform(self):
         result, backend, records, notices = self.run_scene([{'sequence': 1, 'sourceRef': 'owner-stop', 'action': 'finish'}])
         self.assertEqual(len(backend.states), 6)
+        creates = [c['args']['request'] for c in backend.calls if c.get('args', {}).get('request', {}).get('domain') == 'actor-fixture']
+        self.assertEqual(len(creates), 6)
+        self.assertTrue(all(c['placement']['basis'] == 'prepared-qasmoke-anchor-v1' for c in creates))
         self.assertTrue(all(s['race'] == '0x00013746' for s in backend.states.values()))
         self.assertEqual(notices[0][0], 'scene-ready')
         self.assertFalse(result['wholeModAccepted'])

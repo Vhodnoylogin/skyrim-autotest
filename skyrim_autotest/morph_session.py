@@ -117,7 +117,10 @@ def validate(operation, req):
         _text(base["plugin"], "base plugin"); actor_domain.form(base["formId"])
         if int(base["formId"], 16) > 0xffffff: raise BindingError("Base formId is a plugin-local identity")
         placement = req.get("placement")
-        if type(placement) is not dict or set(placement) != {"forwardGameUnits", "rightGameUnits"}: raise BindingError("Exact player-relative placement required")
+        if (type(placement) is not dict or set(placement) not in ({"forwardGameUnits", "rightGameUnits"},
+                {"forwardGameUnits", "rightGameUnits", "basis"})
+                or "basis" in placement and placement["basis"] != fixture_actors.FIXED_BASIS):
+            raise BindingError("Exact relative offsets and a supported placement basis required")
         actor_domain.bounded(placement["forwardGameUnits"], 0, 1000); actor_domain.bounded(placement["rightGameUnits"], -1000, 1000)
     elif domain == "actor-fixture-identity": required.add("actor")
     elif domain == "human-preset-catalog":

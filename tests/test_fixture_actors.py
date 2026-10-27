@@ -3,7 +3,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from skyrim_autotest import fixture_actors, interactive_bindings
+from skyrim_autotest import fixture_actors, fixture_anchor, interactive_bindings
 
 
 BASE, REF, RACE = "0x00013475", "0xFF000123", "0x00013746"
@@ -40,6 +40,9 @@ class FixtureSession:
         self.bad_position, self.actor_sex = False, 1
         self.native_identity_hook = lambda raw: None
         self.identity_reads = 0
+        self.marker = "0x0402A1B9"
+        self.marker_handle, self.player_cell = 222, fixture_anchor.CELL
+        self.position[self.marker] = list(fixture_anchor.TARGET_POSITION)
 
     def log(self, *args, **kwargs): self.logs.append((args, kwargs))
     def save(self): self.saved.append(copy.deepcopy(self.state))
@@ -66,10 +69,15 @@ class FixtureSession:
                         "refs": [{"formId": ref} for ref in self.prior]}
             ref = args["refs"][0]
             player = ref == "0x00000014"
+            marker = ref == self.marker
             return {"ok": True, "sessionId": "foreign" if self.foreign_actor_world and not player else "observer-session",
                     "loadGeneration": self.generation, "refs": [{"status": "available", "deleted": False, "disabled": False,
-                    "loaded3D": self.loaded if not player else True, "baseForm": "0x00000007" if player else self.actual_base,
-                    "identity": {"form": ref, "runtimeHandle": 111 if player else self.handle, "loadGeneration": self.generation}}]}
+                    "loaded3D": self.loaded if not player else True,
+                    "baseForm": "0x00000007" if player else "0x0000003B" if marker else self.actual_base,
+                    "cellForm": self.player_cell if player else fixture_anchor.CELL,
+                    "position": list(self.position.get(ref, [0, 0, 0])),
+                    "identity": {"form": ref, "runtimeHandle": 111 if player else self.marker_handle if marker else self.handle,
+                                 "loadGeneration": self.generation}}]}
         if args["action"] == "describe":
             methods = CONTRACT[args["script"]]
             rows = [{"name": name, "params": [{"type": kind} for kind in signature[0]], "returnType": signature[1], "native": True}
@@ -98,8 +106,8 @@ class FixtureSession:
             self.position.setdefault(self.new_ref, [100.0, 200.0, 5.0]); self.angles.setdefault(self.new_ref, 0.0)
             returned, returned_type = {"formId": self.new_ref}, "ObjectReference"
         elif function == "MoveTo":
-            player = self.position["0x00000014"]
-            self.position[target] = [player[i] + args["args"][i + 1] for i in range(3)]
+            anchor = self.position[args["args"][0]["form"]]
+            self.position[target] = [anchor[i] + args["args"][i + 1] for i in range(3)]
             if self.bad_position: self.position[target][0] += 100
             returned, returned_type = None, "None"
         elif function == "SetAngle":
@@ -135,6 +143,66 @@ class FixtureActorTests(unittest.TestCase):
 
     def create(self, request=None, seconds=10):
         return fixture_actors.create(self.session, REQUEST if request is None else request, time.monotonic() + seconds, POLICY)
+
+    def enable_fixed_frame(self):
+        s = self.session
+        s.state["configuration"].update(game_edition="se", se_fixture_anchor=fixture_anchor.RECIPE)
+        s.state["fixtureAnchor"] = {"recipe": fixture_anchor.RECIPE, "status": "prepared",
+            "preparationId": "a" * 32, "runId": s.state["id"], "game": copy.deepcopy(s.state["game"]),
+            "worldGeneration": 1, "steps": {"MoveTo": "returned", "SetAngle": "returned"},
+            "target": {**fixture_anchor.TARGET, "reference": s.marker,
+                "incarnation": {"sessionId": "observer-session", "loadGeneration": 1, "runtimeHandle": s.marker_handle},
+                "position": list(fixture_anchor.TARGET_POSITION)},
+            "playerIncarnation": {"sessionId": "observer-session", "loadGeneration": 1, "runtimeHandle": 111},
+            "expectedPosition": list(fixture_anchor.POSITION), "position": list(fixture_anchor.POSITION),
+            "headingDegrees": fixture_anchor.HEADING}
+        return dict(REQUEST, basis=fixture_actors.FIXED_BASIS)
+
+    def test_fixed_layout_survives_player_movement_and_turning_during_native_calls(self):
+        request = self.enable_fixed_frame()
+        def move_player(function):
+            self.session.position["0x00000014"] = [-2409.33618, 1789.56165, 6976.44775]
+            self.session.angles["0x00000014"] = 279.98004150390625
+        self.session.on_mutation = move_player
+        result = self.create(request)
+        self.assertEqual(result["placement"]["position"], [-2550, 1486, 6976])
+        self.assertEqual(result["placement"]["headingDegrees"], 90)
+        self.assertEqual([x["function"] for x in self.session.mutations], ["PlaceAtMe", "SetDontMove", "MoveTo", "SetAngle"])
+        self.assertEqual(self.session.mutations[0]["self"], {"form": "0x00000014"})
+        self.assertEqual(self.session.mutations[2]["args"][0], {"form": self.session.marker})
+        entry = self.session.state["interactiveActorFixtures"]["M1"]
+        self.assertEqual(entry["creationWitness"]["anchor"], "0x00000014")
+        self.assertEqual(entry["placementFrame"]["basis"], fixture_actors.FIXED_BASIS)
+
+    def test_fixed_basis_requires_actual_prepared_same_run_anchor_before_spawn(self):
+        for field, value in (("status", "intent"), ("runId", "old"), ("worldGeneration", 2),
+                             ("position", [0, 0, 0]), ("headingDegrees", 270)):
+            request = self.enable_fixed_frame()
+            self.session.state["fixtureAnchor"][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError): self.create(request)
+            self.assertEqual(self.session.mutations, [])
+
+    def test_fixed_marker_change_after_spawn_keeps_uncertain_actor_without_replay(self):
+        request = self.enable_fixed_frame()
+        self.session.on_mutation = lambda _: setattr(self.session, "marker_handle", 333)
+        with self.assertRaisesRegex(ValueError, "marker/player identity"): self.create(request)
+        self.assertEqual([x["function"] for x in self.session.mutations], ["PlaceAtMe"])
+        self.assertEqual(self.session.state["interactiveActorFixtures"]["M1"]["status"], "uncertain")
+        with self.assertRaisesRegex(ValueError, "already attempted"): self.create(request)
+        self.assertEqual(len(self.session.mutations), 1)
+
+    def test_fixed_player_cell_change_still_blocks_placement(self):
+        request = self.enable_fixed_frame()
+        self.session.on_mutation = lambda _: setattr(self.session, "player_cell", "0x00000001")
+        with self.assertRaisesRegex(ValueError, "marker/player identity"): self.create(request)
+        self.assertEqual(len(self.session.mutations), 1)
+
+    def test_fixed_lost_move_callback_is_not_replayed_or_accepted(self):
+        request = self.enable_fixed_frame()
+        self.session.fail_after = "MoveTo"
+        with self.assertRaises(TimeoutError): self.create(request)
+        with self.assertRaisesRegex(ValueError, "already attempted"): self.create(request)
+        self.assertEqual([x["function"] for x in self.session.mutations], ["PlaceAtMe", "SetDontMove", "MoveTo"])
 
     def test_creation_has_durable_intent_exact_once_placement_and_registry_witness(self):
         result = self.create()

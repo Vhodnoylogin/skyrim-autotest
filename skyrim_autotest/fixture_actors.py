@@ -21,6 +21,7 @@ from .readiness_state import gameplay_ready
 
 
 PLAYER = {"reference": "0x00000014", "base": "0x00000007"}
+FIXED_BASIS = "prepared-qasmoke-anchor-v1"
 _SIGNATURES = {
     "ObjectReference": {
         "PlaceAtMe": (["form", "int", "bool", "bool"], "objectreference"),
@@ -39,8 +40,10 @@ def validate_request(request, policy):
         raise BindingError("Fixture creation requires explicit nativeBindings policy")
     required = {"tag", "base", "forwardGameUnits", "rightGameUnits"}
     if (type(request) is not dict or not required <= set(request) or
-            set(request) - required - {"persistentForOwnedSave"}):
+            set(request) - required - {"persistentForOwnedSave", "basis"}):
         raise BindingError("Fixture creation requires exact tag, base and player-relative offsets")
+    if "basis" in request and request["basis"] != FIXED_BASIS:
+        raise BindingError("Unknown fixture placement basis")
     if "persistentForOwnedSave" in request and type(request["persistentForOwnedSave"]) is not bool:
         raise BindingError("persistentForOwnedSave requires an explicit Bool")
     tag = request["tag"]
@@ -56,7 +59,50 @@ def validate_request(request, policy):
     result = {"tag": tag, "base": base, "forwardGameUnits": float(forward), "rightGameUnits": float(right)}
     if "persistentForOwnedSave" in request:
         result["persistentForOwnedSave"] = request["persistentForOwnedSave"]
+    if "basis" in request:
+        result["basis"] = request["basis"]
     return result
+
+
+def _fixed_frame(backend, player_incarnation):
+    """Read the prepared arena and actual immovable marker, never player pose."""
+    from . import fixture_anchor as arena
+    state = backend.s.state
+    anchor = state.get("fixtureAnchor", {})
+    target = anchor.get("target", {})
+    config = state.get("configuration", {})
+    if (config.get("game_edition") != "se" or config.get("se_fixture_anchor") != arena.RECIPE
+            or anchor.get("recipe") != arena.RECIPE or anchor.get("status") != "prepared"
+            or anchor.get("runId") != state["id"] or anchor.get("game") != state.get("game")
+            or anchor.get("worldGeneration") != state.get("ownedWorldGeneration")
+            or anchor.get("playerIncarnation") != player_incarnation
+            or not isinstance(anchor.get("preparationId"), str) or not re.fullmatch(r"[0-9a-f]{32}", anchor["preparationId"])
+            or anchor.get("expectedPosition") != arena.POSITION or anchor.get("headingDegrees") != arena.HEADING
+            or anchor.get("steps") != {"MoveTo": "returned", "SetAngle": "returned"}
+            or any(target.get(key) != value for key, value in arena.TARGET.items())):
+        raise BindingError("Fixed fixture placement requires the exact same-run prepared QA anchor")
+    origin = anchor.get("position")
+    if (not isinstance(origin, list) or len(origin) != 3
+            or any(type(n) not in (int, float) or not math.isfinite(n) for n in origin)
+            or math.dist(origin, arena.POSITION) > 4):
+        raise BindingError("Prepared QA origin is unavailable or outside its verified tolerance")
+    ref = actor_domain.form(target.get("reference"))
+    if int(ref, 16) >> 24 >= 0xFE or int(ref, 16) & 0xFFFFFF != int(arena.TARGET["localId"], 16):
+        raise BindingError("Fixed fixture marker is foreign or dynamic")
+    current_player, player, _ = actor_domain.anchor(backend, PLAYER["reference"])
+    incarnation, marker, _ = actor_domain.anchor(backend, ref)
+    position = marker.get("position")
+    if (current_player != player_incarnation or player.get("baseForm") != PLAYER["base"]
+            or player.get("loaded3D") is not True or player.get("cellForm") != arena.CELL
+            or incarnation != target.get("incarnation") or marker.get("baseForm") != "0x0000003B"
+            or marker.get("cellForm") != arena.CELL
+            or any(incarnation[key] != player_incarnation[key] for key in ("sessionId", "loadGeneration"))
+            or not isinstance(position, list) or len(position) != 3
+            or any(type(n) not in (int, float) or not math.isfinite(n) for n in position)
+            or math.dist(position, arena.TARGET_POSITION) > .01 or target.get("position") != position):
+        raise BindingError("Fixed fixture marker/player identity, cell or marker position changed")
+    return {"basis": FIXED_BASIS, "preparationId": anchor["preparationId"], "target": copy.deepcopy(target),
+            "originPosition": list(origin), "headingDegrees": arena.HEADING}
 
 
 def require_fixture(session, spec, observation=None):
@@ -211,7 +257,8 @@ def create(session, request, deadline, policy):
     player = actor_domain.observe_actor(backend, PLAYER)
     if player["actor"]["loaded3D"] is not True:
         raise BindingError("Actual player anchor is not loaded")
-    pos, heading = _pose(backend, PLAYER["reference"])
+    frame = _fixed_frame(backend, player["incarnation"]) if request.get("basis") == FIXED_BASIS else None
+    pos, heading = (frame["originPosition"], frame["headingDegrees"]) if frame else _pose(backend, PLAYER["reference"])
     prior = backend.call("inspect", {"kind": "refs", "formType": "Actor", "radius": 0, "limit": 1024})
     rows = prior.get("refs")
     if (not isinstance(rows, list) or prior.get("truncated") is not False or type(prior.get("count")) is not int or
@@ -228,6 +275,8 @@ def create(session, request, deadline, policy):
     entry = {"status": "intent", "tag": request["tag"], "base": base, "runId": session.state["id"],
              "creationId": creation_id, "game": game, "worldGeneration": session.state["ownedWorldGeneration"],
              "destination": destination, "headingDegrees": heading, "steps": {}, "createdAt": time.time()}
+    if frame:
+        entry["placementFrame"] = copy.deepcopy(frame)
     with getattr(session, "lock", nullcontext()):
         if request["tag"] in records or len(records) >= 16:
             raise BindingError("Fixture tag was already attempted; no replacement or replay")
@@ -239,6 +288,8 @@ def create(session, request, deadline, policy):
         incarnation, row, _ = actor_domain.anchor(backend, PLAYER["reference"])
         if incarnation != player["incarnation"] or row["loaded3D"] is not True or session.state["ownedWorldGeneration"] != entry["worldGeneration"]:
             raise BindingError("Player anchor or owned world changed during fixture creation")
+        if frame and _fixed_frame(backend, player["incarnation"]) != frame:
+            raise BindingError("Prepared fixture placement frame changed during creation")
     def invoke(function, arguments, target, script="ObjectReference"):
         entry["steps"][function] = "intent"
         save()
@@ -289,11 +340,16 @@ def create(session, request, deadline, policy):
         stationary_actor = observe_new()
         if stationary_actor["incarnation"] != entry["incarnation"] or stationary_actor["actor"]["loaded3D"] is not True:
             raise BindingError("Created actor incarnation/loaded state changed before placement")
-        current, _ = _pose(backend, PLAYER["reference"])
-        if math.dist(current, pos) > 1:
-            raise BindingError("Player moved before relative fixture placement; never repeat creation")
+        if frame:
+            move_target = frame["target"]["reference"]
+            offsets = [destination[i] - frame["target"]["position"][i] for i in range(3)]
+        else:
+            current, _ = _pose(backend, PLAYER["reference"])
+            if math.dist(current, pos) > 1:
+                raise BindingError("Player moved before relative fixture placement; never repeat creation")
+            move_target, offsets = PLAYER["reference"], [float(dx), float(dy), 0.0]
         stable_world()
-        invoke("MoveTo", [{"form": PLAYER["reference"]}, float(dx), float(dy), 0.0, False], ref)
+        invoke("MoveTo", [{"form": move_target}, *offsets, False], ref)
         current_actor = observe_new()
         if current_actor["incarnation"] != entry["incarnation"]:
             raise BindingError("Created actor incarnation changed before orientation")
