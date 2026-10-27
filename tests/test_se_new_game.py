@@ -28,21 +28,45 @@ class SENewGameTests(unittest.TestCase):
     def test_platform_policy_runs_real_new_game_path_before_original_cell(self):
         session = fixtures.Session()
         session.state['configuration'] = {'game_edition': 'se', 'se_new_game_ui': True}
+        order=[]
+        session.wait_task_queue=Mock(side_effect=lambda:order.append('normal-task-readiness'))
         scenario = {'cell': 'QASmoke'}
-        with patch.object(bootstrap, 'prepare_startup_screen'), \
-             patch.object(bootstrap, 'start_new_game') as start, \
-             patch.object(bootstrap, 'wait_gameplay_ready', return_value=(fixtures.SCENE, fixtures.MENUS)), \
+        def ready(*args,**kwargs):
+            order.append('gameplay-readiness');return fixtures.SCENE,fixtures.MENUS
+        with patch.object(bootstrap, 'prepare_startup_screen')as screen, \
+             patch.object(bootstrap, 'start_new_game',side_effect=lambda *args:order.append('native-new-game-transition')) as start, \
+             patch.object(bootstrap, 'wait_gameplay_ready', side_effect=ready), \
              patch.object(bootstrap.vr_probe, 'guard_fixture_modal', return_value=False), \
              patch.object(bootstrap.vr_probe, 'wait_test_cell', return_value=fixtures.SCENE), \
              patch('skyrim_autotest.initial_world.InitialWorld') as initial:
             initial.return_value.read.return_value = ['newGame']
             bootstrap.prepare_gameplay(session, scenario)
         start.assert_called_once_with(session, 'QASmoke')
+        screen.assert_not_called()
+        session.wait_task_queue.assert_called_once_with()
+        self.assertEqual(order[:3],['native-new-game-transition','normal-task-readiness','gameplay-readiness'])
         self.assertEqual(initial.call_args.args[1], 'new-game')
         self.assertEqual(scenario, {'cell': 'QASmoke'})
         self.assertEqual(session.state['gameplayBootstrap']['startupSelection'], 'platform')
         self.assertEqual(session.state['gameplayBootstrap']['startMode'], 'new-game')
         self.assertFalse(any(c.args[0] in ('game', 'console') for c in session.tool.call_args_list))
+
+    def test_uncertain_ui_transition_never_attempts_normal_queue_or_fixture_actions(self):
+        session=fixtures.Session();session.state['configuration']={'game_edition':'se','se_new_game_ui':True}
+        session.wait_task_queue=Mock()
+        with patch.object(bootstrap,'prepare_startup_screen')as screen,patch('skyrim_autotest.initial_world.InitialWorld'),\
+             patch.object(bootstrap,'start_new_game',side_effect=TimeoutError('Unknown confirm result')),\
+             patch.object(bootstrap,'wait_gameplay_ready')as ready,self.assertRaises(TimeoutError):
+            bootstrap.prepare_gameplay(session,{'cell':'QASmoke'})
+        screen.assert_not_called();session.wait_task_queue.assert_not_called();ready.assert_not_called();session.tool.assert_not_called()
+
+    def test_post_new_game_task_readiness_failure_blocks_gameplay_and_fixture(self):
+        session=fixtures.Session();session.state['configuration']={'game_edition':'se','se_new_game_ui':True}
+        session.wait_task_queue=Mock(side_effect=runner.Blocked('Normal queue unavailable'))
+        with patch('skyrim_autotest.initial_world.InitialWorld'),patch.object(bootstrap,'start_new_game')as start,\
+             patch.object(bootstrap,'wait_gameplay_ready')as ready,self.assertRaises(runner.Blocked):
+            bootstrap.prepare_gameplay(session,{'cell':'QASmoke'})
+        start.assert_called_once();ready.assert_not_called();session.tool.assert_not_called()
 
     def test_se_requires_native_new_game_even_if_menu_and_world_are_present(self):
         for native_new_game in (False, True):

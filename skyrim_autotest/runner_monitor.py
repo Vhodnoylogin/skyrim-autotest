@@ -52,3 +52,18 @@ def restore(directory, state):
 def observed_at(directory, state):
     pulse=read(directory,state)
     return max(state.get('heartbeat',0),pulse['at'] if pulse else 0),pulse
+
+
+def guardian_deadlines(directory, state):
+    """Record the exact bound pulse used for the existing guardian time limits."""
+    pulse_at,pulse=observed_at(directory,state)
+    now=time.time()
+    deadline=state.get('deadline',now+1)
+    stopping=state.get('phase','').startswith('stop-and-restore')
+    reasons=[]
+    if now>deadline+15:reasons.append('phase-deadline-exceeded')
+    if now-pulse_at>35:reasons.append('runner-heartbeat-expired')
+    if pulse and not pulse['healthy'] and not stopping:reasons.append('heartbeat-reported-failure')
+    return {'at':now,'phase':state.get('phase'),'deadline':deadline,
+            'stateHeartbeat':state.get('heartbeat'),'pulseAt':pulse_at,
+            'pulse':pulse,'reasons':reasons}

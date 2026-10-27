@@ -1087,10 +1087,23 @@ class Session:
                     except Exception as error:
                         focus = {'available': False, 'error': str(error)}
                     self.log('se-startup-focus-observed', observation=focus)
-                self.wait_task_queue()
+                self.complete_startup_admission(selected)
                 return
             time.sleep(1)
         raise Blocked('Fresh matching DevBench with advancing game frames not found')
+
+    def complete_startup_admission(self, selected):
+        if (selected['edition'] == 'se'
+                and self.state.get('configuration', {}).get('se_new_game_ui') is True):
+            admission = self.state.get('seStartupAdmission', {})
+            if admission.get('completed') is not True or admission.get('game') != self.state.get('game'):
+                raise Blocked('Explicit SE New Game requires exact native startup admission')
+            # Main Menu runs its own UI queue. The ordinary task queue is
+            # qualified by bootstrap only after the actual New Game transition.
+            self.log('task-queue-probe-deferred', until='native-new-game-transition',
+                     admissionCursor=admission.get('cursor'))
+            return
+        self.wait_task_queue()
 
     def wait_task_queue(self):
         self.phase('wait-task-queue', 90)
@@ -1381,6 +1394,68 @@ class Session:
             self.log('original-mo2-reopened')
 
 
+def _guardian_audit(directory, record):
+    with (Path(directory) / 'guardian-decisions.jsonl').open('a', encoding='utf-8') as output:
+        output.write(json.dumps(record, ensure_ascii=False) + '\n')
+        output.flush()
+        os.fsync(output.fileno())
+
+
+def _guardian_recheck(directory, previous, last_health, health_changed, connection_failed):
+    """Fresh evidence may cancel a candidate; a live owner alone never permits kill."""
+    from . import runner_monitor
+    from .game_restart import expected_restart
+    state = read_json(Path(directory) / 'state.json')
+    binding = ('id', 'runner', 'game')
+    result = {'id': state.get('id'), 'runner': state.get('runner'), 'game': state.get('game'),
+              'done': state.get('done', False), 'reasons': [], 'ownerAlive': None}
+    if any(state.get(key) != previous.get(key) for key in binding):
+        return dict(result, cancelled='ownership-binding-changed')
+    if result['done']:
+        return dict(result, cancelled='runner-completed')
+    reason = None
+    stopping = state.get('phase', '').startswith('stop-and-restore')
+    restarting = expected_restart(state, time.time())
+    if state.get('game') and not stopping and not restarting:
+        result['gameAlive'] = native.alive(state['game'])
+        if not result['gameAlive']:
+            reason = 'Owned game process exited unexpectedly (CTD or external termination)'
+            result['reasons'].append('owned-game-unavailable')
+        else:
+            try:
+                health = request(state['port'], 'api/health', timeout=2)
+                result['health'] = health
+                marker = (health.get('frame'), health.get('lastTaskFrame'))
+                if health.get('pid') != state['game']['pid']:
+                    reason = 'DevBench process identity changed'
+                    result['reasons'].append('devbench-identity-changed')
+                elif (marker == last_health and health.get('pendingTasks', 0) > 0
+                      and time.monotonic() - health_changed > 20):
+                    reason = 'Game frames and SKSE task completion stalled with pending work'
+                    result['reasons'].append('pending-task-stall')
+            except (OSError, ValueError, RuntimeError) as error:
+                result['healthError'] = str(error)
+                if connection_failed is not None and time.monotonic() - connection_failed > 20:
+                    reason = 'DevBench connection lost while the owned game remains alive'
+                    result['reasons'].append('devbench-connection-lost')
+    # The health request can cross a phase transition or completion. Read the
+    # bound state and heartbeat again after it, immediately before the decision.
+    latest = read_json(Path(directory) / 'state.json')
+    if any(latest.get(key) != state.get(key) for key in (*binding, 'phase', 'deadline', 'done')):
+        return dict(result, reasons=[], cancelled='state-changed-during-recheck')
+    timing = runner_monitor.guardian_deadlines(directory, latest)
+    result['timing'] = timing
+    result['reasons'].extend(timing['reasons'])
+    if 'heartbeat-reported-failure' in timing['reasons']:
+        reason = 'Executor heartbeat reported failure'
+    elif reason is None and timing['reasons']:
+        reason = 'Runner exceeded its phase deadline or heartbeat limit'
+    result['ownerAlive'] = native.alive(latest.get('runner'))
+    result['reason'] = reason or 'Runner is unavailable; independent guardian recovered the session'
+    result['expired'] = bool(result['reasons'])
+    return result
+
+
 def guardian(directory):
     # Observe only; claim the same OS mutex after the owner dies or exits its scope.
     log = Path(directory) / 'guardian.log'
@@ -1395,8 +1470,9 @@ def guardian(directory):
         owner = state.get('runner')
         reason = 'Runner died or exceeded its deadline; independent guardian recovered the session'
         from . import runner_monitor
-        pulse_at,pulse=runner_monitor.observed_at(directory,state)
-        expired = time.time() > state.get('deadline', time.time() + 1) + 15 or time.time() - pulse_at > 35
+        timing = runner_monitor.guardian_deadlines(directory,state)
+        pulse = timing['pulse']
+        expired = bool(timing['reasons'])
         if pulse and not pulse['healthy'] and not state.get('phase','').startswith('stop-and-restore'):
             reason,expired='Executor heartbeat reported failure',True
         from .game_restart import expected_restart
@@ -1429,10 +1505,40 @@ def guardian(directory):
                     connection_failed = connection_failed or time.monotonic()
                     if time.monotonic() - connection_failed > 20:
                         reason, expired = 'DevBench connection lost while the owned game remains alive', True
-        if native.alive(owner) and not expired:
+        owner_alive = native.alive(owner)
+        if owner_alive and not expired:
             time.sleep(2)
             continue
-        if native.alive(owner):
+        if not owner_alive and not expired:
+            reason = 'Runner identity lookup was unavailable; fresh recovery decision required'
+        candidate = {'at': time.time(), 'kind': 'recovery-candidate', 'id': state.get('id'),
+                     'runner': owner, 'game': state.get('game'), 'ownerAlive': owner_alive,
+                     'expired': expired, 'reason': reason, 'timing': timing,
+                     'lastHealth': last_health, 'healthUnchangedSeconds': time.monotonic()-health_changed,
+                     'connectionFailedSince': connection_failed}
+        try:
+            _guardian_audit(directory, candidate)
+            decision = _guardian_recheck(directory, state, last_health, health_changed, connection_failed)
+            decision.update(at=time.time(), kind='recovery-decision')
+            if decision.get('done'):
+                decision['action'] = 'completed'
+            elif decision.get('cancelled') or (decision['ownerAlive'] and not decision['expired']):
+                decision['action'] = 'cancelled'
+            else:
+                decision['action'] = 'terminate-expired-owner' if decision['ownerAlive'] else 'claim-recovery-mutex'
+            _guardian_audit(directory, decision)
+        except (OSError, ValueError, RuntimeError):
+            # Never kill from stale evidence when the fresh proof/audit failed.
+            log.write_text(traceback.format_exc(), encoding='utf-8')
+            time.sleep(2)
+            continue
+        if decision['action'] == 'completed':
+            return
+        if decision['action'] == 'cancelled':
+            time.sleep(2)
+            continue
+        reason = decision['reason']
+        if decision['ownerAlive'] and decision['expired']:
             native.terminate(owner)
         try:
             with native.SessionMutex():
@@ -1440,10 +1546,14 @@ def guardian(directory):
                 # The runner can finish between the observer read and mutex claim.
                 if session.state.get('done'):
                     return
+                if any(session.state.get(key) != state.get(key) for key in ('id', 'runner', 'game')):
+                    _guardian_audit(directory, {'at': time.time(), 'kind': 'recovery-cancelled',
+                        'action': 'cancelled', 'reason': 'ownership-binding-changed-before-mutex-claim'})
+                    return
                 previous = {'result': session.state.get('result'),
                             'reason': session.state.get('reason'),
                             'phase': session.state.get('phase')}
-                session.state['guardianRecovery'] = {'trigger': reason, 'prior': previous}
+                session.state['guardianRecovery'] = {'trigger': reason, 'prior': previous, 'decision': decision}
                 prior_reason = previous['reason'] or ''
                 session.state.update(result='failed', reason=(prior_reason + '; ' + reason).lstrip('; '))
                 session.save()

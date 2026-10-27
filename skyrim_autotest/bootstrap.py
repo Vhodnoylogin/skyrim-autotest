@@ -469,11 +469,18 @@ def prepare_gameplay(session, scenario):
         new_game = True
     if new_game and fixture:
         raise AssertionError('New Game cannot load a save fixture')
-    prepare_startup_screen(session)
+    # The explicit SE route has listener-side Main Menu admission and its own
+    # fenced UI-queue contract. Ordinary inspect/scene tasks may be paused there.
+    if not platform_new_game:
+        prepare_startup_screen(session)
     from .initial_world import InitialWorld
     initial = InitialWorld(session, 'fixture' if fixture else 'new-game' if new_game else 'cell')
     if new_game:
         start_new_game(session, cell)
+        if platform_new_game:
+            # Normal game-task/menu readiness remains mandatory after the
+            # actual NEW lifecycle/world transition, before gameplay/fixture work.
+            session.wait_task_queue()
         session.phase('gameplay-new-game-initial-world', 120)
         loaded_scene, _ = wait_gameplay_ready(session, None, True, lifecycle_poll=initial.read)
         if platform_new_game and initial.read() != ['newGame']:
