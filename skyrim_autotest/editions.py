@@ -49,6 +49,11 @@ def validate_mo2_loader(text, configuration):
 
 def validate_scenario(configuration, scenario, driver_backend, input_backend):
     edition = target(configuration)['edition']
+    if configuration.get('se_fixture_anchor') is not None:
+        if (edition != 'se' or configuration['se_fixture_anchor'] != 'qasmoke-west-navmesh-v1' or
+                configuration.get('se_new_game_ui') is not True or
+                scenario.get('cell') != 'QASmoke' or scenario.get('fixture')):
+            raise ValueError('SE fixture anchor requires an explicit native New Game QASmoke scenario')
     steps = [*scenario.get('steps', []), *scenario.get('postSteps', [])]
     if any(step.get('tool') == 'native14' for step in steps):
         if edition != 'vr':

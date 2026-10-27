@@ -298,12 +298,37 @@ def create(session, request, deadline, policy):
         if current_actor["incarnation"] != entry["incarnation"]:
             raise BindingError("Created actor incarnation changed before orientation")
         invoke("SetAngle", [0.0, 0.0, heading], ref)
-        final = observe_new()
-        if final["incarnation"] != entry["incarnation"] or final["actor"]["loaded3D"] is not True:
-            raise BindingError("Created actor incarnation/loaded state changed during placement")
-        actual_pos, actual_heading = _pose(backend, ref)
-        if math.dist(actual_pos, destination) > 4 or abs((actual_heading - heading + 180) % 360 - 180) > 1:
-            raise BindingError("Actual fixture placement/orientation readback differs from its requested position")
+        readback = {"requestedPosition": destination, "requestedHeadingDegrees": heading,
+                    "positionToleranceGameUnits": 4, "headingToleranceDegrees": 1, "samples": []}
+        entry["placementReadback"] = readback
+        settle_end = min(deadline, time.monotonic()+3)
+        previous = None
+        while True:
+            final = observe_new()
+            if final["incarnation"] != entry["incarnation"] or final["actor"]["loaded3D"] is not True:
+                raise BindingError("Created actor incarnation/loaded state changed during placement")
+            actual_pos, actual_heading = _pose(backend, ref)
+            sample = {"atMonotonic": time.monotonic(), "position": actual_pos, "headingDegrees": actual_heading,
+                      "positionErrorGameUnits": math.dist(actual_pos, destination),
+                      "headingErrorDegrees": abs((actual_heading-heading+180) % 360-180)}
+            readback["samples"].append(sample)
+            save()
+            session.log("interactive-fixture-placement-readback", tag=request["tag"], reference=ref,
+                        requestedPosition=destination, requestedHeadingDegrees=heading, **sample)
+            if sample["positionErrorGameUnits"] > 4 or sample["headingErrorDegrees"] > 1:
+                raise BindingError("Actual fixture placement/orientation readback differs from its requested position: "
+                                   + repr({"requestedPosition": destination, "requestedHeadingDegrees": heading, **sample}))
+            if sample["atMonotonic"] > settle_end:
+                raise BindingError("Actual fixture placement readback exceeded its settling deadline: " + repr(readback))
+            if previous and sample["atMonotonic"]-previous["atMonotonic"] >= .2:
+                if (math.dist(actual_pos, previous["position"]) <= 1
+                        and abs((actual_heading-previous["headingDegrees"]+180) % 360-180) <= 1):
+                    readback["stableSampleSpanSeconds"] = sample["atMonotonic"]-previous["atMonotonic"]
+                    break
+            if time.monotonic() >= settle_end:
+                raise BindingError("Actual fixture placement did not stabilize within its original tolerance: " + repr(readback))
+            previous = sample
+            backend.pause(.2)
         stable_world()
         if actor_domain.anchor(backend, ref)[0] != entry["incarnation"]:
             raise BindingError("Created actor incarnation changed across placement readback")

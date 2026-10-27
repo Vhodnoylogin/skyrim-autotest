@@ -298,10 +298,79 @@ class FixtureActorTests(unittest.TestCase):
 
     def test_wrong_actual_placement_never_becomes_created(self):
         self.session.bad_position = True
-        with self.assertRaisesRegex(ValueError, "placement"):
+        with self.assertRaisesRegex(ValueError, "placement") as caught:
             self.create()
         self.assertEqual(len(self.session.mutations), 4)
-        self.assertEqual(self.session.state["interactiveActorFixtures"]["M1"]["status"], "uncertain")
+        record = self.session.state["interactiveActorFixtures"]["M1"]
+        self.assertEqual(record["status"], "uncertain")
+        self.assertEqual(record["placementReadback"]["samples"][0]["positionErrorGameUnits"], 100)
+        self.assertIn("requestedPosition", str(caught.exception))
+        self.assertIn("positionErrorGameUnits", str(caught.exception))
+
+    def test_ongoing_xy_drift_is_not_accepted_by_a_single_in_tolerance_sample(self):
+        original = self.session.tool
+        def tool(name, args, timeout, deadline):
+            entry = self.session.state.get("interactiveActorFixtures", {}).get("M1", {})
+            if (name == "papyrus" and args.get("function") == "GetPositionX"
+                    and args.get("self") == {"form": REF} and entry.get("steps", {}).get("SetAngle") == "returned"):
+                self.session.position[REF][0] += 1.5
+            return original(name, args, timeout, deadline)
+        self.session.tool = tool
+        with self.assertRaisesRegex(ValueError, "placement"): self.create()
+        record = self.session.state["interactiveActorFixtures"]["M1"]
+        self.assertEqual(record["status"], "uncertain")
+        self.assertEqual([x["positionErrorGameUnits"] for x in record["placementReadback"]["samples"]], [1.5, 3, 4.5])
+        self.assertEqual(len(self.session.mutations), 4)
+        with self.assertRaisesRegex(ValueError, "already attempted"): self.create()
+        self.assertEqual(len(self.session.mutations), 4)
+
+    def test_small_floor_settle_requires_two_stable_reads_with_original_tolerance(self):
+        def settle(function):
+            if function == "SetAngle": self.session.position[REF][2] -= .35
+        self.session.on_mutation = settle
+        result = self.create()
+        record = self.session.state["interactiveActorFixtures"]["M1"]
+        readback = record["placementReadback"]
+        self.assertEqual(len(readback["samples"]), 2)
+        self.assertGreaterEqual(readback["stableSampleSpanSeconds"], .2)
+        self.assertEqual(readback["positionToleranceGameUnits"], 4)
+        self.assertAlmostEqual(result["placement"]["position"][2], 4.65)
+        self.assertEqual(readback["requestedPosition"][2], 5)
+        self.assertEqual(len(self.session.mutations), 4)
+
+    def test_retained_mheavy_33_unit_xy_displacement_is_not_floor_settling(self):
+        # q04:20261027-124523-b1e00f, completed MoveTo and SetAngle callbacks.
+        self.session.position["0x00000014"] = [-363.2663879394531, 2035.23779296875, 6976.35009765625]
+        self.session.angles["0x00000014"] = 260.2141418457031
+        actual = [-568.7416381835938, 2244.05224609375, 6976.0009765625]
+        def displaced(function):
+            if function == "SetAngle": self.session.position[REF] = list(actual)
+        self.session.on_mutation = displaced
+        with self.assertRaisesRegex(ValueError, "placement"):
+            self.create(dict(REQUEST, forwardGameUnits=200, rightGameUnits=240))
+        record = self.session.state["interactiveActorFixtures"]["M1"]
+        self.assertEqual(record["status"], "uncertain")
+        self.assertEqual(record["steps"]["MoveTo"], "returned")
+        self.assertEqual(record["steps"]["SetAngle"], "returned")
+        sample = record["placementReadback"]["samples"][0]
+        self.assertEqual(sample["position"], actual)
+        self.assertGreater(sample["positionErrorGameUnits"], 33)
+        self.assertLess(sample["positionErrorGameUnits"], 34)
+        self.assertEqual(sample["headingErrorDegrees"], 0)
+        self.assertEqual(len(self.session.mutations), 4)
+        with self.assertRaisesRegex(ValueError, "already attempted"): self.create()
+        self.assertEqual(len(self.session.mutations), 4)
+
+    def test_lost_orientation_ack_never_retries_or_starts_stability_reads(self):
+        self.session.fail_after = "SetAngle"
+        with self.assertRaises(TimeoutError): self.create()
+        record = self.session.state["interactiveActorFixtures"]["M1"]
+        self.assertEqual(record["status"], "uncertain")
+        self.assertEqual(record["steps"]["SetAngle"], "intent")
+        self.assertNotIn("placementReadback", record)
+        self.assertEqual(len(self.session.mutations), 4)
+        with self.assertRaisesRegex(ValueError, "already attempted"): self.create()
+        self.assertEqual(len(self.session.mutations), 4)
 
     def test_metadata_and_truncated_census_fail_before_any_mutation(self):
         for field in ("metadata_invalid", "truncated"):

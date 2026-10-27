@@ -61,6 +61,17 @@ the mutable state file while keeping all comparison inputs and full evidence.
 
 ## Persistent references and inspection
 
+The default QASmoke arrival faces furniture; relative NPC offsets can land in
+its collision geometry even after SetDontMove. For the native SE New Game route,
+the explicit top-level `se_fixture_anchor:"qasmoke-west-navmesh-v1"` prepares a
+west-room player anchor during common initialization, before gameplay readiness
+is published. The executor resolves Dragonborn's actual marker through the
+loaded plugin, checks its identity/pose and performs one recorded relocation and
+orientation. Bounded stable readbacks must pass; unknown mutations are never
+replayed. No subject order implements this startup transition. The unchanged
+fixture offsets still need actual placement and drift checks; navigation data
+alone do not prove the absence of contacts. Live qualification remains required.
+
 `persistentForOwnedSave:true` is allowed only with the explicit opt-in. PlaceAtMe
 uses forcePersist, then two independent native reads verify actual persistence
 and exact VM/reference identity. Names change only the created reference; no NPC

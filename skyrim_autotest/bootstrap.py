@@ -524,9 +524,19 @@ def prepare_gameplay(session, scenario):
         scene = session.tool('inspect', {'kind': 'scene'})
     scene, menus = wait_gameplay_ready(session, cell, False, lifecycle_poll=initial.read)
     initial.complete(scene, menus)
+    anchor = None
+    if session.state.get('configuration', {}).get('se_fixture_anchor') is not None:
+        if not platform_new_game or cell != 'QASmoke' or fixture:
+            raise AssertionError('SE fixture anchor requires the owned New Game QASmoke initialization')
+        from .fixture_anchor import prepare_anchor
+        session.phase('gameplay-fixture-anchor', 45)
+        anchor = prepare_anchor(session, time.monotonic() + 30)
+        scene, menus = wait_gameplay_ready(session, cell, False, lifecycle_poll=initial.read)
     session.state['gameplayBootstrap'] = {'completed': True, 'cell': cell,
                                           'loadedFixture': bool(fixture), 'startMode': 'new-game' if new_game else scenario.get('startMode'),
                                           'startupSelection': 'platform' if platform_new_game else 'scenario',
                                           'scene': scene, 'menus': menus}
+    if anchor is not None:
+        session.state['gameplayBootstrap']['fixtureAnchor'] = anchor
     session.save()
     session.log('gameplay-ready', scene=scene, menus=menus)

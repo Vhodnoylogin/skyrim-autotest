@@ -8,6 +8,52 @@ import tests.test_initial_world as fixtures
 
 
 class SENewGameTests(unittest.TestCase):
+    def test_fixture_anchor_is_explicit_se_new_game_only_and_scenario_is_checked_offline(self):
+        value = config.template('se')
+        for key in config.REQUIRED - {'openvr_paths'}: value[key] = 'C:/Fixture/'+key
+        before = config.P.snapshot(); self.addCleanup(lambda: setattr(config.P, 'value', before))
+        anchor = dict(value, se_new_game_ui=True, se_fixture_anchor='qasmoke-west-navmesh-v1')
+        self.assertEqual(config.configure(anchor)['se_fixture_anchor'], 'qasmoke-west-navmesh-v1')
+        editions.validate_scenario(anchor, {'cell': 'QASmoke'}, 'none', 'devbench')
+        for changes in ({'se_new_game_ui':False}, {'se_fixture_anchor':None},
+                        {'se_fixture_anchor':True}, {'se_fixture_anchor':'unknown'},
+                        {'game_edition':'vr', 'openvr_paths':'C:/VR'}):
+            with self.subTest(changes=changes), self.assertRaises(config.ConfigurationError):
+                config.configure(dict(anchor, **changes))
+        for scenario in ({'cell':'Riverwood'}, {'cell':'QASmoke', 'fixture':{'saveStem':'pinned'}}, {}):
+            with self.subTest(scenario=scenario), self.assertRaises(ValueError):
+                editions.validate_scenario(anchor, scenario, 'none', 'devbench')
+
+    def test_fixture_anchor_precedes_completed_gameplay_and_failure_does_not_publish_ready(self):
+        for failed in (False, True):
+            with self.subTest(failed=failed):
+                session = fixtures.Session()
+                session.state['configuration'] = {'game_edition':'se', 'se_new_game_ui':True,
+                                                  'se_fixture_anchor':'qasmoke-west-navmesh-v1'}
+                session.wait_task_queue = Mock()
+                initial = Mock(); initial.read.return_value = ['newGame']
+                def relocate(*args):
+                    self.assertNotIn('gameplayBootstrap', session.state)
+                    initial.complete.assert_called_once_with(fixtures.SCENE, fixtures.MENUS)
+                    if failed: raise ValueError('Anchor position drifted')
+                    return {'policy':'qasmoke-west-navmesh-v1', 'status':'prepared'}
+                with patch('skyrim_autotest.initial_world.InitialWorld', return_value=initial), \
+                     patch.object(bootstrap, 'start_new_game'), \
+                     patch.object(bootstrap, 'wait_gameplay_ready', return_value=(fixtures.SCENE,fixtures.MENUS)) as ready, \
+                     patch.object(bootstrap.vr_probe, 'guard_fixture_modal', return_value=False), \
+                     patch.object(bootstrap.vr_probe, 'wait_test_cell', return_value=fixtures.SCENE), \
+                     patch('skyrim_autotest.fixture_anchor.prepare_anchor', side_effect=relocate) as anchor:
+                    if failed:
+                        with self.assertRaisesRegex(ValueError, 'position drifted'):
+                            bootstrap.prepare_gameplay(session, {'cell':'QASmoke'})
+                        self.assertNotIn('gameplayBootstrap', session.state)
+                    else:
+                        bootstrap.prepare_gameplay(session, {'cell':'QASmoke'})
+                        self.assertTrue(session.state['gameplayBootstrap']['completed'])
+                        self.assertEqual(session.state['gameplayBootstrap']['fixtureAnchor']['status'], 'prepared')
+                        self.assertEqual(ready.call_count, 3)
+                anchor.assert_called_once()
+
     def test_policy_is_explicit_boolean_se_only_and_does_not_replace_pinned_save(self):
         value = config.template('se')
         for key in config.REQUIRED - {'openvr_paths'}: value[key] = 'C:/Fixture/'+key

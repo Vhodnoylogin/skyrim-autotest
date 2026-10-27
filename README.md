@@ -29,6 +29,10 @@ The SE source candidate adds [morph sessions and owned NPC persistence](docs/mor
 real OBody control/catalog, independent SKEE vectors, reference names/equipment,
 and a strictly guarded same-process save/load with native form/VM remapping.
 These additions require exact installed Polygon qualification before admission.
+An explicit `se_fixture_anchor: "qasmoke-west-navmesh-v1"` with the native SE
+New Game route prepares a measured west-room QASmoke anchor before test actions.
+It leaves the default startup unchanged and verifies the loaded Dragonborn marker,
+one player relocation and stable actual position; it does not disable collisions.
 
 Current bounded SE evidence includes the0.4.0 RC6/native-startup composition:
 actual New Game, settled QASmoke, movement, creation of one disposable NPC,
