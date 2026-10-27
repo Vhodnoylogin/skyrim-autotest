@@ -1543,7 +1543,8 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
     requested_configuration = P.snapshot()
     recover()
     configure(requested_configuration)
-    with native.SessionMutex():
+    from .command_endpoint import managed_endpoint
+    with native.SessionMutex(), managed_endpoint(P.value.get('interactive_session')) as endpoint:
         info = preflight(profile, restart_idle_mo2)
         run_id = time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6]
         directory = RUNS / run_id
@@ -1566,6 +1567,10 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
         if order:
             state['order'] = order
         session = Session(directory, state)
+        if endpoint is not None:
+            session.command_endpoint = endpoint
+            state['commandEndpoint'] = endpoint.check()
+            session.log('command-endpoint-ready', phase='before-setup', **state['commandEndpoint'])
         session.save()
         (directory / 'scenario.json').write_bytes(scenario_bytes)
         boundary_collection.initialize(session, P.value.get('boundary_collection'))
@@ -1577,6 +1582,9 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
             session.setup()
             if fault == 'after-setup':
                 os._exit(99)  # Acceptance test: guardian must restore without finally.
+            if endpoint is not None:
+                session.state['commandEndpoint'] = endpoint.check()
+                session.log('command-endpoint-ready', phase='before-launch', **session.state['commandEndpoint'])
             session.launch()
             if session.state.get('rootBuilder'):
                 from . import root_builder

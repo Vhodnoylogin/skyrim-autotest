@@ -69,6 +69,14 @@ Source/offline tests do not establish live acceptance of a new game/provider bui
 For a finite origin-owned program that retains same-run NPC identities, read
 `docs/subject-companion.md`. Its standalone transport ships in this full kit;
 Polygon owns ordinary admission and independently collected case reports.
+For an authorized held companion run, explicitly select
+`interactive_session.manageCommandEndpoint:true` in the reviewed external
+runner configuration; see `docs/interactive-session.md`. Initialize its external
+channel/token first. The native runner then owns the HTTP receiver lifetime or
+proves an already running receiver identifies that exact database. An older or
+foreign receiver blocks launch and is left running. This changes the frozen
+configuration and needs the normal fresh preparation/qualification; do not
+change an active attempt or attach a manual replacement receiver.
 
 For a qualified producer's already collected native14 diagnostics, use
 `validate-native14 --snapshot FILE --expected-pid PID --max-age-micros AGE`.

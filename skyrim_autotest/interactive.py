@@ -30,7 +30,7 @@ class InteractiveError(ValueError):
 
 def validate(settings):
     required = {'channelConfig', 'maximumSeconds', 'allowedTools', 'sourceId'}
-    if (type(settings) is not dict or not required <= set(settings) or set(settings) - required - {'nativeBindings','npcPersistence','morphSession'} or
+    if (type(settings) is not dict or not required <= set(settings) or set(settings) - required - {'nativeBindings','npcPersistence','morphSession','manageCommandEndpoint'} or
             not isinstance(settings['channelConfig'], str) or not Path(settings['channelConfig']).is_absolute()):
         raise InteractiveError('interactive_session requires explicit channelConfig, maximumSeconds, allowedTools and sourceId')
     maximum, allowed = settings['maximumSeconds'], settings['allowedTools']
@@ -42,6 +42,8 @@ def validate(settings):
     if settings['sourceId'] != 'operator.actions':
         raise InteractiveError('interactive_session sourceId must be operator.actions')
     result = dict(settings, channelConfig=str(Path(settings['channelConfig']).resolve()), allowedTools=list(allowed))
+    if 'manageCommandEndpoint' in settings and type(settings['manageCommandEndpoint']) is not bool:
+        raise InteractiveError('manageCommandEndpoint requires an explicit boolean')
     if 'nativeBindings' in settings:
         from .interactive_bindings import validate as validate_bindings
         result['nativeBindings'] = validate_bindings(settings['nativeBindings'])
@@ -252,6 +254,14 @@ def run(session, settings):
         raise InteractiveError('Interactive hold requires completed common bootstrap and a fresh owned run')
     channel = load_config(settings['channelConfig'])
     bus = CommandBus(channel['database'], channel['claimTimeoutSeconds'])
+    endpoint_metadata = None
+    if settings.get('manageCommandEndpoint'):
+        endpoint = getattr(session, 'command_endpoint', None)
+        if endpoint is None or endpoint.config_path != settings['channelConfig']:
+            raise InteractiveError('Managed command endpoint must be acquired by the native runner before launch')
+        endpoint_metadata = endpoint.check()
+        session.state['commandEndpoint'] = endpoint_metadata
+        session.log('command-endpoint-ready', phase='interactive-ready', **endpoint_metadata)
     run_id = session.state['id']
     session_id = 'game-' + run_id
     binding = {'provider': 'skyrim-autotest', 'conversationId': run_id, 'agentId': 'owned-game-executor'}
@@ -263,6 +273,8 @@ def run(session, settings):
     metadata = {'sessionId': session_id, 'binding': binding, 'sourceId': settings['sourceId'],
         'channelConfig': settings['channelConfig'], 'maximumSeconds': settings['maximumSeconds'],
         'ready': True, 'liveQualified': False}
+    if endpoint_metadata is not None:
+        metadata['commandEndpoint'] = endpoint_metadata
     session.state['interactiveSession'] = metadata
     session.phase('interactive-session', settings['maximumSeconds'] + 5)
     session.save()

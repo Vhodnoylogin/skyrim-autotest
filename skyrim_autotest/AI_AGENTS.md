@@ -31,6 +31,12 @@ Explicit interactive_session is platform-owned and separately qualified; it
 holds the existing owner after common readiness/preparation until explicit finish
 or its declared bound. It is not a second launch route or permission to replay
 queued/delivered orders. Read docs/interactive-session.md before selecting it.
+For an authorized companion hold, explicitly opting into
+interactive_session.manageCommandEndpoint:true is recommended in the reviewed
+configuration. Initialize the channel/token first. The existing native owner
+then starts its in-process endpoint or authenticates an existing same-database
+receiver; a foreign/unsupported receiver blocks launch and is left untouched.
+No endpoint restart or action replay is permitted after an uncertain outcome.
 For an external whole-utterance backend, docs/asr-bridge.md describes the data-only
 JSONL forwarder. It uses a separate durable cursor, immutable source IDs and ACKs;
 it does not open audio or change the shared listener cursor. New source/session

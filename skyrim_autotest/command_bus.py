@@ -199,12 +199,17 @@ class CommandBus:
                     type TEXT NOT NULL, created REAL NOT NULL, data TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS event_session_order ON events(session_id, id);
+                CREATE TABLE IF NOT EXISTS channel_metadata (
+                    key TEXT PRIMARY KEY, value TEXT NOT NULL
+                );
                 PRAGMA user_version=1;
             """
             for statement in schema.split(";"):
                 if statement.strip():
                     con.execute(statement)
             con.execute(f"PRAGMA application_id={APPLICATION_ID}")
+            con.execute("INSERT OR IGNORE INTO channel_metadata(key,value) VALUES ('channelId',?)", (uuid.uuid4().hex,))
+            self._identity(con)
         # Set persistent journal mode only after proving that this is our database.
         with closing(self._connect()) as con:
             con.execute("PRAGMA journal_mode=WAL")
@@ -592,6 +597,19 @@ class CommandBus:
                                 "data": json.loads(r["data"])} for r in rows],
                     "nextAfterId": rows[-1]["id"] if rows else afterId}
 
+    def _identity(self, con):
+        row = con.execute("SELECT value FROM channel_metadata WHERE key='channelId'").fetchone()
+        if row is None or not isinstance(row["value"], str) or not re.fullmatch(r"[0-9a-f]{32}", row["value"]):
+            raise BusError("Command channel identity is invalid")
+        location = os.path.normcase(str(self.database.resolve()))
+        return {"schemaVersion": 1, "channelId": row["value"],
+                "databaseLocationSha256": hashlib.sha256(location.encode('utf-8')).hexdigest()}
+
+    def identity(self):
+        """Read the durable channel identity without changing session/queue state."""
+        with closing(self._connect()) as con:
+            return self._identity(con)
+
     def status(self, sessionId=None):
         with closing(self._connect()) as con:
             if sessionId is None:
@@ -605,6 +623,7 @@ class CommandBus:
 
 # One strict dispatch contract shared by HTTP, CLI JSON calls and the stdio bridge.
 OPERATIONS = {
+    "identity": ("identity", (), ()),
     "sessions": ("create_session", ("sessionId",), ()),
     "bind": ("bind", ("sessionId", "binding"), ()),
     "submit": ("submit", ("sessionId", "sourceId", "sourceEventId", "kind", "text"), ("priority", "metadata", "expectedBinding")),

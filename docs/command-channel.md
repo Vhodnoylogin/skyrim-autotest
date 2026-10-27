@@ -1,5 +1,17 @@
 # Durable text and voice command channel
 
+Authenticated `identity` (POST `/v1/identity` with `{}`) returns schemaVersion1
+and the persistent opaque `channelId` of this command database, plus
+`databaseLocationSha256`: the SHA256 of its canonical, case-normalized absolute
+database path. A copy retaining the same UUID at another path cannot identify
+the selected local database. The actual path is not returned. This operation reads no
+queue contents and changes no session/delivery state. Existing owned schema1
+databases acquire this metadata without changing their queues or ownership
+guards. The HTTP client, CLI and stdio bridge share this operation. The identity
+is a database/channel identifier, not a credential. An older receiver without
+this operation cannot be adopted by an explicitly managed held run; see
+[interactive endpoint ownership](interactive-session.md).
+
 The command channel receives text and **final** ASR into an external SQLite inbox,
 including while the bound AI consumer is busy. It exposes the same operations through
 Python, authenticated loopback HTTP, a CLI and an optional stdio MCP bridge. The bus

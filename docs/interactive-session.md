@@ -46,6 +46,7 @@ subject orders:
 {
   "interactive_session": {
     "channelConfig": "C:/TestBench/se/config-040/command-channel.json",
+    "manageCommandEndpoint": true,
     "maximumSeconds": 1800,
     "allowedTools": ["inspect", "menu", "input", "platform"],
     "sourceId": "operator.actions"
@@ -69,8 +70,24 @@ by an incoming command. The `papyrus` tool must also appear in `allowedTools`.
 A separately started neutral command receiver may accept owner text/final ASR
 while the game executor or an agent is busy. Initialize its external channel
 configuration and optionally start its HTTP server through the documented
-[channel interface](command-channel.md). Neither the interactive loop nor setup
-starts that server or any voice adapter. A fresh ready-file target must be
+[channel interface](command-channel.md). For a companion-controlled held run,
+explicit `manageCommandEndpoint:true` is recommended. Under the existing native
+session lock, the runner starts an in-process loopback HTTP receiver before
+preflight/setup/game launch when the selected port is free. An occupied port is
+accepted only when authenticated `identity` readback matches the persistent
+`channelId` and canonical database-location fingerprint of the selected local
+command database. A copied database at another path, foreign database, wrong
+token or older receiver without `identity` stops the run before launch; the
+existing receiver is never stopped. Initialize the channel and token beforehand.
+
+The runner checks identity again immediately before launch and before publishing
+interactive readiness. Logs and readiness metadata expose only mode (`owned` or
+`adopted`), loopback host/port and channel ID. The receiver remains alive through
+native cleanup and final reporting. Only a receiver started by this run is
+closed afterward. A stopped endpoint is never restarted or silently adopted in
+its place. No adapter, audio or additional process is started. The absent/false
+setting preserves the separately started receiver contract. The interactive
+loop itself cannot start a receiver. A fresh ready-file target must be
 separate from all existing configuration, token and database files.
 
 The human conversation session belongs to its exact AI-host binding. Its raw
