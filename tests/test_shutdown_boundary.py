@@ -82,8 +82,12 @@ class ShutdownBoundaryTests(unittest.TestCase):
                 self.session.guard_shutdown()
 
     def guardian_fixture(self, current):
-        initial = {'id': 'handoff', 'runner': {'pid': 1}, 'done': False,
+        initial = {'id': 'handoff', 'runner': {'pid': 1, 'birth': 100, 'path': 'C:/Python/python.exe'},
+                   'game': dict(self.game), 'done': False,
                    'phase': 'stop-and-restore', 'deadline': time.time()+100}
+        # A later Session read keeps the same run/process ownership. Tests may
+        # override a binding explicitly when exercising a refused handoff.
+        current = dict(initial, **current)
         recovered = Mock(); recovered.state = current
         recovered.cleanup.side_effect = lambda: current.update(restored=True)
         return initial, recovered
@@ -113,6 +117,28 @@ class ShutdownBoundaryTests(unittest.TestCase):
         self.assertTrue(recovered.state['reason'].startswith(original+'; '))
         self.assertEqual(recovered.state['result'], 'failed')
         self.assertTrue(recovered.state['done']); recovered.report.assert_called_once()
+        self.assertEqual(recovered.state['guardianRecovery']['decision']['action'], 'claim-recovery-mutex')
+
+    def test_guardian_refuses_changed_run_or_process_binding_after_mutex_claim(self):
+        for change in ({'id': 'another-run'},
+                       {'runner': {'pid': 1, 'birth': 101, 'path': 'C:/Python/python.exe'}},
+                       {'game': dict(self.game, birth=103)}):
+            with self.subTest(change=change):
+                initial, recovered = self.guardian_fixture(dict(done=False, result='failed', **change))
+                with patch.object(runner, 'read_json', return_value=initial), \
+                     patch.object(runner_monitor, 'observed_at', return_value=(time.time(), None)), \
+                     patch.object(native, 'alive', return_value=False), \
+                     patch.object(native, 'terminate') as terminate, \
+                     patch.object(native, 'SessionMutex', return_value=nullcontext()), \
+                     patch.object(runner, 'Session', return_value=recovered):
+                    runner.guardian(self.root)
+                terminate.assert_not_called()
+                recovered.cleanup.assert_not_called()
+                recovered.save.assert_not_called()
+                recovered.report.assert_not_called()
+                self.assertNotIn('guardianRecovery', recovered.state)
+                audit = [json.loads(row) for row in (self.root/'guardian-decisions.jsonl').read_text().splitlines()]
+                self.assertEqual(audit[-1]['reason'], 'ownership-binding-changed-before-mutex-claim')
 
 
 if __name__ == '__main__': unittest.main()
