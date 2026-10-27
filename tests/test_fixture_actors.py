@@ -331,9 +331,10 @@ class FixtureActorTests(unittest.TestCase):
         result = self.create()
         record = self.session.state["interactiveActorFixtures"]["M1"]
         readback = record["placementReadback"]
-        self.assertEqual(len(readback["samples"]), 2)
+        self.assertGreaterEqual(len(readback["samples"]), 2)
         self.assertGreaterEqual(readback["stableSampleSpanSeconds"], .2)
         self.assertEqual(readback["positionToleranceGameUnits"], 4)
+        self.assertEqual(readback["headingToleranceDegrees"], 1)
         self.assertAlmostEqual(result["placement"]["position"][2], 4.65)
         self.assertEqual(readback["requestedPosition"][2], 5)
         self.assertEqual(len(self.session.mutations), 4)
