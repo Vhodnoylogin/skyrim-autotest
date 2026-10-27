@@ -59,12 +59,18 @@ def _capture_blocks(device, stop):
         def fault(reason, message, flags=None):
             now = time.monotonic()
             flags = [int(h.flags) for h in headers] if flags is None else flags
+            recorded = [int(h.recorded) for h in headers]
+            completed_sizes = [size for flag, size in zip(flags, recorded) if flag & WHDR_DONE]
             return CaptureGap(message, {'reason': reason, 'nativeBufferCount': len(headers),
                 'blockSamples': BLOCK_SAMPLES, 'nativeReserveSeconds': len(headers) * BLOCK_SAMPLES / RATE,
                 'nextHeader': index, 'completedHeaders': sum(bool(value & WHDR_DONE) for value in flags),
                 'drainedBlocks': drained, 'drainedSamples': drained * BLOCK_SAMPLES,
                 'captureElapsedSeconds': now - started, 'sinceLastDrainSeconds': now - last_drained,
-                'headerFlags': flags, 'recordedBytes': [int(h.recorded) for h in headers],
+                'headerFlags': flags, 'recordedBytes': recorded,
+                'completedFullHeaders': sum(size == BLOCK_SAMPLES * 2 for size in completed_sizes),
+                'completedEmptyHeaders': completed_sizes.count(0),
+                'completedPartialHeaders': sum(0 < size < BLOCK_SAMPLES * 2 for size in completed_sizes),
+                'completedInvalidHeaders': sum(size > BLOCK_SAMPLES * 2 or size % 2 for size in completed_sizes),
                 'missingSamples': None, 'coverageEstablished': False})
 
         while not stop.is_set():
@@ -79,6 +85,13 @@ def _capture_blocks(device, stop):
                 flags = [int(h.flags) for h in headers]
                 completed = sum(bool(value & WHDR_DONE) for value in flags)
                 if completed == len(headers):
+                    if any(h.recorded != BLOCK_SAMPLES * 2 for h in headers):
+                        # An input reset/interruption may return every queued
+                        # header empty except the partially recorded current one.
+                        # That shape is not a reserve filled with captured PCM.
+                        # Neither the initiating cause nor lost duration is known.
+                        raise fault('interrupted-buffer-return',
+                            'Input buffers returned empty or incomplete; audio continuity unavailable', flags)
                     # DONE proves return of a buffer, not a measured loss count.
                     # With no native reserve left, continuity is unproven; fail
                     # closed and retain timing/flags instead of guessing a cause.

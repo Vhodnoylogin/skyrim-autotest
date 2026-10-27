@@ -131,6 +131,13 @@ cause of a particular earlier ring exhaustion is known. Exhausted native reserve
 still ends capture with incomplete coverage, retaining header flags, byte counts
 and drainer timings. It never silently resumes or admits buffered fragments as
 fresh commands. A new listener uses supported exact-device/ownership checks.
+If all native headers return with any empty or incomplete buffer, diagnostics
+use `interrupted-buffer-return`, with separate full/empty/partial/invalid counts.
+That shape is not a fully recorded reserve and does not establish its cause or
+lost duration. Only a fully recorded returned reserve uses
+`native-reserve-exhausted`. Both remain explicit coverage gaps with unknown
+missing samples; this classification does not prevent an input interruption or
+authorize replacing a healthy live listener.
 
 Polling consumes speech only while Polygon's turn is active. When it ends or the
 desktop sleeps/closes, audio/ASR may continue but replies need Polygon to resume
