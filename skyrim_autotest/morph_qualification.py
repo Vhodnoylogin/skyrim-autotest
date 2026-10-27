@@ -17,8 +17,10 @@ CASES = (
 )
 
 
-def run_plan(spec, exchange, emit):
-    """Execute once inside an already owned, ready SE session; no action retry."""
+def run_plan(spec, exchange, emit, *, finish_owner=True):
+    """Execute once; a composed stage may leave final finish to its caller."""
+    if type(finish_owner) is not bool:
+        raise ValueError('finish_owner requires an explicit boolean')
     actors = spec['actors']
     if len(actors) != 6 or len({a['tag'] for a in actors}) != 6:
         raise ValueError('Qualification needs six unique pinned fixture definitions')
@@ -191,6 +193,7 @@ def run_plan(spec, exchange, emit):
             raw=inspection(a,phase='returned-human')
             check(a['tag']+'-name-persisted',raw['actor']['displayName'],a['displayName'])
             check(a['tag']+'-mapped-reference',raw['fixture']['registryIdentityMatch'])
+            check(a['tag']+'-postload-position-stable',raw['fixture']['positionDriftGameUnits']<=1)
             raw=human(a)
             check(a['tag']+'-assignment-persisted',raw['human']['assignedPreset'],a['humanPreset'])
         end()
@@ -215,7 +218,8 @@ def run_plan(spec, exchange, emit):
         for pending in CASES:
             if pending not in finished:emit({'kind':'check-result','caseId':pending,'outcome':'not_run','detail':'Qualification stopped before this case'})
         raise
-    case=None
-    call({'schemaVersion':1,'operation':'finish'})
+    if finish_owner:
+        case=None
+        call({'schemaVersion':1,'operation':'finish'})
     return {'qualification':'tools-only','outcome':'passed','cases':list(CASES),
         'physicsQualified':False,'subjectModAccepted':False,'automaticSubjectOrdersStarted':False}

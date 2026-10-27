@@ -166,7 +166,10 @@ def validate_spec(spec):
     return copy.deepcopy(spec)
 
 
-def run_plan(spec, exchange, emit, *, clock=time.monotonic, pause=time.sleep):
+def run_plan(spec, exchange, emit, *, clock=time.monotonic, pause=time.sleep, finish_owner=True):
+    """Run one stage; only its caller may own finish when finish_owner=False."""
+    if type(finish_owner) is not bool:
+        raise ValueError('finish_owner requires an explicit boolean')
     spec = validate_spec(spec)
     roles = {row['name']: row['role'] for row in spec['originalTesting']['checks']}
     boundary = spec['originalTesting']['start']['name']
@@ -231,7 +234,8 @@ def run_plan(spec, exchange, emit, *, clock=time.monotonic, pause=time.sleep):
                         'Original assertions evaluated against actual returned state', attempts)
                 if not passed:
                     remaining_not_run(index)
-                    call(None, {'schemaVersion': 1, 'operation': 'finish'})
+                    if finish_owner:
+                        call(None, {'schemaVersion': 1, 'operation': 'finish'})
                     return {'interface': INTERFACE, 'outcome': 'mismatch', 'steps': results, 'originalTesting': spec['originalTesting'],
                             'subjectOrderSha256': spec['subjectOrderSha256'], 'originAcceptanceClaimed': False}
             else:
@@ -247,7 +251,8 @@ def run_plan(spec, exchange, emit, *, clock=time.monotonic, pause=time.sleep):
                 verdict(index, 'unavailable', 'unavailable', type(error).__name__ + ': ' + str(error), attempts)
                 remaining_not_run(index)
             raise
-    call(None, {'schemaVersion': 1, 'operation': 'finish'})
+    if finish_owner:
+        call(None, {'schemaVersion': 1, 'operation': 'finish'})
     return {'interface': INTERFACE, 'outcome': 'passed', 'steps': results, 'originalTesting': spec['originalTesting'],
             'subjectOrderSha256': spec['subjectOrderSha256'], 'originAcceptanceClaimed': False}
 

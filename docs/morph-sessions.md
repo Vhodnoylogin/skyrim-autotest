@@ -111,3 +111,16 @@ exercise catalog/real automatic events, six persistent references, names/gear/ho
 assignment, independent signed/zero keys, typed subject/race routes, owned save/load,
 postload identity and exact cleanup. A pass qualifies these component routes;
 it is not acceptance of the subject mod, physics or every future scenario.
+
+The optional `--include-held-bridge-check` adds `held-semantic-world-read` as a
+tenth tool case. Both real interpreters run as stages without an intermediate
+finish, retaining one global measurement sequence. The generic interpreter
+performs actual `platform.state.read` and asserts `world.ready:true`; this is
+transport/composition qualification, with no subject behavior assertion. Only
+after both stages pass does their caller send one final owner finish. An unknown
+stage outcome stops without another stage, finish or replay. The default nine
+case recipe remains available. New outputs explicitly select
+`manageCommandEndpoint:true`, retain both authored source snapshots, and pin the
+generated generic order, mapping, compiled scenario and semantic spec. The
+default600second/256command bounds are unchanged; Polygon's900second outer limit
+still includes common startup/restoration. Existing frozen packages are untouched.

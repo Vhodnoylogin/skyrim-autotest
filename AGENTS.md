@@ -37,6 +37,13 @@ configuration. Initialize the channel/token first. The existing native owner
 then starts its in-process endpoint or authenticates an existing same-database
 receiver; a foreign/unsupported receiver blocks launch and is left untouched.
 No endpoint restart or action replay is permitted after an uncertain outcome.
+Semantic orders using owned NPC/morph mutations require Polygon's separately
+reviewed operator-held-semantic route; do not execute compiled subject actions
+before the interactive owner supplies durable command IDs. Keep the original
+ordinary schema2 mod order unchanged. The operator pins its map, compiled program,
+generic builder and current qualified baseline. Preserve original testing roles
+and factual start; the wrapper's technical start is not mod-testing start. Read
+docs/semantic-companion.md and the Dashboard's docs/held-semantic-plans.md.
 For an external whole-utterance backend, docs/asr-bridge.md describes the data-only
 JSONL forwarder. It uses a separate durable cursor, immutable source IDs and ACKs;
 it does not open audio or change the shared listener cursor. New source/session

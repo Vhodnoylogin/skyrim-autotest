@@ -86,3 +86,25 @@ observation-only steps, unknown values, deadline expiry, known mismatches and
 uncertain mutations. A real local durable-bus test exercises the existing
 companion protocol with the generated standalone source. These are offline tests,
 not evidence that the subject's numerical or rendered behavior passed in a game.
+
+## Explicit component stages
+
+`semantic_companion.run_plan(..., finish_owner=True)` and
+`morph_qualification.run_plan(..., finish_owner=True)` retain their ordinary
+single-program finish behavior by default. A separately reviewed caller may set
+the keyword `finish_owner=False` to run one component stage without sending an
+owner finish or inventing a finish receipt. The caller must inspect the actual
+returned outcome before starting another stage. Unknown exchanges propagate and
+permit no next stage, replay or finish. Known semantic mismatches return their
+real mismatch outcome; qualification exceptions remain exceptions.
+
+Each stage has a local measurement sequence. A composed caller provides one
+global measurement sequence, preserving every case/request/raw result, and owns
+exactly one final ordinary finish after all stages pass. This does not reset the
+native session deadline, transport command bound, actor identities or load count.
+The existing client enforces those original limits throughout all stages.
+`tools/prepare_morph_qualification.py --include-held-bridge-check` supplies this
+finite composition: the nine native cases, one real generic `state.read` assertion
+of `world.ready`, then the sole owner finish. Its source snapshots and generated
+generic order/mapping/compiled-spec pins are retained with the new package. No
+original mod order is executed or accepted by that tooling probe.
