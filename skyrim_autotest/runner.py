@@ -1227,10 +1227,14 @@ class Session:
         self.discover()
         self.guard_shutdown()
         if self.state.get('game') and native.alive(self.state['game']):
-            try:
-                self.tool('console', {'action': 'exec', 'command': 'qqq'}, timeout=4)
-            except Exception as e:
-                self.log('exit-request', error=str(e))
+            if self.state.get('configuration', {}).get('game_edition') == 'se':
+                from .game_shutdown import request_and_wait
+                request_and_wait(self)
+            else:
+                try:
+                    self.tool('console', {'action': 'exec', 'command': 'qqq'}, timeout=4)
+                except Exception as e:
+                    self.log('exit-request', error=str(e))
         roles = ('game', 'loader', 'mo2', 'vr')
         for role in roles:
             self.discover()
@@ -1246,6 +1250,9 @@ class Session:
                 if native.alive(ident):
                     self.guard_shutdown()
                     self.log('forced-stop', role=role, pid=ident['pid'])
+                    if role == 'game':
+                        self.state['forcedGameStop'] = True
+                        self.save()
                     native.terminate(ident)
             end = time.monotonic() + 4
             while time.monotonic() < end and any(native.alive(i) for i in owned):
@@ -1253,6 +1260,16 @@ class Session:
             if any(native.alive(i) for i in owned):
                 raise RuntimeError(f'Owned {role} process did not exit; refusing file restoration')
         Session.observe_game_exit(self, 'owned-processes-ended')
+        if self.state.get('configuration', {}).get('game_edition') == 'se':
+            from .game_shutdown import classify_exit
+            self.state['gameTermination'] = classify_exit(self)
+            termination = self.state['gameTermination']
+            if termination['kind'] in ('abnormal_exit', 'forced_stop') and self.state.get('result') == 'passed':
+                self.state['result'] = 'failed'
+                self.state['reason'] = ('All action checks completed; owned game shutdown was ' + termination['kind']
+                                        + ' (' + str(termination.get('exitCodeHex', 'unavailable')) + ')')
+            self.save()
+            self.log('game-termination-summary', termination=termination, subjectChecksUnchanged=True)
         if self.state.get('crashCapture'):
             from .crash_capture import stop as stop_crash_capture
             try:
@@ -1405,7 +1422,7 @@ class Session:
                       f'Observed at: {observed.get("stage", "unavailable")}',
                       'The OS observation does not determine the exit cause.']
         (self.dir / 'report.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
-        atomic_json(self.dir / 'result.json', {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors','heartbeatHealth','guardianRecovery','interactiveSession','interactiveArtifacts','interactiveActorFixtures','gameProcessObservations','gameProcessObservationError','crashCapture','crashCaptureStopError')})
+        atomic_json(self.dir / 'result.json', {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors','heartbeatHealth','guardianRecovery','interactiveSession','interactiveArtifacts','interactiveActorFixtures','gameProcessObservations','gameProcessObservationError','crashCapture','crashCaptureStopError','gameTermination','gracefulGameExit','forcedGameStop')})
 
     def reopen_mo2(self):
         if self.state.get('reopenMO2') and self.state.get('restored'):

@@ -59,6 +59,14 @@ and inventory-menu state. An optional item is independently resolved and returns
 retained static item after a save/load without using an old fixture reference.
 Save/load and process exit remain the common executor's separate operations.
 
+SE cleanup records one owned quit request and waits for its original bounded
+grace before considering the existing window-close fallback. Recovery never
+replays that request or extends its deadline. `gameTermination` comes from exact
+native process-exit observations: nonzero or forced game exit fails technical
+execution even when all action checks passed. It does not rewrite those checks.
+Normal closure requires observed exit0 plus an owned quit request; missing exit
+telemetry remains unknown.
+
 SE owned loads also read the game's actual localized confirmation strings and
 observe message-box opening events during the original load deadline. A matching
 discard-progress confirmation gets one recorded answer; unknown/corrupt/content
