@@ -47,6 +47,7 @@ class Backend:
         self.effect, self.held, self.input_error, self.mutation_error = True, [], None, None
         self.native_ready, self.release_pending = True, False
         self.next_id, self.health_damage, self.corrupt_receipt = 0xFF000001, 8., False
+        self.pickup_removes_reference, self.pickup_keeps_loaded, self.pickup_delta = False, False, 1
     def remaining(self):
         if self.budget <= 0: raise TimeoutError('original absolute deadline exhausted')
         return self.budget
@@ -79,7 +80,11 @@ class Backend:
             return {'pov': 'first', 'freeCam': False, 'camX': 10., 'camY': 20., 'camZ': 90.}
         if tool == 'inspect':
             if args['kind'] == 'scene': return {'playerLoaded': True, 'cell': {'editorId': 'QASmoke'}, 'position': list(self.position)}
-            if args['kind'] == 'refs': return {'count': 1, 'refs': [self.ref(args['formId'])]}
+            if args['kind'] == 'refs':
+                ref = args['formId']
+                if ref not in (domain.PLAYER, BASE, ACTOR_BASE) and ref not in self.world:
+                    return {'count': 0, 'refs': []}
+                return {'count': 1, 'refs': [self.ref(ref)]}
             if args['kind'] == 'world_observer':
                 ref = args['refs'][0]; value = self.world[ref]
                 return {'ok': True, 'refs': [{'status': 'available', 'identity': {'form': ref},
@@ -109,8 +114,9 @@ class Backend:
                     if key == 23: self.open = not self.open
                     if key == 19: self.drawn = not self.drawn
                     if key == 18:
-                        self.world[self.crosshair]['loaded'] = False
-                        self.inventory[BASE] = self.inventory.get(BASE, 0) + 1
+                        if self.pickup_removes_reference: del self.world[self.crosshair]
+                        else: self.world[self.crosshair]['loaded'] = self.pickup_keeps_loaded
+                        self.inventory[BASE] = self.inventory.get(BASE, 0) + self.pickup_delta
                     if key == 256: self.world[self.crosshair]['health'] -= self.health_damage
                 part = {'owner': args['owner'], 'generation': 1, 'accepted': True,
                         'pending': self.release_pending, 'released': True, 'scancode': key}
@@ -194,6 +200,57 @@ class GameplayTests(unittest.TestCase):
         self.create_item(); self.b.crosshair = None
         with self.assertRaisesRegex(ValueError, 'exact owned fixture'): self.perform('pickup', referenceTag='dagger')
         self.assertEqual(self.taps(), [])
+    def test_pickup_removed_reference_uses_explicit_native_absence_without_deleted_papyrus_self(self):
+        self.create_item(); self.b.pickup_removes_reference = True
+        value = self.perform('pickup', referenceTag='dagger')
+        self.assertEqual(value['pickup']['quantityDeltaItems'], 1)
+        self.assertEqual(value['pickup']['worldReferenceState'], 'absent')
+        self.assertEqual(value['consumedReferenceObservation']['nativeLookup'], {'count': 0, 'refs': []})
+        tap_index = next(i for i, (tool, args) in enumerate(self.b.calls) if tool == 'input' and args['action'] == 'tap')
+        self.assertFalse(any(tool == 'papyrus' and args.get('function') == 'Is3DLoaded'
+                             for tool, args in self.b.calls[tap_index + 1:]))
+        self.assertEqual(len(self.taps()), 1)
+    def test_pickup_extant_unloaded_reference_requires_actual_loaded3d_read(self):
+        self.create_item(); value = self.perform('pickup', referenceTag='dagger')
+        self.assertEqual(value['pickup']['worldReferenceState'], 'unloaded')
+        self.assertIs(value['consumedReferenceObservation']['loaded3D'], False)
+        self.assertEqual(len(self.taps()), 1)
+    def test_pickup_inventory_delta_without_world_consumption_fails_without_repeated_input(self):
+        self.create_item(); self.b.pickup_keeps_loaded = True
+        with self.assertRaises(TimeoutError): self.perform('pickup', referenceTag='dagger')
+        self.assertEqual(self.b.inventory[BASE], 1)
+        self.assertEqual(self.b.s.state['seGameplayFixtures']['dagger']['status'], 'pickup-intent')
+        self.assertEqual(len(self.taps()), 1)
+    def test_pickup_malformed_native_absence_is_unavailable_without_repeated_input(self):
+        invalid = [{}, {'count': False, 'refs': []}, {'count': 0, 'refs': [{}]},
+                   {'count': 1, 'refs': []}, {'count': 2, 'refs': []},
+                   {'count': 1, 'refs': [{'formId': '0xFF000099', 'base': {'formId': BASE}}]}]
+        for payload in invalid:
+            with self.subTest(payload=payload):
+                self.b = Backend(); created = self.create_item(); ref = created['fixture']['reference']
+                original = self.b.call
+                def intercepted(tool, args):
+                    if tool == 'inspect' and args.get('kind') == 'refs' and args.get('formId') == ref and not self.b.world[ref]['loaded']:
+                        return copy.deepcopy(payload)
+                    return original(tool, args)
+                self.b.call = intercepted
+                with self.assertRaises(ValueError): self.perform('pickup', referenceTag='dagger')
+                self.assertEqual(len(self.taps()), 1)
+                self.assertEqual(self.b.s.state['seGameplayFixtures']['dagger']['status'], 'pickup-intent')
+    def test_pickup_reference_transport_failure_never_becomes_absence(self):
+        self.create_item(); original = self.b.call
+        def intercepted(tool, args):
+            if tool == 'inspect' and args.get('kind') == 'refs' and args['formId'] in self.b.world and not self.b.world[args['formId']]['loaded']:
+                raise OSError('native lookup transport unavailable')
+            return original(tool, args)
+        self.b.call = intercepted
+        with self.assertRaisesRegex(OSError, 'transport unavailable'): self.perform('pickup', referenceTag='dagger')
+        self.assertEqual(len(self.taps()), 1)
+    def test_pickup_wrong_quantity_cannot_pass_on_reference_disappearance_or_replay(self):
+        self.create_item(); self.b.pickup_removes_reference = True; self.b.pickup_delta = 2
+        with self.assertRaisesRegex(ValueError, 'delta1'): self.perform('pickup', referenceTag='dagger')
+        with self.assertRaisesRegex(ValueError, 'same-run/world'): self.perform('pickup', referenceTag='dagger')
+        self.assertEqual(len(self.taps()), 1)
     def test_stale_world_and_foreign_process_fixture_rejected_before_input(self):
         self.create_item(); self.b.s.state['ownedWorldGeneration'] = 2
         with self.assertRaisesRegex(ValueError, 'same-run/world'): self.perform('pickup', referenceTag='dagger')

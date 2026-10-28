@@ -279,6 +279,30 @@ def _crosshair(b, ref):
         raise ValueError('Actual crosshair does not select the exact owned fixture; no input issued')
 
 
+def _consumed_reference(b, row):
+    """A native exact lookup can prove absence without calling a deleted self.
+
+    DevBench's explicit formId branch returns count:0,refs:[] when LookupFormArg
+    finds no form. Missing fields, mismatched identities and failed requests are
+    unavailable telemetry, never an absent reference. An extant reference still
+    needs its actual loaded3D read; input is not repeated while observing it.
+    """
+    ref = row['reference']
+    raw = b.call('inspect', {'kind': 'refs', 'formId': ref})
+    if not isinstance(raw, dict) or type(raw.get('count')) is not int or not isinstance(raw.get('refs'), list):
+        raise ValueError('Exact post-pickup native reference lookup unavailable')
+    if raw['count'] == 0 and raw['refs'] == []:
+        return {'consumed': True, 'state': 'absent', 'nativeLookup': raw}
+    if raw['count'] != 1 or len(raw['refs']) != 1 or not isinstance(raw['refs'][0], dict):
+        raise ValueError('Post-pickup native reference count/rows are inconsistent')
+    actual = raw['refs'][0]
+    if form(actual.get('formId')) != ref or form(actual.get('base', {}).get('formId')) != row['base']:
+        raise ValueError('Post-pickup native lookup returned another reference/base')
+    loaded = _pap(b, 'ObjectReference', 'Is3DLoaded', [], 'bool', target=ref)
+    return {'consumed': loaded is False, 'state': 'loaded' if loaded else 'unloaded',
+            'nativeLookup': raw, 'loaded3D': loaded}
+
+
 def _combat_state(b, row):
     # The qualified SE Observer exposes identity, not the VR actorState domain.
     # Native SetRestrained completion is fixture preparation only; do not invent
@@ -418,10 +442,11 @@ def perform(b, request):
         inventory = _wait(b, lambda: _inventory(b), lambda inv: _item_count(inv, row['base']) != before)
         after = _item_count(inventory, row['base'])
         if after - before != 1: raise ValueError('Pickup did not produce the exact actual inventory delta1')
-        # A consumed world reference must cease having loaded3D; no missing row is coerced to success.
-        _wait(b, lambda: _pap(b, 'ObjectReference', 'Is3DLoaded', [], 'bool', target=row['reference']), lambda v: v is False)
+        world = _wait(b, lambda: _consumed_reference(b, row), lambda value: value['consumed'])
         row['status'] = 'picked-up'; row['quantityBeforePickup'] = before; row['quantityAfterPickup'] = after; b.s.save()
-        result = {'pickup': {'reference': row['reference'], 'quantityDeltaItems': after - before}, 'inputReceipt': receipt}
+        result = {'pickup': {'reference': row['reference'], 'quantityDeltaItems': after - before,
+                             'worldReferenceState': world['state']},
+                  'consumedReferenceObservation': world, 'inputReceipt': receipt}
     elif action in ('equip', 'unequip'):
         row = _entry(b, request['referenceTag'], 'pickup', picked=True)
         if row.get('equipmentAttempt', {}).get('status') == 'intent':

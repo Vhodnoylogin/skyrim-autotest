@@ -103,6 +103,21 @@ against the config file's directory, never the working directory. Unknown fields
 are rejected. No path value includes credentials; only `bridge_token` names a
 file whose content is read immediately before an authenticated request.
 
+For an explicitly scoped SE tool fixture, optional `copied_profile_mods` reduces
+only the fresh owned profile copy before MO2 starts. It has exact `enabledMods`
+and `enabledPlugins` name lists plus a nonempty `reason`. Names are not paths;
+every selected mod must already be enabled in the source profile. All
+`required_mods` must remain selected. Plugin rows keep their source order and
+activation markers; implicit base masters are not invented. Declare the complete
+dependency composition and qualification scope before using this option. It
+cannot qualify a subject mod excluded from that composition.
+
+The source profile and installed mods are preserved. The executor records
+before/after hashes and archives the reduced copied profile at ordinary cleanup.
+Borrowed/reused profiles and VR reject this option. It is useful for a basic
+control-chain test that does not require unrelated character/physics plugins;
+it does not repair or conceal a prior failure in another recorded composition.
+
 | Field | Meaning |
 |---|---|
 | runtime | External writable backups/dependencies/queue/results root; outside Git and live MO2/game directories |

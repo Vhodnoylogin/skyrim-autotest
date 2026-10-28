@@ -101,8 +101,13 @@ it with `SetMotionType(4,false)` and places it along measured player pitch/yaw
 from the actual first-person camera position. If necessary, a separately
 recorded fixture-only camera operation selects first person. Actual crosshair
 selection of that exact reference remains mandatory before one mapped Activate
-input. The item must add exactly one to the measured inventory count and cease
-having loaded world 3D. This is a controlled pickup fixture, not a physics or
+input. The item must add exactly one to the measured inventory count and either
+disappear from an actual exact-form native lookup (`count: 0, refs: []`) or have
+an actual `Is3DLoaded: false` read while that exact reference still exists.
+Deleted references are not passed as Papyrus `self`. Missing/malformed lookup
+fields, another identity and transport failures never count as disappearance;
+`pickup.worldReferenceState` records `absent` or `unloaded` with the raw lookup.
+This is a controlled pickup fixture, not a physics or
 general aiming qualification.
 
 The combat factory creates one nonpersistent NPC in front of the player,

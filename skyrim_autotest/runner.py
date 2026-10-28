@@ -247,6 +247,13 @@ def preflight(profile, restart_idle_mo2=False):
     required = set(P.required_mods)
     if not required <= enabled:
         raise Blocked('Required disabled mods: ' + str(sorted(required - enabled)))
+    composition = P.value.get('copied_profile_mods')
+    if composition is not None:
+        selected_mods = set(composition['enabledMods'])
+        if not selected_mods <= enabled:
+            raise Blocked('Copied-profile composition cannot enable source-disabled/missing mods: ' + str(sorted(selected_mods - enabled)))
+        if not required <= selected_mods:
+            raise Blocked('Copied-profile composition excludes required mods: ' + str(sorted(required - selected_mods)))
     if vr and not root_policy:
         rb = P.mo2 / 'plugins/data/RootBuilder'
         originals = [p for p in rb.rglob('openvr_api.dll') if p.parent.name == 'Backup' and p.stat().st_size < 2000000]
@@ -908,6 +915,9 @@ class Session:
         text = modlist.read_text(encoding='utf-8-sig')
         text = '\n'.join('-' + line[1:] if line.startswith('+') and line[1:] in OCU else line for line in text.splitlines()) + '\n'
         modlist.write_text(text, encoding='utf-8')
+        if P.value.get('copied_profile_mods') is not None:
+            from .copied_profile import apply as apply_copied_profile
+            apply_copied_profile(self, P.snapshot())
         prefs = test_profile / 'SkyrimPrefs.ini'
         if prefs.exists():
             text = prefs.read_text(encoding='utf-8-sig')
