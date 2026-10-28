@@ -51,9 +51,11 @@ automatic qualification of replacement builds or refreshed VR.
 The SE [basic gameplay domain](docs/se-gameplay.md) adds measured movement,
 exact-reference pickup, inventory open/close, explicitly native equipment,
 weapon draw/sheathe and a controlled attack. The integrated agent-kit includes
-`se-basic-gameplay.example.json`. Its candidate and owned New Game save/load path
-require their own Polygon game qualification; native equip is not inventory-row
-selection and input acknowledgements alone cannot pass its checks.
+`se-basic-gameplay.example.json`. The exact SE build `a05102d` passed all 16
+basic checks through Polygon on 28 October 2026, including owned save/load and
+verified normal window-close/exit0/restoration. See the domain document for
+exact scope and component pins. Native equip is not inventory-row selection;
+input acknowledgements alone cannot pass its checks. This is not VR or mod acceptance.
 
 ## Install and first configuration
 

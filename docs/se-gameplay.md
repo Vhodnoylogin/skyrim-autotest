@@ -79,7 +79,7 @@ native provider. Each transition has a separate durable, one-shot intent. Only
 the exact final desktop-quit intent counts as an owned quit request; returning
 to Main Menu alone does not. The entire route retains its original45second
 bound on recovery, without replay. It requires the additive QUIT operations in
-[DevBench52f0c4c](https://github.com/Vhodnoylogin/devbench/commit/52f0c4ca92231226a99032b0e305f9cf6c3030a9).
+[DevBench 52f0c4c](https://github.com/Vhodnoylogin/devbench/commit/52f0c4ca92231226a99032b0e305f9cf6c3030a9).
 A native callback or closed menu is not actual process-exit proof. Unavailable
 menu/API state is retained before the caller's existing guarded fallback.
 It is not the default exit route: the live pitch adjustment did not clear the
@@ -209,3 +209,52 @@ key/script/console route, reference adoption, save remapping or VR action.
 Reads may poll only within the inherited absolute deadline. Mutations execute
 once; uncertain spawn, pickup, equipment and attack state retains its durable
 intent and cannot become a successful result or an automatic replay.
+
+## External USVFS acquisition
+
+The reviewed MO2 2.5.2 installation uses the official
+[USVFS 0.5.7.2 archive](https://github.com/ModOrganizer2/usvfs/releases/download/v0.5.7.2/usvfs_v0.5.7.2.7z),
+with SHA-256
+`c6252eed78ee1c307733a4412cb68522cffc48107be4795c4e38b2b8d7c76d01`.
+Keep the archive, extracted binaries/PDBs, hash manifest and backups outside Git.
+Before replacement, require a cold MO2 and no remaining users of its shared VFS.
+Back up and verify all four files, then replace `usvfs_x64.dll`, `usvfs_x86.dll`,
+`usvfs_proxy_x64.exe` and `usvfs_proxy_x86.exe` as one coherent release and verify
+their installed hashes. Mixing old and new users/files is unsafe across the
+Boost shared-memory ABI change. This acquisition does not establish that the
+update alone fixes shutdown; actual owned process-exit evidence remains required.
+
+## Qualified basic SE composition — 28 October 2026
+
+Polygon run `20261028-175824-9c9a70` completed all 16 declared basic checks plus
+native New Game bootstrap: movement, exact pickup, inventory open/close, native
+equip, draw, one controlled attack, sheathe, owned save, unequip, same-process
+load and fresh saved-equipment restoration. Observed movement was 204.7114 game
+units; pickup added exactly one item; target health changed 1000 to 995.59998 after
+one input. The damage assertion is sampled health change, not a matched hit event.
+
+One native close invocation posted WM_CLOSE to three verified owned windows,
+received accepted receipts and observed actual native exit0 within 1.9 seconds.
+No forced game stop or recovery occurred. Worker exit was 0; files/profile were
+restored, collection finished and the nonempty copied profile was archived and
+removed from MO2's ordinary list. Historical failed packets remain unchanged.
+
+Exact executable code: [Skyrim Autotest a05102d](https://github.com/Vhodnoylogin/skyrim-autotest/commit/a05102d9b2dc89790f7de693b5d096459bf1ecc7).
+Game: Skyrim SE 1.7.104, SKSE64 2.3.1, Realm of Lorkhan and the five declared managed
+tool/start mods in the isolated copy. Provider code:
+[DevBench 52f0c4c](https://github.com/Vhodnoylogin/devbench/commit/52f0c4ca92231226a99032b0e305f9cf6c3030a9),
+DLL SHA256 `3c6d7e199c14760ad0998cf8f11b983e164feb325a4e218b4cb2b9f4b825697f`.
+ObserverSE DLL SHA256 `7e81410b2b446f6606715e3f4b0f00466a1eac655d4b1789c32a77aaf5260c0a`.
+MO2 2.5.2 uses the official USVFS set described above. Dashboard projection code:
+[fc790a8](https://github.com/Vhodnoylogin/skyrim-poligon-dashboard/commit/fc790a8ba06122ff1744f838ee2b314e9a71919d).
+Source and exact portable extraction each ran 299 focused tests: 297 passed,
+two Windows symlink-create privilege skips. The unchanged native DLL had 318
+passing cases; Dashboard had 17 targeted passing cases.
+
+Tested portable archive SHA256:
+`43054bc874fc9b4ea99bea726f1aa1bcdc516c0b166072606aa0d1865bb774cc`.
+The included agent-kit example and explicit `se_shutdown: "window-close-v1"`
+configuration describe this route. Rebuilt/replaced providers and other fixtures
+need their own reviewed pins and qualification. This baseline does not establish
+inventory-row navigation, general combat AI, physical contacts, rendered output,
+VR, audio or acceptance of any subject mod.

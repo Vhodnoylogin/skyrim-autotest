@@ -5,6 +5,16 @@ not launch another game, replay a failed action, qualify a subject, change the
 Windows registry or install a crash handler. A previous crash without a dump
 has an unavailable cause; another run requires its own Polygon admission.
 
+Before considering another game run, inspect existing `%LOCALAPPDATA%/CrashDumps`
+and Windows Error Reporting records. Match the exact Application Error/WER event
+and record IDs, PID, full process birth and executable path to the owned run.
+Validate the dump's `MDMP` signature, MiscInfo PID and process-create time
+(at its recorded seconds precision), header UTC timestamp and loaded module
+identity against that evidence. A filename containing a PID alone never permits
+adoption. Copy the matched dump outside Git and verify stable source/copy SHA-256
+hashes before offline analysis or another launch; retain the original evidence.
+Inspecting existing dumps requires no registry or crash-handler changes.
+
 The operator acquires Microsoft's Windows Debugger (WinDbg) from its official
 distribution and independently records the exact local `amd64/cdb.exe` and
 support DLL SHA-256 values. These external Microsoft binaries are never bundled
