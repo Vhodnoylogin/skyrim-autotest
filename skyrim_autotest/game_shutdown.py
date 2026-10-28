@@ -1,7 +1,8 @@
 """One owned quit request followed by its original bounded observation grace.
 
-This module never closes a window or terminates a process. The caller owns any
-fallback after a false return, and exit telemetry remains distinct from checks.
+The window route posts an ordinary owned WM_CLOSE once; it never terminates a
+process. The caller owns any fallback after the original observation grace,
+and exit telemetry remains distinct from scenario checks.
 """
 from __future__ import annotations
 
@@ -52,8 +53,18 @@ def _capture_exited(session, game):
     return latest is not None and latest.get('status') == 'exited'
 
 
-def request_and_wait(session, seconds=10):
-    """Issue qqq once, then wait before the caller considers another quit path.
+def window_close_receipt(value):
+    """A posted owned-window request is separate from actual process exit."""
+    return (isinstance(value, dict) and value.get('requested') is True
+            and value.get('systemCommand') is False and isinstance(value.get('windows'), list)
+            and any(isinstance(row, dict) and type(row.get('hwnd')) is int and row['hwnd'] > 0
+                    and type(row.get('message')) is int and row['message'] == 0x10
+                    and row.get('accepted') is True and type(row.get('error')) is int and row['error'] == 0
+                    for row in value['windows']))
+
+
+def request_and_wait(session, seconds=10, *, route='qqq'):
+    """Issue the selected owned quit request once, then observe actual exit.
 
     A durable matching intent is never dispatched again, even if its callback is
     unknown. Recovery retains the original monotonic deadline. A previous boot's
@@ -61,11 +72,14 @@ def request_and_wait(session, seconds=10):
     """
     if type(seconds) not in (int, float) or not math.isfinite(seconds) or not 0 < seconds <= 30:
         raise ValueError('Graceful game exit requires a finite grace in(0,30]seconds')
+    if route not in ('qqq', 'window-close'):
+        raise ValueError('Unknown owned graceful exit route')
     if not session.state.get('game'):
         return True
     game = _identity(session.state['game'])
     existing = session.state.get('gracefulGameExit')
-    if existing is not None and (not isinstance(existing, dict) or existing.get('game') != game):
+    if existing is not None and (not isinstance(existing, dict) or existing.get('game') != game
+                                 or existing.get('command') != route):
         raise RuntimeError('Previous graceful exit intent belongs to another game identity')
     alive = _alive(session, game, before_request=existing is None)
     if existing is None:
@@ -74,7 +88,7 @@ def request_and_wait(session, seconds=10):
             # identity. Report gone only if actual retained telemetry proves it.
             return _capture_exited(session, game)
         started = time.monotonic()
-        record = {'game': game, 'command': 'qqq', 'status': 'request-intent',
+        record = {'game': game, 'command': route, 'status': 'request-intent',
                   'startedMonotonic': started, 'deadlineMonotonic': started + seconds,
                   'graceSeconds': seconds, 'requestAttempted': False}
         session.state['gracefulGameExit'] = record
@@ -84,8 +98,14 @@ def request_and_wait(session, seconds=10):
             try:
                 remaining = record['deadlineMonotonic'] - time.monotonic()
                 if remaining > 0:
-                    response = session.tool('console', {'action': 'exec', 'command': 'qqq'},
-                                            timeout=min(4, remaining), deadline=record['deadlineMonotonic'])
+                    if route == 'window-close':
+                        record['requestAttempted'] = True
+                        session.save()  # Before the single possibly uncertain PostMessage operation.
+                        response = native.close(game)
+                        record['windowClose'] = copy.deepcopy(response)
+                    else:
+                        response = session.tool('console', {'action': 'exec', 'command': 'qqq'},
+                                                timeout=min(4, remaining), deadline=record['deadlineMonotonic'])
                     record['requestAttempted'] = True
                     record['requestAcknowledgement'] = copy.deepcopy(response)
             except Exception as error:
@@ -99,7 +119,7 @@ def request_and_wait(session, seconds=10):
         record = existing
         deadline = record.get('deadlineMonotonic')
         started = record.get('startedMonotonic')
-        if (record.get('command') != 'qqq' or type(deadline) not in (int, float)
+        if (record.get('command') != route or type(deadline) not in (int, float)
                 or type(started) not in (int, float) or not math.isfinite(deadline)
                 or not math.isfinite(started) or not 0 < deadline - started <= 30):
             raise RuntimeError('Previous graceful exit deadline is unavailable; never replay its request')
@@ -129,6 +149,7 @@ def classify_exit(session):
     own_quit = (isinstance(record, dict) and record.get('game') == game
                 and record.get('requestAttempted') is True
                 and (record.get('command') == 'qqq'
+                     or (record.get('command') == 'window-close' and window_close_receipt(record.get('windowClose')))
                      or (record.get('command') == 'menu-main-quit'
                          and isinstance(record.get('desktopQuit'), dict)
                          and record['desktopQuit'].get('game') == game

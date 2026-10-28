@@ -72,8 +72,8 @@ def configure(value, base=None):
         except (ValueError, TypeError, KeyError) as error:
             raise ConfigurationError('Invalid interactive-session policy: ' + str(error)) from error
     if 'se_shutdown' in result:
-        if selected['edition'] != 'se' or result['se_shutdown'] not in ('main-menu-v1', 'console-qqq'):
-            raise ConfigurationError('se_shutdown requires explicit SE main-menu-v1 or console-qqq')
+        if selected['edition'] != 'se' or result['se_shutdown'] not in ('window-close-v1', 'main-menu-v1', 'console-qqq'):
+            raise ConfigurationError('se_shutdown requires explicit SE window-close-v1, main-menu-v1 or console-qqq')
     if 'se_new_game_ui' in result:
         if type(result['se_new_game_ui']) is not bool or selected['edition'] != 'se':
             raise ConfigurationError('se_new_game_ui is an explicit SE-only boolean startup policy')
@@ -261,4 +261,6 @@ def template(edition='vr'):
     result = {"schemaVersion": 1, "game_edition": edition, "runtime": str(default_runtime()), "mo2": "REPLACE/MO2", "game": "REPLACE/" + selected['bridgeGame'], "mods": "REPLACE/MO2/mods", "profiles": "REPLACE/MO2/profiles", "overwrite": "REPLACE/MO2/overwrite", "bridge_token": "REPLACE/MO2/plugins/mo2aibridge/mo2aibridge-token.txt", "bridge_port": 8930, "skse_logs": "REPLACE/Documents/My Games/" + ('Skyrim VR' if edition == 'vr' else 'Skyrim Special Edition') + "/SKSE", "fixture_dir": "REPLACE/authorized-fixture", "required_mods": ["DevBench"] + (["VRIK Player Avatar", "HIGGS - Enhanced VR Interaction"] if edition == 'vr' else []), "extra_files": [], "staged_plugins": [], "devbench_runtime_files": []}
     if edition == 'vr':
         result['openvr_paths'] = str(Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "openvr/openvrpaths.vrpath")
+    else:
+        result['se_shutdown'] = 'window-close-v1'
     return result

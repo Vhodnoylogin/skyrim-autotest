@@ -1231,9 +1231,13 @@ class Session:
             if self.state.get('configuration', {}).get('game_edition') == 'se':
                 if self.state.get('configuration', {}).get('se_shutdown') == 'main-menu-v1':
                     from .menu_shutdown import request_and_wait
+                    request_and_wait(self)
                 else:
                     from .game_shutdown import request_and_wait
-                request_and_wait(self)
+                    if self.state.get('configuration', {}).get('se_shutdown') == 'window-close-v1':
+                        request_and_wait(self, seconds=30, route='window-close')
+                    else:
+                        request_and_wait(self)
             else:
                 try:
                     self.tool('console', {'action': 'exec', 'command': 'qqq'}, timeout=4)
@@ -1246,7 +1250,12 @@ class Session:
             owned = [p['identity'] for p in self.state['owned'] if p['role'] == role and native.alive(p['identity'])]
             for ident in owned:
                 self.guard_shutdown()
-                native.close(ident)
+                prior_exit = self.state.get('gracefulGameExit', {})
+                if (role == 'game' and prior_exit.get('game') == ident
+                        and prior_exit.get('command') == 'window-close' and prior_exit.get('requestAttempted') is True):
+                    self.log('owned-window-close-not-replayed', game=ident)
+                else:
+                    native.close(ident)
             end = time.monotonic() + (12 if owned else 0)
             while time.monotonic() < end and any(native.alive(i) for i in owned):
                 time.sleep(.5)
@@ -1268,7 +1277,7 @@ class Session:
             from .game_shutdown import classify_exit
             self.state['gameTermination'] = classify_exit(self)
             termination = self.state['gameTermination']
-            if termination['kind'] in ('abnormal_exit', 'forced_stop') and self.state.get('result') == 'passed':
+            if termination['kind'] != 'normal_close' and self.state.get('result') == 'passed':
                 self.state['result'] = 'failed'
                 self.state['reason'] = ('All action checks completed; owned game shutdown was ' + termination['kind']
                                         + ' (' + str(termination.get('exitCodeHex', 'unavailable')) + ')')

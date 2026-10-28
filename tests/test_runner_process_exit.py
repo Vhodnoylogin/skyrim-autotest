@@ -304,6 +304,39 @@ class RunnerProcessExitTests(unittest.TestCase):
         self.assertTrue(all(item['status'] == 'unavailable' and item['exitCode'] is None
                             for item in observations[len(prior):]))
 
+    def test_window_close_timeout_never_reposts_before_failed_force_fallback(self):
+        from tests.test_game_shutdown import Clock
+        tracker = self.tracker()
+        self.attach(tracker)
+        self.session.state.update(result='passed', configuration={'game_edition': 'se', 'se_shutdown': 'window-close-v1'})
+        self.session.state['gracefulGameExit'] = {'game': copy.deepcopy(self.game),
+            'command': 'window-close', 'requestAttempted': True}
+        clock, live = Clock(), [True]
+        def terminate(identity):
+            self.assertEqual(identity, self.game)
+            live[0] = False; tracker.status = 'exited'; tracker.code = 1
+        with patch.object(self.session, 'discover'), patch.object(self.session, 'guard_shutdown'), \
+             patch.object(native, 'alive', side_effect=lambda identity: live[0]), \
+             patch.object(native, 'processes', return_value=[{'pid': 4, 'parent': 0, 'name': 'System'}]), \
+             patch.object(native, 'close') as close, patch.object(native, 'terminate', side_effect=terminate) as force, \
+             patch('skyrim_autotest.game_shutdown.request_and_wait', return_value=False) as grace, \
+             patch.object(runner.time, 'monotonic', clock.monotonic), patch.object(runner.time, 'sleep', clock.sleep), \
+             patch.object(self.session, 'collect', side_effect=lambda: self.session.state.update(collectionComplete=True)):
+            self.session.cleanup()
+        grace.assert_called_once_with(self.session, seconds=30, route='window-close')
+        close.assert_not_called(); force.assert_called_once_with(self.game)
+        self.assertEqual(self.session.state['gameTermination']['kind'], 'forced_stop')
+        self.assertEqual(self.session.state['result'], 'failed')
+
+    def test_unattributed_zero_exit_is_not_complete_technical_success(self):
+        self.attach(self.tracker(status='exited', code=0))
+        self.session.state.update(result='passed', configuration={'game_edition': 'se'},
+                                  checks=[{'name': 'action', 'result': 'passed'}])
+        with self.offline_cleanup(): self.session.cleanup()
+        self.assertEqual(self.session.state['gameTermination']['kind'], 'unknown')
+        self.assertEqual(self.session.state['result'], 'failed')
+        self.assertEqual(self.session.state['checks'], [{'name': 'action', 'result': 'passed'}])
+
 
 if __name__ == '__main__':
     unittest.main()

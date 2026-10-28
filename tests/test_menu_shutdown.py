@@ -84,6 +84,8 @@ class Session:
 class MenuExitTests(unittest.TestCase):
     def setUp(self):
         self.stack, self.clock = ExitStack(), Clock()
+        policy_before = config.P.snapshot()
+        self.addCleanup(lambda: setattr(config.P, 'value', policy_before))
         self.addCleanup(self.stack.close)
         self.s = Session(self.clock)
         self.stack.enter_context(patch.object(menu_shutdown.time, 'monotonic', self.clock.monotonic))
@@ -219,7 +221,7 @@ class MenuExitTests(unittest.TestCase):
         with self.assertRaises(ValueError): menu_shutdown.request_and_wait(self.s)
         self.s.tool.assert_not_called()
     def test_config_policy_is_explicit_and_se_only(self):
-        for mode in ('main-menu-v1', 'console-qqq'):
+        for mode in ('window-close-v1', 'main-menu-v1', 'console-qqq'):
             value = config.template('se'); value['se_shutdown'] = mode
             self.assertEqual(config.configure(value)['se_shutdown'], mode)
         for edition, mode in (('vr', 'main-menu-v1'), ('se', True), ('se', 'unknown')):

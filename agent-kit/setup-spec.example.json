@@ -73,7 +73,8 @@
     }
   },
   "configuration": {
-    "se_new_game_ui": true
+    "se_new_game_ui": true,
+    "se_shutdown": "window-close-v1"
   },
   "destination_allowlist": [
     "SKSE/Plugins/devbench/config.json",

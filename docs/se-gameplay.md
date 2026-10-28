@@ -72,7 +72,7 @@ uncertain aim receipt prevents another world/menu mutation; original-grace
 observation and the existing guarded fallback remain distinct from success.
 This adjustment happens after scenario checks, as common session cleanup.
 
-Explicit `se_shutdown: "main-menu-v1"` uses native `Game.QuitToMainMenu`,
+The optional diagnostic `se_shutdown: "main-menu-v1"` uses native `Game.QuitToMainMenu`,
 observes a fresh contiguous Main Menu opening, then invokes the unique enabled
 stock `$QUIT` entry (index9) and its actual `MainConfirm` selection through the
 native provider. Each transition has a separate durable, one-shot intent. Only
@@ -82,7 +82,19 @@ bound on recovery, without replay. It requires the additive QUIT operations in
 [DevBench52f0c4c](https://github.com/Vhodnoylogin/devbench/commit/52f0c4ca92231226a99032b0e305f9cf6c3030a9).
 A native callback or closed menu is not actual process-exit proof. Unavailable
 menu/API state is retained before the caller's existing guarded fallback.
-Legacy configurations without this explicit policy retain the QQQ route.
+It is not the default exit route: the live pitch adjustment did not clear the
+cached target within its bound. That failure is retained; use the window route.
+
+New SE templates and the setup example select `se_shutdown: "window-close-v1"`.
+It posts ordinary `WM_CLOSE` only to windows whose current PID/birth/path still
+match the owned game, saves the single request intent and native window receipts,
+then waits up to30seconds on the original bound. A receipt needs at least one
+accepted typed WM_CLOSE; it is never process-exit proof. Actual verified exit0
+and no forced stop are still required. Recovery and later cleanup do not repost
+the request. A failure can reach the existing guarded force fallback, which
+always fails technical execution. Unknown termination also fails execution while
+retaining passed scenario checks. This route needs no desktop focus or in-game
+quit interface. Existing configurations without the policy retain legacy QQQ.
 
 SE cleanup records one owned quit request and waits for its original bounded
 grace before considering the existing window-close fallback. Recovery never
