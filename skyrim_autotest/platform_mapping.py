@@ -36,6 +36,16 @@ def operations():
             'photo.configuration.matchesReadback','photo.camera.matchesReadback','photo.target.inFrame','photo.hud.hidden',
             'camera.restored','hud.restored'], 'input.perform': [], 'menu.read': []
     }
+    # Explicit SE domain actions retain measured effects and their mechanism.
+    # Publishing these fields is source support, not live platform qualification.
+    fields['input.perform'].extend([
+        'gameplay.completed', 'movement.distanceGameUnits', 'pickup.quantityDeltaItems',
+        'inventory.open', 'equipment.equipped', 'equipment.mechanism', 'weapon.drawn',
+        'combat.healthDeltaPoints', 'combat.targetAlive', 'combat.attackInputs'])
+    fields['object.perform'].extend(['gameplay.completed', 'fixture.created', 'fixture.reference', 'fixture.base'])
+    fields['world.read'].extend(['gameplay.completed', 'player.currentHealthPoints', 'inventory.open',
+                                 'item.runtimeId', 'item.quantityItems', 'item.equipped',
+                                 'equipment.right', 'equipment.left', 'equipment.ammo'])
     result = {}
     for op, names in fields.items():
         args = {'operation': op}

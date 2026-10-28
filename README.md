@@ -48,6 +48,13 @@ See [release status](docs/release-0.4.md) for current verification. Historical
 version/candidate statements below describe their original revisions, not an
 automatic qualification of replacement builds or refreshed VR.
 
+The SE [basic gameplay domain](docs/se-gameplay.md) adds measured movement,
+exact-reference pickup, inventory open/close, explicitly native equipment,
+weapon draw/sheathe and a controlled attack. The integrated agent-kit includes
+`se-basic-gameplay.example.json`. Its candidate and owned New Game save/load path
+require their own Polygon game qualification; native equip is not inventory-row
+selection and input acknowledgements alone cannot pass its checks.
+
 ## Install and first configuration
 
 Requires Windows and Python 3.11+. For a wheel:

@@ -33,7 +33,14 @@ def prepare_mapping_probe(session, target):
         raise ValueError('Save mapping probe must precede game launch')
     if target.resolve()!=Path(state['ownedSaveDirectory']).resolve():
         raise ValueError('Mapping probe outside owned save directory')
-    if state.get('configuration',{}).get('interactive_session',{}).get('npcPersistence') is True:
+    configuration = state.get('configuration', {})
+    # A fresh SE New Game has no ESS to copy. Prove the same USVFS alias with
+    # the native read-only nonce service instead; no NPC fixture is required.
+    native_nonce = (configuration.get('interactive_session', {}).get('npcPersistence') is True or
+                    (configuration.get('game_edition') == 'se' and
+                     configuration.get('allow_owned_save_load') is True and
+                     not state.get('fixture') and not state.get('scenario', {}).get('fixture')))
+    if native_nonce:
         marker,nonce=uuid.uuid4().hex,uuid.uuid4().hex
         challenge=target/('Autotest_Map_'+marker+'.probe')
         with challenge.open('xb') as stream:stream.write(nonce.encode('ascii'))
@@ -284,6 +291,10 @@ def perform(backend, req, restart_prepare=None):
     state['platformReferences'] = {}
     state['invalidatedRuntimeItemTags']=sorted(set(state.get('invalidatedRuntimeItemTags',[]))|set(state.get('runtimeItems',{})))
     state['runtimeItems']={}
+    # Keep creation/uncertainty evidence, but never use pre-load dynamic IDs in
+    # the newly loaded world. Stable plugin/local-ID snapshots resolve afresh.
+    for fixture in state.get('seGameplayFixtures', {}).values():
+        fixture.update(status='invalidated-by-load', invalidatedBySaveTag=tag)
     b.s.invalidate_probe_reference('owned save load requested')
     state['gameplayBootstrap']['completed'] = False
     history=state.setdefault('ownedLoadHistory',[])

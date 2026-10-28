@@ -1,0 +1,367 @@
+{
+  "name": "SE basic gameplay: actual New Game, native input, item/combat effects and owned save/load",
+  "schemaVersion": 1,
+  "startMode": "new-game",
+  "cell": "QASmoke",
+  "steps": [
+    {
+      "name": "Initialized native New Game world",
+      "timeout": 30,
+      "assert": [
+        {
+          "path": "world.ready",
+          "equals": true
+        }
+      ],
+      "args": {
+        "operation": "state.read",
+        "request": {}
+      },
+      "tool": "platform"
+    },
+    {
+      "name": "One bounded forward move",
+      "timeout": 30,
+      "assert": [
+        {
+          "path": "gameplay.completed",
+          "equals": true
+        },
+        {
+          "min": 5,
+          "path": "movement.distanceGameUnits"
+        }
+      ],
+      "args": {
+        "operation": "input.perform",
+        "request": {
+          "action": "move",
+          "direction": "forward",
+          "domain": "se-gameplay",
+          "durationSeconds": 0.5
+        }
+      },
+      "tool": "platform"
+    },
+    {
+      "name": "Create owned pickup fixture",
+      "timeout": 30,
+      "assert": [
+        {
+          "path": "fixture.created",
+          "equals": true
+        }
+      ],
+      "args": {
+        "operation": "object.perform",
+        "request": {
+          "action": "create-pickup-fixture",
+          "item": {
+            "plugin": "Skyrim.esm",
+            "localId": "01397E",
+            "type": "WEAP"
+          },
+          "distanceGameUnits": 80,
+          "domain": "se-gameplay",
+          "referenceTag": "baseline-weapon"
+        }
+      },
+      "tool": "platform"
+    },
+    {
+      "name": "Acquire exact owned item",
+      "timeout": 30,
+      "assert": [
+        {
+          "path": "gameplay.completed",
+          "equals": true
+        },
+        {
+          "path": "pickup.quantityDeltaItems",
+          "equals": 1
+        }
+      ],
+      "args": {
+        "operation": "input.perform",
+        "request": {
+          "action": "pickup",
+          "domain": "se-gameplay",
+          "referenceTag": "baseline-weapon"
+        }
+      },
+      "tool": "platform"
+    },
+    {
+      "name": "Open stock inventory",
+      "timeout": 30,
+      "assert": [
+        {
+          "path": "inventory.open",
+          "equals": true
+        }
+      ],
+      "args": {
+        "operation": "input.perform",
+        "request": {
+          "action": "inventory-open",
+          "domain": "se-gameplay"
+        }
+      },
+      "tool": "platform"
+    },
+    {
+      "name": "Close stock inventory",
+      "timeout": 30,
+      "assert": [
+        {
+          "path": "inventory.open",
+          "equals": false
+        }
+      ],
+      "args": {
+        "operation": "input.perform",
+        "request": {
+          "action": "inventory-close",
+          "domain": "se-gameplay"
+        }
+      },
+      "tool": "platform"
+    },
+    {
+      "name": "Equip acquired fixture through native API",
+      "timeout": 30,
+      "assert": [
+        {
+          "path": "equipment.equipped",
+          "equals": true
+        }
+      ],
+      "args": {
+        "operation": "input.perform",
+        "request": {
+          "action": "equip",
+          "mechanism": "papyrus-native",
+          "domain": "se-gameplay",
+          "referenceTag": "baseline-weapon"
+        }
+      },
+      "tool": "platform"
+    },
+    {
+      "name": "Draw equipped weapon",
+      "timeout": 30,
+      "assert": [
+        {
+          "path": "weapon.drawn",
+          "equals": true
+        }
+      ],
+      "args": {
+        "operation": "input.perform",
+        "request": {
+          "action": "weapon-draw",
+          "domain": "se-gameplay"
+        }
+      },
+      "tool": "platform"
+    },
+    {
+      "name": "Create disposable combat fixture",
+      "timeout": 30,
+      "assert": [
+        {
+          "path": "fixture.created",
+          "equals": true
+        }
+      ],
+      "args": {
+        "operation": "object.perform",
+        "request": {
+          "action": "create-combat-fixture",
+          "actorTag": "baseline-target",
+          "distanceGameUnits": 80,
+          "base": {
+            "plugin": "Skyrim.esm",
+            "localId": "013475"
+          },
+          "domain": "se-gameplay"
+        }
+      },
+      "tool": "platform"
+    },
+    {
+      "name": "One attack with measured target damage",
+      "timeout": 30,
+      "assert": [
+        {
+          "path": "gameplay.completed",
+          "equals": true
+        },
+        {
+          "path": "combat.healthDeltaPoints",
+          "max": -0.01
+        },
+        {
+          "path": "combat.attackInputs",
+          "equals": 1
+        },
+        {
+          "path": "combat.targetAlive",
+          "equals": true
+        }
+      ],
+      "args": {
+        "operation": "input.perform",
+        "request": {
+          "action": "attack",
+          "actorTag": "baseline-target",
+          "domain": "se-gameplay",
+          "durationSeconds": 0.1
+        }
+      },
+      "tool": "platform"
+    },
+    {
+      "name": "Sheathe weapon before owned save",
+      "timeout": 30,
+      "assert": [
+        {
+          "path": "weapon.drawn",
+          "equals": false
+        }
+      ],
+      "args": {
+        "operation": "input.perform",
+        "request": {
+          "action": "weapon-sheathe",
+          "domain": "se-gameplay"
+        }
+      },
+      "tool": "platform"
+    },
+    {
+      "name": "Complete one disposable owned save",
+      "timeout": 90,
+      "assert": [
+        {
+          "path": "save.completed",
+          "equals": true
+        },
+        {
+          "path": "save.ownedByAttempt",
+          "equals": true
+        }
+      ],
+      "args": {
+        "operation": "input.perform",
+        "request": {
+          "action": "save_game",
+          "saveTag": "baseline-save",
+          "scope": "owned-disposable-profile"
+        }
+      },
+      "tool": "platform"
+    },
+    {
+      "assert": [
+        {
+          "path": "equipment.equipped",
+          "equals": false
+        }
+      ],
+      "timeout": 30,
+      "tool": "platform",
+      "args": {
+        "operation": "input.perform",
+        "request": {
+          "action": "unequip",
+          "referenceTag": "baseline-weapon",
+          "mechanism": "papyrus-native",
+          "domain": "se-gameplay"
+        }
+      },
+      "name": "Change saved equipment before load"
+    },
+    {
+      "name": "Complete same-process owned load",
+      "timeout": 90,
+      "assert": [
+        {
+          "path": "lifecycle.worldReady",
+          "equals": true
+        },
+        {
+          "path": "lifecycle.pidChanged",
+          "equals": false
+        },
+        {
+          "path": "lifecycle.generationChanged",
+          "equals": true
+        }
+      ],
+      "args": {
+        "operation": "input.perform",
+        "request": {
+          "action": "load_game",
+          "saveTag": "baseline-save",
+          "scope": "owned-disposable-profile"
+        }
+      },
+      "tool": "platform"
+    },
+    {
+      "name": "Fresh playable world after owned load",
+      "timeout": 30,
+      "assert": [
+        {
+          "path": "world.ready",
+          "equals": true
+        }
+      ],
+      "args": {
+        "operation": "state.read",
+        "request": {}
+      },
+      "tool": "platform"
+    },
+    {
+      "assert": [
+        {
+          "path": "gameplay.completed",
+          "equals": true
+        },
+        {
+          "path": "item.quantityItems",
+          "min": 1
+        },
+        {
+          "path": "item.equipped",
+          "equals": true
+        },
+        {
+          "path": "item.quantityItems",
+          "min": 1
+        },
+        {
+          "path": "inventory.open",
+          "equals": false
+        }
+      ],
+      "timeout": 30,
+      "tool": "platform",
+      "args": {
+        "operation": "world.read",
+        "request": {
+          "item": {
+            "type": "WEAP",
+            "plugin": "Skyrim.esm",
+            "localId": "01397E"
+          },
+          "observation": "snapshot",
+          "domain": "se-gameplay"
+        }
+      },
+      "name": "Fresh saved equipment restored after load"
+    }
+  ]
+}

@@ -74,6 +74,43 @@ class OwnedSaveTests(unittest.TestCase):
             owned_saves.prepare_required_mapping_probe(self.b.s,Path(self.b.s.state['ownedSaveDirectory']))
             prepare.assert_called_once()
         self.assertTrue(self.b.s.state['ownedSaveMappingRequired'])
+
+    def test_fresh_se_can_prove_save_alias_without_an_existing_save_or_npcs(self):
+        self.b.s.state.pop('game')
+        self.b.s.state['configuration'].update(game_edition='se',
+            skse_logs=str(Path(self.tmp.name)/'MyGames/SKSE'))
+        self.b.s.state['scenario']={'startMode':'new-game','steps':[
+            {'tool':'platform','args':{'operation':'input.perform','request':self.request()}}]}
+        target=Path(self.b.s.state['ownedSaveDirectory'])
+        (target.parent/'settings.ini').write_text('[General]\nLocalSaves=true\nLocalSettings=true\n')
+        owned_saves.prepare_required_mapping_probe(self.b.s,target)
+        probe=self.b.s.state['ownedSaveMappingProbe']
+        self.assertEqual(probe['kind'],'native-nonce/1')
+        self.assertEqual(len(list(target.iterdir())),1)
+        self.assertEqual(Path(probe['path']).read_bytes(),probe['nonce'].encode('ascii'))
+        self.b.s.state['game']={'pid':17,'birth':123}
+        self.b.pap=lambda *a,**k:'__MO_Saves\\'
+        def native_read(tool,args):
+            self.b.calls.append((tool,args))
+            self.assertEqual(tool,'npc_persistence')
+            self.assertEqual(args['action'],'mapping_probe')
+            return {'protocol':'npc-save-mapping/1','pid':17,'marker':probe['marker'],
+                    'nonce':probe['nonce'],'exactBytes':32,'readOnly':True,
+                    'nativeDirectory':str(Path(self.tmp.name)/'MyGames/__MO_Saves')}
+        self.b.call=native_read
+        self.assertEqual(owned_saves.directory(self.b),target)
+        self.assertEqual(len(self.b.calls),1)
+        # Neither a fake initial save nor a world mutation established custody.
+        self.assertFalse(list(target.glob('*.ess')))
+        self.assertNotIn('interactive_session',self.b.s.state['configuration'])
+
+    def test_fresh_se_nonce_does_not_replace_a_declared_pinned_fixture(self):
+        self.b.s.state.pop('game')
+        self.b.s.state['configuration']['game_edition']='se'
+        self.b.s.state['scenario']={'fixture':{'saveStem':'required-real-save'}}
+        with self.assertRaisesRegex(ValueError,'Pinned owned fixture needed'):
+            owned_saves.prepare_mapping_probe(self.b.s,Path(self.b.s.state['ownedSaveDirectory']))
+
     def complete(self):
         replies=[{'headSeq':1,'events':[event(1,'saveGame')]},{'headSeq':1,'events':[]}]
         with patch('skyrim_autotest.runner.request',side_effect=replies),patch.object(owned_saves.time,'monotonic',side_effect=[0,0,2]):
@@ -107,6 +144,7 @@ class OwnedSaveTests(unittest.TestCase):
         self.assertEqual(len(self.b.calls),before)
     def test_same_process_load_requires_ordered_events_common_readiness_and_old_tag_invalidation(self):
         self.complete()
+        self.b.s.state['seGameplayFixtures']={'picked-item':{'status':'picked-up','reference':'0xFF001234'}}
         native=[event(1,'preLoadGame'),event(2,'postLoadGame')]
         with patch('skyrim_autotest.runner.request',side_effect=[{'headSeq':2,'events':native},{'headSeq':2,'events':[]}]), \
              patch('skyrim_autotest.bootstrap.wait_gameplay_ready',return_value=({'playerLoaded':True,'cell':{'editorId':'QASmoke'}},{})) as common, \
@@ -116,6 +154,9 @@ class OwnedSaveTests(unittest.TestCase):
         self.assertFalse(value['pidChanged']);self.assertTrue(value['oldReferenceTagsInvalidated'])
         self.assertEqual(self.b.s.state['platformReferences'],{})
         self.assertIn('old-tag',self.b.s.state['invalidatedReferenceTags'])
+        self.assertEqual(self.b.s.state['seGameplayFixtures']['picked-item']['status'],'invalidated-by-load')
+        self.assertEqual(self.b.s.state['seGameplayFixtures']['picked-item']['invalidatedBySaveTag'],'stocked-a')
+        self.assertEqual(self.b.s.state['seGameplayFixtures']['picked-item']['reference'],'0xFF001234')
         common.assert_called_once()
         self.assertEqual(common.call_args.kwargs['deadline'],self.b.end)
     def test_unordered_postload_cannot_be_completion(self):
