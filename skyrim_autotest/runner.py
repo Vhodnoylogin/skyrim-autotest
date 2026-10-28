@@ -1174,9 +1174,10 @@ class Session:
                 if row['name'].lower() not in GAME_NAMES:
                     continue
                 identity = native.identity(row['pid'])
-                if identity is None and any(i['pid'] == row['pid'] for i in owned):
+                if identity is None and any(i['pid'] in (row['pid'], row.get('parent')) for i in owned):
                     # Toolhelp's complete snapshot may outlive the process it lists.
-                    # PID membership permits observation only, never ownership/action.
+                    # An owned PID or its child permits bounded reobservation
+                    # only: parentage never grants ownership or process action.
                     unresolved.append({**row, 'identity': None})
                 elif identity is None or identity not in owned:
                     foreign.append({**row, 'identity': identity})

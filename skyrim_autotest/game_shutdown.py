@@ -21,13 +21,17 @@ def _identity(value):
     return copy.deepcopy(value)
 
 
-def _alive(session, game):
+def _alive(session, game, *, before_request=False):
     if session.state.get('game') != game:
         raise RuntimeError('Owned game identity changed during graceful exit')
     if not any(row.get('role') == 'game' and row.get('identity') == game
                for row in session.state.get('owned', [])):
         raise RuntimeError('Graceful exit requires the exact owned game process')
-    session.guard_shutdown()
+    # The shutdown barrier protects mutations. Once qqq is requested, observing
+    # our retained identity must not be interrupted by an unrelated transient
+    # process row. The caller guards every later mutation/restoration separately.
+    if before_request:
+        session.guard_shutdown()
     if session.state.get('game') != game:
         raise RuntimeError('Owned game identity changed during graceful exit guard')
     current = native.identity(game['pid'])
@@ -51,9 +55,10 @@ def request_and_wait(session, seconds=10):
     existing = session.state.get('gracefulGameExit')
     if existing is not None and (not isinstance(existing, dict) or existing.get('game') != game):
         raise RuntimeError('Previous graceful exit intent belongs to another game identity')
-    alive = _alive(session, game)
+    alive = _alive(session, game, before_request=existing is None)
     if existing is None:
         if not alive:
+            session.observe_game_exit('graceful-game-exit-observed')
             return True
         started = time.monotonic()
         record = {'game': game, 'command': 'qqq', 'status': 'request-intent',
@@ -62,7 +67,7 @@ def request_and_wait(session, seconds=10):
         session.state['gracefulGameExit'] = record
         session.save()  # Must precede the one potentially uncertain mutation.
         session.log('graceful-game-exit-request', **copy.deepcopy(record))
-        if _alive(session, game):
+        if _alive(session, game, before_request=True):
             try:
                 remaining = record['deadlineMonotonic'] - time.monotonic()
                 if remaining > 0:
@@ -90,6 +95,10 @@ def request_and_wait(session, seconds=10):
         remaining = record['deadlineMonotonic'] - time.monotonic()
         if not alive or remaining <= 0:
             gone = not alive
+            if gone:
+                # Preserve the live retained-handle exit code before the caller's
+                # next mutation barrier or cleanup operation can fail.
+                session.observe_game_exit('graceful-game-exit-observed')
             record.update(status='observed-gone' if gone else 'grace-expired',
                           observedGone=gone, waitFinishedMonotonic=time.monotonic())
             session.save()

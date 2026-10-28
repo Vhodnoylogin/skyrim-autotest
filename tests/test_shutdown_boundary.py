@@ -56,6 +56,29 @@ class ShutdownBoundaryTests(unittest.TestCase):
                 self.session.guard_shutdown()
         sleep.assert_not_called()
 
+    def test_unidentified_owned_child_may_disappear_on_fresh_inventory_without_adoption(self):
+        child={'pid':99,'parent':self.game['pid'],'name':'SkyrimSE.exe'}
+        original=list(self.state['owned'])
+        with patch.object(native,'processes',side_effect=[[self.system,child],[self.system]]), \
+             patch.object(native,'identity',return_value=None),patch.object(runner.time,'sleep'), \
+             patch.object(native,'close') as close,patch.object(native,'terminate') as terminate:
+            self.session.guard_shutdown()
+        self.assertEqual(self.state['owned'],original)
+        close.assert_not_called();terminate.assert_not_called()
+
+    def test_persistent_or_identified_foreign_child_is_never_adopted_or_closed(self):
+        child={'pid':99,'parent':self.game['pid'],'name':'SkyrimSE.exe'}
+        foreign={'pid':99,'birth':999,'path':'foreign/SkyrimSE.exe'}
+        for identities in (None,foreign):
+            with self.subTest(identity=identities),patch.object(native,'processes',return_value=[self.system,child]), \
+                 patch.object(native,'identity',return_value=identities),patch.object(runner.time,'sleep'), \
+                 patch.object(runner.time,'monotonic',return_value=0), \
+                 patch.object(native,'close') as close,patch.object(native,'terminate') as terminate:
+                with self.assertRaisesRegex(RuntimeError,'Unexpected session'):
+                    self.session.guard_shutdown()
+            close.assert_not_called();terminate.assert_not_called()
+        self.assertEqual(len(self.state['owned']),1)
+
     def test_unknown_owned_pid_stays_blocked_with_finite_observation_bound(self):
         with patch.object(native, 'processes', return_value=[self.system, self.row]) as processes, \
              patch.object(native, 'identity', return_value=None), patch.object(runner.time, 'sleep'), \

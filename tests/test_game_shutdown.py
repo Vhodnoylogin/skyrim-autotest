@@ -23,6 +23,7 @@ class Session:
         self.saved, self.events = [], []
         self.guard_shutdown = Mock()
         self.tool = Mock(side_effect=self.request)
+        self.observe_game_exit = Mock()
     def save(self): self.saved.append(copy.deepcopy(self.state))
     def log(self, event, **fields): self.events.append((event, fields))
     def request(self, tool, args, **kwargs):
@@ -58,6 +59,7 @@ class GraceTests(unittest.TestCase):
         self.assertEqual([event for event, _ in self.session.events],
                          ['graceful-game-exit-request', 'graceful-game-exit-wait-finished'])
         self.assertTrue(all(0 < duration <= .2 for duration in self.clock.sleeps))
+        self.session.observe_game_exit.assert_called_once_with('graceful-game-exit-observed')
     def test_false_return_only_after_original_deadline_and_recovery_never_renews(self):
         self.assertFalse(shutdown.request_and_wait(self.session, seconds=1))
         self.assertAlmostEqual(self.clock.now, 1)
@@ -105,6 +107,51 @@ class GraceTests(unittest.TestCase):
         self.session.guard_shutdown.side_effect = lambda: self.session.state['game'].update(birth=9999)
         with self.assertRaisesRegex(RuntimeError, 'identity changed'): shutdown.request_and_wait(self.session)
         self.session.tool.assert_not_called()
+    def test_before_request_foreign_shutdown_barrier_still_refuses_input(self):
+        self.session.guard_shutdown.side_effect = RuntimeError('foreign game blocks mutation')
+        with self.assertRaisesRegex(RuntimeError, 'foreign game'): shutdown.request_and_wait(self.session)
+        self.session.tool.assert_not_called()
+        self.session.observe_game_exit.assert_not_called()
+    def test_readonly_wait_ignores_transient_foreign_barrier_and_captures_live_exit(self):
+        self.gone_after(.6)
+        original_request = self.session.request
+        def request(*args, **kwargs):
+            result = original_request(*args, **kwargs)
+            # Simulate an unknown ephemeral Skyrim process row after our qqq.
+            # Such a row must still block the caller's next process mutation,
+            # but cannot interrupt read-only observation of this exact game.
+            self.session.guard_shutdown.side_effect = RuntimeError('unidentified child snapshot row')
+            return result
+        self.session.tool.side_effect = request
+        observed = []
+        self.session.observe_game_exit.side_effect = lambda stage: observed.append((stage, self.clock.now))
+        self.assertTrue(shutdown.request_and_wait(self.session))
+        self.assertEqual(self.session.guard_shutdown.call_count, 2)
+        self.assertEqual([stage for stage, _ in observed], ['graceful-game-exit-observed'])
+        self.assertAlmostEqual(observed[0][1], .6)
+        with self.assertRaisesRegex(RuntimeError, 'unidentified child'): self.session.guard_shutdown()
+        self.assertEqual(self.session.tool.call_count, 1)
+    def test_recovery_wait_never_calls_mutation_barrier_or_renews_deadline(self):
+        self.session.state['gracefulGameExit'] = {'game': copy.deepcopy(GAME), 'command': 'qqq',
+            'status': 'waiting', 'startedMonotonic': 0., 'deadlineMonotonic': .4,
+            'requestAttempted': True}
+        self.session.guard_shutdown.side_effect = RuntimeError('unknown process blocks mutations only')
+        self.gone_after(.2)
+        self.assertTrue(shutdown.request_and_wait(self.session, seconds=30))
+        self.session.guard_shutdown.assert_not_called(); self.session.tool.assert_not_called()
+        self.assertEqual(self.session.state['gracefulGameExit']['deadlineMonotonic'], .4)
+        self.session.observe_game_exit.assert_called_once_with('graceful-game-exit-observed')
+    def test_exit_capture_precedes_persistence_or_caller_failure(self):
+        self.gone_after(.2)
+        captured = []
+        self.session.observe_game_exit.side_effect = lambda stage: captured.append(stage)
+        original_save = self.session.save
+        def save():
+            if self.clock.now >= .2: raise OSError('later persistence failure')
+            original_save()
+        self.session.save = save
+        with self.assertRaisesRegex(OSError, 'persistence failure'): shutdown.request_and_wait(self.session)
+        self.assertEqual(captured, ['graceful-game-exit-observed'])
     def test_identity_change_while_waiting_never_sends_another_quit(self):
         def sleep(seconds):
             self.clock.sleep(seconds)

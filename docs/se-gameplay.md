@@ -66,6 +66,11 @@ native process-exit observations: nonzero or forced game exit fails technical
 execution even when all action checks passed. It does not rewrite those checks.
 Normal closure requires observed exit0 plus an owned quit request; missing exit
 telemetry remains unknown.
+After the quit request, read-only exit polling keeps the retained game handle
+and captures its final code before another shutdown guard can fail. Strict
+foreign-session checks still precede all process/file actions. An unidentified
+snapshot row for an owned process or child may be reobserved within the existing
+two-second bound; parentage never permits adoption or termination.
 
 SE owned loads also read the game's actual localized confirmation strings and
 observe message-box opening events during the original load deadline. A matching
