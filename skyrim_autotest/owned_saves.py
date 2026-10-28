@@ -317,11 +317,16 @@ def perform(backend, req, restart_prepare=None):
         transition['restartRequested']=True
         b.s.save()
         BoundSession(b).phase('gameplay-owned-restart-load',b.remaining())
+    load_settings = None
+    if state.get('configuration', {}).get('game_edition') == 'se':
+        from . import load_modal
+        load_settings = load_modal.prepare(b)
     b.call('game', {'action':'load', 'name':record['stem'], 'dir':str(target)})
     events = Events(b, cursor)
     saw_pre, completed_events = False, []
     while True:
-        for event in events.read():
+        batch = events.read()
+        for event in batch:
             name = lifecycle(event)
             if name == 'newGame': raise ValueError('Unexpected New Game during owned load')
             if name == 'preLoadGame':
@@ -332,6 +337,11 @@ def perform(backend, req, restart_prepare=None):
                 if not saw_pre or len(completed_events) != 1: raise ValueError('Owned load completion lacks unique ordered preLoadGame')
                 completed_events.append(event)
         if len(completed_events) == 2: break
+        if load_settings is not None and any(
+                event.get('topic') == 'menu' and event.get('data', {}).get('name') == 'MessageBoxMenu'
+                and event['data'].get('opening') is True for event in batch):
+            from . import load_modal
+            load_modal.handle(b, transition, load_settings)
         b.pause(.2)
     from .bootstrap import wait_gameplay_ready
     proxy = BoundSession(b)

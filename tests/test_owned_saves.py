@@ -165,6 +165,39 @@ class OwnedSaveTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'unique ordered'):owned_saves.perform(self.b,self.request('load_game'))
         self.assertFalse(self.b.s.state['gameplayBootstrap']['completed'])
 
+    def test_se_owned_load_handles_observed_modal_then_requires_actual_native_events(self):
+        self.complete()
+        self.b.s.state['configuration']['game_edition']='se'
+        opened={'seq':1,'topic':'menu','data':{'name':'MessageBoxMenu','opening':True}}
+        settings={'actual':'localized values'}
+        replies=[{'headSeq':1,'events':[opened]},
+                 {'headSeq':3,'events':[event(2,'preLoadGame'),event(3,'postLoadGame')]},
+                 {'headSeq':3,'events':[]}]
+        with patch('skyrim_autotest.load_modal.prepare',return_value=settings) as prepare, \
+             patch('skyrim_autotest.load_modal.handle',return_value=True) as answer, \
+             patch('skyrim_autotest.runner.request',side_effect=replies), \
+             patch('skyrim_autotest.bootstrap.wait_gameplay_ready',return_value=({'playerLoaded':True,'cell':{'editorId':'QASmoke'}},{})), \
+             patch('skyrim_autotest.platform.initialize_controllers'):
+            value=owned_saves.perform(self.b,self.request('load_game'))
+        prepare.assert_called_once_with(self.b)
+        answer.assert_called_once()
+        self.assertIs(answer.call_args.args[2],settings)
+        self.assertTrue(value['lifecycle']['worldReady'])
+        self.assertEqual(sum(t=='game' and a['action']=='load' for t,a in self.b.calls),1)
+
+    def test_unknown_se_load_dialog_stops_with_evidence_without_waiting_or_replaying(self):
+        self.complete()
+        self.b.s.state['configuration']['game_edition']='se'
+        opened={'seq':1,'topic':'menu','data':{'name':'MessageBoxMenu','opening':True}}
+        with patch('skyrim_autotest.load_modal.prepare',return_value={}), \
+             patch('skyrim_autotest.load_modal.handle',side_effect=ValueError('Unknown blocking modal rawDescriptor=corrupt')) as modal, \
+             patch('skyrim_autotest.runner.request',return_value={'headSeq':1,'events':[opened]}):
+            with self.assertRaisesRegex(ValueError,'rawDescriptor=corrupt'):
+                owned_saves.perform(self.b,self.request('load_game'))
+        modal.assert_called_once()
+        self.assertFalse(self.b.s.state['ownedLoadTransition']['completed'])
+        self.assertEqual(sum(t=='game' and a['action']=='load' for t,a in self.b.calls),1)
+
     def test_restart_load_requires_new_process_common_startup_then_ordered_native_load(self):
         self.complete()
         def restart(b):

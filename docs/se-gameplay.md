@@ -59,6 +59,21 @@ and inventory-menu state. An optional item is independently resolved and returns
 retained static item after a save/load without using an old fixture reference.
 Save/load and process exit remain the common executor's separate operations.
 
+SE owned loads also read the game's actual localized confirmation strings and
+observe message-box opening events during the original load deadline. A matching
+discard-progress confirmation gets one recorded answer; unknown/corrupt/content
+warnings retain their exact native body/buttons and fail immediately. An answer
+does not replace ordered pre/postLoadGame or the restored-equipment assertion.
+
+The corrected provider load path is published in the owner DevBench fork at
+commit `b734f6de888e73db2148eae411f276355ed6f883`:
+[source](https://github.com/Vhodnoylogin/devbench/commit/b734f6de888e73db2148eae411f276355ed6f883).
+It keeps named-file validation and requests native `Game.LoadGame` through SKSE's
+event-processing route. It does not suppress content warnings or establish load
+completion. Reacquire/build the source with the fork's
+[provider build instructions](https://github.com/Vhodnoylogin/devbench/blob/b734f6de888e73db2148eae411f276355ed6f883/docs/autotest-provider-tools.md);
+SDKs, headers, compiler/debugger binaries and DLL outputs remain external to Git.
+
 ## Native provider contracts
 
 The native `input` tool must advertise `devbench.input` version 2.0, keyboard
