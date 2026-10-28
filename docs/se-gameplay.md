@@ -59,6 +59,19 @@ and inventory-menu state. An optional item is independently resolved and returns
 retained static item after a save/load without using an old fixture reference.
 Save/load and process exit remain the common executor's separate operations.
 
+Before returning to Main Menu, this route reads SKSE's actual cached crosshair
+reference. If nonempty, one native player `SetAngle(float,float,float)` aims
+upward while preserving the observed roll/yaw. Two separately polled native
+`Game.GetCurrentCrosshairRef()` None results are mandatory before world teardown;
+no reference is deleted and no SKSE memory is patched. This releases the strong
+reference while the actor/base data still exists. SKSE2.3.1's static
+[`g_curCrosshairRef`](https://github.com/ianpatt/skse64/blob/25b72352adb6543fa6d0bd3795780672b2e238e0/skse64/Hooks_Gameplay.cpp)
+otherwise can release an Actor during CRT teardown after base data is gone,
+as observed in the retained1.7.104 quit dump. A surviving cached target or
+uncertain aim receipt prevents another world/menu mutation; original-grace
+observation and the existing guarded fallback remain distinct from success.
+This adjustment happens after scenario checks, as common session cleanup.
+
 Explicit `se_shutdown: "main-menu-v1"` uses native `Game.QuitToMainMenu`,
 observes a fresh contiguous Main Menu opening, then invokes the unique enabled
 stock `$QUIT` entry (index9) and its actual `MainConfirm` selection through the

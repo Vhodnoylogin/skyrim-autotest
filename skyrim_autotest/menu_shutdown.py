@@ -13,6 +13,73 @@ from . import game_shutdown as exit_observation
 CONTRACT = 'devbench-startup-ui/1'
 
 
+def release_crosshair(call, mutate, record, session, remaining):
+    """Release SKSE's strong crosshair reference while its actor/base still live.
+
+    SKSE2.3.1 keeps g_curCrosshairRef in a static NiPointer. Merely returning to
+    Main Menu does not clear it; its CRT destructor can outlive the actor base.
+    No reference is deleted/adopted. One player pitch adjustment is allowed,
+    and the actual SKSE getter must return None twice before world teardown.
+    """
+    from .api_contract import validate_description
+
+    def crosshair():
+        value = call('papyrus', {'action': 'call', 'script': 'Game', 'function': 'GetCurrentCrosshairRef', 'args': []})
+        if (not isinstance(value, dict) or value.get('called') is not True or 'returned' not in value
+                or str(value.get('returnedType')).casefold() not in ('none', 'objectreference')
+                or str(value.get('returnedType')).casefold() == 'none' and value['returned'] is not None):
+            raise ValueError('Typed SKSE crosshair-cache read unavailable')
+        if value['returned'] is not None:
+            from .actor_domain import returned_form
+            returned_form(value['returned'])
+        return value
+
+    before = crosshair()
+    receipt = {'before': copy.deepcopy(before), 'released': False, 'samples': []}
+    record['crosshairRelease'] = receipt
+    session.save()
+    if before['returned'] is not None:
+        metadata = call('papyrus', {'action': 'describe', 'script': 'ObjectReference'})
+        api = validate_description('ObjectReference', metadata, 'memberFunctions',
+            {'SetAngle': ['float', 'float', 'float'], 'GetAngleX': [], 'GetAngleY': [], 'GetAngleZ': []})
+        if (api[0].get('native') is not True or str(api[0].get('returnType')).casefold() != 'none'
+                or any(row.get('native') is not True or str(row.get('returnType')).casefold() != 'float' for row in api[1:])):
+            raise ValueError('Native player pitch interface unavailable')
+        angles = []
+        for axis in 'XYZ':
+            value = call('papyrus', {'action': 'call', 'script': 'ObjectReference',
+                'function': 'GetAngle' + axis, 'self': {'form': '0x00000014'}, 'args': []})
+            angle = value.get('returned') if isinstance(value, dict) else None
+            if (not isinstance(value, dict) or value.get('called') is not True
+                    or str(value.get('returnedType')).casefold() != 'float'
+                    or type(angle) not in (int, float) or not math.isfinite(angle) or abs(angle) > 3600):
+                raise ValueError('Actual finite player angle readback unavailable')
+            angles.append(angle)
+        receipt.update(api=api, player={'form': '0x00000014'}, anglesBeforeDegrees=angles, requestedPitchDegrees=-85.)
+        session.save()
+        answer = mutate('crosshairAim', 'papyrus', {'action': 'call', 'script': 'ObjectReference',
+            'function': 'SetAngle', 'self': {'form': '0x00000014'}, 'args': [-85., angles[1], angles[2]]})
+        if (not isinstance(answer, dict) or answer.get('called') is not True
+                or str(answer.get('returnedType')).casefold() != 'none'
+                or 'returned' not in answer or answer['returned'] is not None):
+            raise ValueError('Player pitch completion unavailable; no replay')
+    clear = 0
+    end = min(record['deadlineMonotonic'], time.monotonic() + 5)
+    while time.monotonic() < end:
+        remaining()
+        value = crosshair()
+        receipt['samples'].append(copy.deepcopy(value))
+        clear = clear + 1 if value['returned'] is None else 0
+        if clear >= 2:
+            receipt.update(released=True, basis='actual SKSE cached-crosshair getter returned None twice before world teardown')
+            session.save()
+            session.log('menu-exit-crosshair-released', receipt=copy.deepcopy(receipt))
+            return
+        time.sleep(min(.2, max(0, end - time.monotonic())))
+    session.save()
+    raise ValueError('SKSE crosshair strong reference remains; world teardown not requested')
+
+
 def selection(snapshot, state, selected=False):
     if (not isinstance(snapshot, dict) or snapshot.get('contract') != CONTRACT
             or snapshot.get('menu') != 'Main Menu' or snapshot.get('state') != state):
@@ -97,9 +164,12 @@ def request_and_wait(session, seconds=45):
             if 'Main Menu' not in current['openMenus']:
                 from .api_contract import validate_description
                 description = call('papyrus', {'action': 'describe', 'script': 'Game'})
-                api = validate_description('Game', description, 'globalFunctions', {'QuitToMainMenu': []})
-                if api[0].get('native') is not True or str(api[0].get('returnType')).casefold() != 'none':
+                api = validate_description('Game', description, 'globalFunctions',
+                                           {'QuitToMainMenu': [], 'GetCurrentCrosshairRef': []})
+                if (api[0].get('native') is not True or str(api[0].get('returnType')).casefold() != 'none'
+                        or api[1].get('native') is not True or str(api[1].get('returnType')).casefold() != 'objectreference'):
                     raise ValueError('Native Game.QuitToMainMenu signature unavailable')
+                release_crosshair(call, mutate, record, session, remaining)
                 from .runner import request
                 envelope = request(session.state['port'], 'api/events', timeout=min(3, remaining()))
                 cursor = envelope.get('headSeq')
@@ -110,7 +180,9 @@ def request_and_wait(session, seconds=45):
                 session.save()
                 answer = mutate('mainMenuReturn', 'papyrus', {'action': 'call', 'script': 'Game',
                     'function': 'QuitToMainMenu', 'args': []})
-                if not isinstance(answer, dict) or 'returned' not in answer or answer['returned'] is not None:
+                if (not isinstance(answer, dict) or answer.get('called') is not True
+                        or str(answer.get('returnedType')).casefold() != 'none'
+                        or 'returned' not in answer or answer['returned'] is not None):
                     raise ValueError('QuitToMainMenu completion unavailable; no replay')
                 opened = False
                 while True:
@@ -189,7 +261,7 @@ def request_and_wait(session, seconds=45):
     desktop = record.get('desktopQuit', {})
     if record.get('requestAttempted') is not True or desktop.get('requestAttempted') is not True or desktop.get('game') != game:
         pending = any(isinstance(record.get(stage), dict) and record[stage].get('requestAttempted') is True
-                      for stage in ('mainMenuReturn', 'quitSelection'))
+                      for stage in ('crosshairAim', 'mainMenuReturn', 'quitSelection'))
         if not pending:
             return False
     while True:

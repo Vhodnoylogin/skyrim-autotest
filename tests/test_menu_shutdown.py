@@ -18,6 +18,7 @@ class Clock:
 class Session:
     def __init__(self, clock):
         self.clock, self.main, self.confirm, self.quit_at = clock, False, False, None
+        self.crosshair, self.angles, self.aim_clears = None, [0., 5., 90.], True
         self.state = {'configuration': {'game_edition': 'se'}, 'port': 123,
                       'game': copy.deepcopy(GAME), 'owned': [{'role': 'game', 'identity': copy.deepcopy(GAME)}]}
         self.saved, self.calls = [], []
@@ -41,15 +42,36 @@ class Session:
         if name == 'menu' and args['action'] == 'list':
             return {'openMenus': ['Main Menu'] if self.main else ['HUD Menu'], 'messageBoxOpen': False}
         if name == 'papyrus' and args['action'] == 'describe':
-            return {'name': 'Game', 'globalFunctions': [{'name': 'QuitToMainMenu', 'params': [], 'returnType': 'None', 'native': True}]}
-        if name == 'papyrus': self.main = True; return {'returned': None}
+            if args['script'] == 'Game':
+                return {'name': 'Game', 'globalFunctions': [
+                    {'name': 'QuitToMainMenu', 'params': [], 'returnType': 'None', 'native': True},
+                    {'name': 'GetCurrentCrosshairRef', 'params': [], 'returnType': 'ObjectReference', 'native': True}]}
+            return {'name': 'ObjectReference', 'memberFunctions': [
+                {'name': 'SetAngle', 'params': [{'type': 'float'}] * 3, 'returnType': 'none', 'native': True},
+                *[{'name': 'GetAngle' + axis, 'params': [], 'returnType': 'float', 'native': True} for axis in 'XYZ']]}
+        if name == 'papyrus':
+            function = args['function']
+            if function == 'GetCurrentCrosshairRef':
+                return {'called': True, 'returned': self.crosshair, 'returnedType': 'objectreference' if self.crosshair else 'none'}
+            if function.startswith('GetAngle'):
+                assert args['self'] == {'form': '0x00000014'}
+                return {'called': True, 'returned': self.angles['XYZ'.index(function[-1])], 'returnedType': 'float'}
+            if function == 'SetAngle':
+                assert args['self'] == {'form': '0x00000014'} and len(args['args']) == 3
+                self.angles = list(args['args'])
+                if self.aim_clears: self.crosshair = None
+            else:
+                assert function == 'QuitToMainMenu'
+                self.main = True
+            return {'called': True, 'returned': None, 'returnedType': 'none'}
         op = args['startupOperation']
         if op == 'snapshot': return self.snapshot()
         if op == 'select-quit': self.confirm = True
         if op == 'confirm-quit': self.quit_at = self.clock.now + .4
         return {'contract': menu_shutdown.CONTRACT, 'operation': op, 'completed': True}
     def assert_saved_before_mutation(self, args):
-        stage = ('mainMenuReturn' if args.get('function') == 'QuitToMainMenu' else
+        stage = ('crosshairAim' if args.get('function') == 'SetAngle' else
+                 'mainMenuReturn' if args.get('function') == 'QuitToMainMenu' else
                  'quitSelection' if args.get('startupOperation') == 'select-quit' else
                  'desktopQuit' if args.get('startupOperation') == 'confirm-quit' else None)
         if stage:
@@ -161,6 +183,27 @@ class MenuExitTests(unittest.TestCase):
         self.s.tool.side_effect = call
         self.assertFalse(menu_shutdown.request_and_wait(self.s))
         self.assertFalse(any(a.get('function') == 'QuitToMainMenu' for _, a in self.s.calls))
+    def test_retained_crosshair_released_before_world_teardown_with_native_three_angle_call(self):
+        self.s.crosshair = {'formId': '0xFF000001'}
+        self.assertTrue(menu_shutdown.request_and_wait(self.s))
+        r = self.s.state['gracefulGameExit']['crosshairRelease']
+        self.assertTrue(r['released']); self.assertEqual(self.s.angles, [-85., 5., 90.])
+        self.assertEqual([v['returned'] for v in r['samples'][-2:]], [None, None])
+        functions = [a.get('function') for _, a in self.s.calls]
+        self.assertLess(functions.index('SetAngle'), functions.index('QuitToMainMenu'))
+        self.assertEqual(functions.count('SetAngle'), 1)
+    def test_crosshair_remaining_never_requests_world_teardown_or_repeats_pitch(self):
+        self.s.crosshair, self.s.aim_clears = {'formId': '0xFF000001'}, False
+        self.assertFalse(menu_shutdown.request_and_wait(self.s))
+        functions = [a.get('function') for _, a in self.s.calls]
+        self.assertEqual(functions.count('SetAngle'), 1)
+        self.assertNotIn('QuitToMainMenu', functions)
+        self.assertNotIn('desktopQuit', self.s.state['gracefulGameExit'])
+        self.assertGreaterEqual(self.clock.now, 45.)
+    def test_already_clear_crosshair_requires_no_angle_mutation(self):
+        self.assertTrue(menu_shutdown.request_and_wait(self.s))
+        self.assertTrue(self.s.state['gracefulGameExit']['crosshairRelease']['released'])
+        self.assertFalse(any(a.get('function') == 'SetAngle' for _, a in self.s.calls))
     def test_malformed_or_duplicate_quit_is_refused(self):
         for change in ('disabled', 'index', 'duplicate', 'bool-position'):
             snapshot = self.s.snapshot()
