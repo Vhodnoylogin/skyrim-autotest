@@ -104,10 +104,24 @@ class MenuExitTests(unittest.TestCase):
             return result
         self.s.tool.side_effect = call
         self.assertFalse(menu_shutdown.request_and_wait(self.s))
+        self.assertGreaterEqual(self.clock.now, 45.)
         count = self.s.tool.call_count
         self.assertFalse(menu_shutdown.request_and_wait(self.s))
         self.assertEqual(self.s.tool.call_count, count)
         self.assertFalse(self.s.state['gracefulGameExit']['requestAttempted'])
+    def test_uncertain_return_to_menu_keeps_original_grace_before_fallback(self):
+        normal = self.s.call
+        def call(n, a, **kw):
+            result = normal(n, a, **kw)
+            if a.get('function') == 'QuitToMainMenu': raise TimeoutError('native callback receipt lost')
+            return result
+        self.s.tool.side_effect = call
+        self.assertFalse(menu_shutdown.request_and_wait(self.s, seconds=1))
+        self.assertGreaterEqual(self.clock.now, 1.)
+        self.assertNotIn('desktopQuit', self.s.state['gracefulGameExit'])
+        count = self.s.tool.call_count
+        self.assertFalse(menu_shutdown.request_and_wait(self.s, seconds=1))
+        self.assertEqual(self.s.tool.call_count, count)
     def test_uncertain_desktop_response_can_only_wait_for_observed_exit(self):
         normal = self.s.call
         def call(n, a, **kw):

@@ -179,14 +179,19 @@ def request_and_wait(session, seconds=45):
             record.update(status='menu-flow-unavailable', error={'type': type(error).__name__, 'message': str(error)})
             session.save()
             session.log('menu-game-exit-unavailable', record=copy.deepcopy(record), noReplay=True)
-            return False
+            # A missing return/selection receipt can still leave an engine
+            # mutation in flight. Preserve its original observation grace
+            # before the caller may use another shutdown path.
     started, deadline = record.get('startedMonotonic'), record.get('deadlineMonotonic')
     if (type(started) not in (int, float) or type(deadline) not in (int, float)
             or not math.isfinite(started) or not math.isfinite(deadline) or not 0 < deadline - started <= 60):
         raise RuntimeError('Original menu exit deadline unavailable; no replay')
     desktop = record.get('desktopQuit', {})
     if record.get('requestAttempted') is not True or desktop.get('requestAttempted') is not True or desktop.get('game') != game:
-        return False
+        pending = any(isinstance(record.get(stage), dict) and record[stage].get('requestAttempted') is True
+                      for stage in ('mainMenuReturn', 'quitSelection'))
+        if not pending:
+            return False
     while True:
         alive = exit_observation._alive(session, game)
         gone = exit_observation._capture_exited(session, game) if not alive else False
