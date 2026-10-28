@@ -47,6 +47,7 @@ class Backend:
         self.effect, self.held, self.input_error, self.mutation_error = True, [], None, None
         self.native_ready, self.release_pending = True, False
         self.next_id, self.health_damage, self.corrupt_receipt = 0xFF000001, 8., False
+        self.next_handle = 1000000
         self.pickup_removes_reference, self.pickup_keeps_loaded, self.pickup_delta = False, False, 1
     def remaining(self):
         if self.budget <= 0: raise TimeoutError('original absolute deadline exhausted')
@@ -56,7 +57,7 @@ class Backend:
     def reference_incarnation(self, ref):
         self.remaining()
         if not self.world[ref]['loaded']: raise ValueError('not loaded')
-        return {'sessionId': 'native-owner', 'loadGeneration': 1, 'runtimeHandle': int(ref, 16)}
+        return {'sessionId': 'native-owner', 'loadGeneration': 1, 'runtimeHandle': self.world[ref]['runtimeHandle']}
     def resolve(self, spec):
         return ACTOR_BASE if spec.get('type') == 'NPC_' else BASE
     def menus(self):
@@ -69,7 +70,9 @@ class Backend:
             return {'formId': ref, 'position': list(self.position), 'rotation': list(self.rotation)}
         if ref in (BASE, ACTOR_BASE): return {'formId': ref, 'formType': 'WEAP' if ref == BASE else 'NPC_'}
         value = self.world[ref]
-        result = {'formId': ref, 'base': {'formId': value['base']}, 'position': value['position'], 'rotation': [0., 0., 0.]}
+        result = {'formId': ref, 'formType': 'ACHR' if value['base'] == ACTOR_BASE else 'REFR',
+                  'base': {'formId': value['base'], 'formType': 'NPC_' if value['base'] == ACTOR_BASE else 'WEAP'},
+                  'position': value['position'], 'rotation': [0., 0., 0.]}
         if value['base'] == ACTOR_BASE:
             result['actor'] = {'alive': value['health'] > 0, 'health': value['health'], 'loaded3D': value['loaded']}
         return result
@@ -140,7 +143,9 @@ class Backend:
             elif fn == 'PlaceAtMe':
                 if self.mutation_error: raise self.mutation_error
                 ref = f'0x{self.next_id:08X}'; self.next_id += 1
-                self.world[ref] = {'base': values[0]['form'], 'position': list(self.position), 'loaded': True, 'health': 100.}
+                self.world[ref] = {'base': values[0]['form'], 'position': list(self.position), 'loaded': True,
+                                   'health': 100., 'runtimeHandle': self.next_handle}
+                self.next_handle += 1
                 self.crosshair = ref; returned = {'formId': ref}
             elif fn == 'Is3DLoaded': returned = self.world[target]['loaded']
             elif fn == 'SetPosition': self.world[target]['position'] = values
@@ -210,11 +215,80 @@ class GameplayTests(unittest.TestCase):
         self.assertFalse(any(tool == 'papyrus' and args.get('function') == 'Is3DLoaded'
                              for tool, args in self.b.calls[tap_index + 1:]))
         self.assertEqual(len(self.taps()), 1)
+        row = self.b.s.state['seGameplayFixtures']['dagger']
+        self.assertIs(row['retiredWorldReference'], True)
+        self.assertEqual(row['consumedReferenceObservation'], value['consumedReferenceObservation'])
     def test_pickup_extant_unloaded_reference_requires_actual_loaded3d_read(self):
         self.create_item(); value = self.perform('pickup', referenceTag='dagger')
         self.assertEqual(value['pickup']['worldReferenceState'], 'unloaded')
         self.assertIs(value['consumedReferenceObservation']['loaded3D'], False)
+        self.assertIs(self.b.s.state['seGameplayFixtures']['dagger']['retiredWorldReference'], False)
         self.assertEqual(len(self.taps()), 1)
+    def retired_item(self):
+        self.create_item(); self.b.pickup_removes_reference = True
+        self.perform('pickup', referenceTag='dagger')
+        old = self.b.s.state['seGameplayFixtures']['dagger']
+        self.b.next_id = int(old['reference'], 16)
+        return old
+    def test_reused_retired_numeric_id_requires_new_handle_and_preserves_old_inventory_tag(self):
+        old = self.retired_item(); snapshot = copy.deepcopy(old)
+        result = self.create_actor()
+        current = self.b.s.state['seGameplayFixtures']['target']
+        self.assertEqual(result['fixture']['reference'], old['reference'])
+        self.assertEqual(current['base'], ACTOR_BASE)
+        self.assertNotEqual(current['incarnation']['runtimeHandle'], old['incarnation']['runtimeHandle'])
+        witness = current['referenceReuseWitness']
+        self.assertEqual(witness['retiredAliases'][0]['incarnation'], snapshot['incarnation'])
+        self.assertEqual(witness['retiredAliases'][0]['consumedReferenceObservation']['nativeLookup'], {'count': 0, 'refs': []})
+        self.assertEqual(old, snapshot)
+        value = self.perform('equip', referenceTag='dagger', mechanism='papyrus-native')
+        self.assertEqual(value['equipment']['runtimeId'], BASE)
+        self.assertTrue(self.b.equipped)
+        self.assertEqual(len([a for t, a in self.b.calls if t == 'papyrus' and a.get('function') == 'PlaceAtMe']), 2)
+    def test_active_or_merely_unloaded_alias_cannot_authorize_numeric_reuse(self):
+        for picked in (False, True):
+            with self.subTest(picked=picked):
+                self.b = Backend(); self.create_item()
+                if picked: self.perform('pickup', referenceTag='dagger')
+                old = self.b.s.state['seGameplayFixtures']['dagger']; self.b.next_id = int(old['reference'], 16)
+                start = len(self.b.calls)
+                with self.assertRaisesRegex(ValueError, 'active, stale or unproved'): self.create_actor()
+                mutations = [a['function'] for t, a in self.b.calls[start:] if t == 'papyrus' and a.get('action') == 'call']
+                self.assertEqual(mutations, ['PlaceAtMe'])
+    def test_retired_numeric_reuse_rejects_same_handle_and_preserves_spawn_intent_without_retry(self):
+        old = self.retired_item(); self.b.next_handle = old['incarnation']['runtimeHandle']
+        start = len(self.b.calls)
+        with self.assertRaisesRegex(ValueError, 'fresh runtime handle'): self.create_actor()
+        with self.assertRaisesRegex(ValueError, 'already attempted'): self.create_actor()
+        calls = [a['function'] for t, a in self.b.calls[start:] if t == 'papyrus' and a.get('action') == 'call']
+        self.assertEqual(calls, ['PlaceAtMe', 'Is3DLoaded'])
+        self.assertEqual(self.b.s.state['seGameplayFixtures']['target']['reference'], old['reference'])
+        self.assertEqual(self.b.s.state['seGameplayFixtures']['target']['steps'], {'PlaceAtMe': 'returned'})
+    def test_retirement_reuse_rejects_missing_malformed_or_stale_world_proof(self):
+        for change in ('missing', 'malformed-count', 'wrong-reference', 'world-generation', 'game', 'missing-incarnation'):
+            with self.subTest(change=change):
+                self.b = Backend(); old = self.retired_item()
+                if change == 'missing': del old['consumedReferenceObservation']
+                elif change == 'malformed-count': old['consumedReferenceObservation']['nativeLookup']['count'] = False
+                elif change == 'wrong-reference': old['consumedReferenceObservation']['requestedReference'] = '0xFF000099'
+                elif change == 'world-generation': old['worldGeneration'] = 2
+                elif change == 'game': old['game']['birth'] += 1
+                elif change == 'missing-incarnation': del old['incarnation']
+                start = len(self.b.calls)
+                with self.assertRaisesRegex(ValueError, 'active, stale or unproved'): self.create_actor()
+                calls = [a['function'] for t, a in self.b.calls[start:] if t == 'papyrus' and a.get('action') == 'call']
+                self.assertEqual(calls, ['PlaceAtMe'])
+    def test_reused_reference_actual_wrong_base_rejected_before_placement_or_health_mutation(self):
+        self.retired_item(); original = self.b.call
+        def intercepted(tool, args):
+            result = original(tool, args)
+            if tool == 'papyrus' and args.get('function') == 'PlaceAtMe':
+                self.b.world[result['returned']['formId']]['base'] = BASE
+            return result
+        self.b.call = intercepted; start = len(self.b.calls)
+        with self.assertRaisesRegex(ValueError, 'actual base/type'): self.create_actor()
+        calls = [a['function'] for t, a in self.b.calls[start:] if t == 'papyrus' and a.get('action') == 'call']
+        self.assertEqual(calls, ['PlaceAtMe', 'Is3DLoaded'])
     def test_pickup_inventory_delta_without_world_consumption_fails_without_repeated_input(self):
         self.create_item(); self.b.pickup_keeps_loaded = True
         with self.assertRaises(TimeoutError): self.perform('pickup', referenceTag='dagger')

@@ -96,6 +96,21 @@ and observed incarnation form their creation witness in `seGameplayFixtures`.
 An attempted tag cannot be reused. Every tag becomes invalid after any load,
 including a same-process load; old FormIDs are never automatically rebound.
 
+The game can recycle a consumed item's numeric dynamic FormID for a later
+`PlaceAtMe`. Pickup therefore retains its exact `consumedReferenceObservation`
+and marks `retiredWorldReference` only after the explicit native absence response
+`count: 0, refs: []`. An unloaded reference does not authorize numeric ID reuse.
+Every older matching tag must be a picked-up item with that complete retirement
+proof in the same run, process and world generation, and retain its old observed
+incarnation. After the new single spawn, actual reference/base types and a
+different observed runtime handle in the same native session/generation are
+required before any placement or health mutation. The new fixture retains a
+`referenceReuseWitness` containing both identities and the retirement receipts.
+The original item tag continues to select its inventory base and historical
+reference; it is never retargeted to the new world object. Active aliases,
+missing proof, reused handles and stale generations stop the attempted creation
+without issuing another spawn.
+
 The pickup factory creates one item, observes its loaded reference, keyframes
 it with `SetMotionType(4,false)` and places it along measured player pitch/yaw
 from the actual first-person camera position. If necessary, a separately

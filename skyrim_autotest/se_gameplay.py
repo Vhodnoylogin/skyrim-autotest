@@ -292,15 +292,44 @@ def _consumed_reference(b, row):
     if not isinstance(raw, dict) or type(raw.get('count')) is not int or not isinstance(raw.get('refs'), list):
         raise ValueError('Exact post-pickup native reference lookup unavailable')
     if raw['count'] == 0 and raw['refs'] == []:
-        return {'consumed': True, 'state': 'absent', 'nativeLookup': raw}
+        return {'consumed': True, 'state': 'absent', 'requestedReference': ref, 'nativeLookup': raw}
     if raw['count'] != 1 or len(raw['refs']) != 1 or not isinstance(raw['refs'][0], dict):
         raise ValueError('Post-pickup native reference count/rows are inconsistent')
     actual = raw['refs'][0]
     if form(actual.get('formId')) != ref or form(actual.get('base', {}).get('formId')) != row['base']:
         raise ValueError('Post-pickup native lookup returned another reference/base')
     loaded = _pap(b, 'ObjectReference', 'Is3DLoaded', [], 'bool', target=ref)
-    return {'consumed': loaded is False, 'state': 'loaded' if loaded else 'unloaded',
+    return {'consumed': loaded is False, 'state': 'loaded' if loaded else 'unloaded', 'requestedReference': ref,
             'nativeLookup': raw, 'loaded3D': loaded}
+
+
+def _retired_aliases(b, reference, current_tag):
+    """Only an explicitly absent consumed item can retire a numeric world ID."""
+    aliases = []
+    for tag, old in b.s.state.get('seGameplayFixtures', {}).items():
+        if tag == current_tag or old.get('reference') != reference:
+            continue
+        proof, incarnation = old.get('consumedReferenceObservation', {}), old.get('incarnation', {})
+        lookup = proof.get('nativeLookup', {}) if isinstance(proof, dict) else {}
+        if (old.get('kind') != 'pickup' or old.get('status') != 'picked-up'
+                or old.get('retiredWorldReference') is not True
+                or old.get('runId') != b.s.state.get('id') or old.get('game') != b.s.state.get('game')
+                or type(old.get('worldGeneration')) is not int
+                or old['worldGeneration'] != b.s.state.get('ownedWorldGeneration')
+                or not isinstance(proof, dict) or proof.get('consumed') is not True
+                or proof.get('state') != 'absent' or proof.get('requestedReference') != reference
+                or not isinstance(lookup, dict) or type(lookup.get('count')) is not int
+                or lookup['count'] != 0 or lookup.get('refs') != []
+                or not isinstance(incarnation, dict) or not isinstance(incarnation.get('sessionId'), str)
+                or not incarnation['sessionId'] or type(incarnation.get('loadGeneration')) is not int
+                or incarnation['loadGeneration'] < 0 or type(incarnation.get('runtimeHandle')) is not int
+                or incarnation['runtimeHandle'] <= 0
+                or not isinstance(old.get('creationId'), str) or not re.fullmatch(r'[0-9a-f]{32}', old['creationId'])):
+            raise ValueError('Created numeric reference collides with an active, stale or unproved retired fixture')
+        aliases.append({'tag': tag, 'creationId': old['creationId'], 'reference': reference,
+                        'base': old['base'], 'incarnation': copy.deepcopy(incarnation),
+                        'consumedReferenceObservation': copy.deepcopy(proof)})
+    return aliases
 
 
 def _combat_state(b, row):
@@ -343,11 +372,33 @@ def _create(b, request):
 
     ref = returned_form(mutate('ObjectReference', 'PlaceAtMe', ['form', 'int', 'bool', 'bool'],
                               [{'form': base}, 1, False, False], result='objectreference'))
-    if int(ref, 16) >> 24 != 0xFF or any(r.get('reference') == ref for r in records.values()):
-        raise ValueError('PlaceAtMe did not return a distinct created dynamic reference')
+    if int(ref, 16) >> 24 != 0xFF:
+        raise ValueError('PlaceAtMe did not return a created dynamic reference')
     row['reference'] = ref; b.s.save()
+    retired = _retired_aliases(b, ref, tag)
     _wait(b, lambda: _pap(b, 'ObjectReference', 'Is3DLoaded', [], 'bool', target=ref), lambda v: v is True)
-    row['incarnation'] = b.reference_incarnation(ref); b.s.save()
+    created = _ref(b, ref)
+    if (form(created.get('base', {}).get('formId')) != base
+            or created['base'].get('formType') != selector['type']
+            or created.get('formType') != ('ACHR' if selector['type'] == 'NPC_' else 'REFR')):
+        raise ValueError('Created reference actual base/type differs before fixture mutation')
+    incarnation = b.reference_incarnation(ref)
+    for old in retired:
+        previous = old['incarnation']
+        if (incarnation.get('sessionId') != previous['sessionId']
+                or incarnation.get('loadGeneration') != previous['loadGeneration']
+                or type(incarnation.get('runtimeHandle')) is not int
+                or incarnation['runtimeHandle'] <= 0 or incarnation['runtimeHandle'] == previous['runtimeHandle']):
+            raise ValueError('Reused numeric reference lacks a fresh runtime handle in the same native world')
+    row['incarnation'] = incarnation
+    if retired:
+        row['referenceReuseWitness'] = {'reference': ref, 'runId': row['runId'],
+            'game': copy.deepcopy(row['game']), 'worldGeneration': row['worldGeneration'],
+            'newCreationId': row['creationId'], 'newBase': base,
+            'newIncarnation': copy.deepcopy(incarnation), 'nativeReferenceObservation': copy.deepcopy(created),
+            'retiredAliases': retired,
+            'basis': 'one new PlaceAtMe callback; prior exact native absence and distinct observed runtime handle; historical item tag unchanged'}
+    b.s.save()
     distance = float(request['distanceGameUnits']); yaw, pitch = rotation[2], rotation[0]
     if pickup:
         camera = b.call('camera', {'action': 'get'})
@@ -443,7 +494,11 @@ def perform(b, request):
         after = _item_count(inventory, row['base'])
         if after - before != 1: raise ValueError('Pickup did not produce the exact actual inventory delta1')
         world = _wait(b, lambda: _consumed_reference(b, row), lambda value: value['consumed'])
-        row['status'] = 'picked-up'; row['quantityBeforePickup'] = before; row['quantityAfterPickup'] = after; b.s.save()
+        row['status'] = 'picked-up'; row['quantityBeforePickup'] = before; row['quantityAfterPickup'] = after
+        row['consumedReferenceObservation'] = copy.deepcopy(world)
+        row['retiredWorldReference'] = (world['state'] == 'absent' and type(world['nativeLookup'].get('count')) is int
+                                        and world['nativeLookup']['count'] == 0 and world['nativeLookup'].get('refs') == [])
+        b.s.save()
         result = {'pickup': {'reference': row['reference'], 'quantityDeltaItems': after - before,
                              'worldReferenceState': world['state']},
                   'consumedReferenceObservation': world, 'inputReceipt': receipt}
