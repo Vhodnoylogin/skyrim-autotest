@@ -1229,7 +1229,10 @@ class Session:
         self.guard_shutdown()
         if self.state.get('game') and native.alive(self.state['game']):
             if self.state.get('configuration', {}).get('game_edition') == 'se':
-                from .game_shutdown import request_and_wait
+                if self.state.get('configuration', {}).get('se_shutdown') == 'main-menu-v1':
+                    from .menu_shutdown import request_and_wait
+                else:
+                    from .game_shutdown import request_and_wait
                 request_and_wait(self)
             else:
                 try:

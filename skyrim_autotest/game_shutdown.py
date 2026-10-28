@@ -127,7 +127,12 @@ def classify_exit(session):
     game = copy.deepcopy(state.get('game'))
     record = state.get('gracefulGameExit', {})
     own_quit = (isinstance(record, dict) and record.get('game') == game
-                and record.get('command') == 'qqq' and record.get('requestAttempted') is True)
+                and record.get('requestAttempted') is True
+                and (record.get('command') == 'qqq'
+                     or (record.get('command') == 'menu-main-quit'
+                         and isinstance(record.get('desktopQuit'), dict)
+                         and record['desktopQuit'].get('game') == game
+                         and record['desktopQuit'].get('requestAttempted') is True)))
     forced = bool(state.get('forcedGameStop'))
     result = {'kind': 'forced_stop' if forced else 'unknown', 'game': game,
               'exitCode': None, 'exitCodeHex': None, 'exitCodeAvailable': False,

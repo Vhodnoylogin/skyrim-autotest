@@ -59,6 +59,18 @@ and inventory-menu state. An optional item is independently resolved and returns
 retained static item after a save/load without using an old fixture reference.
 Save/load and process exit remain the common executor's separate operations.
 
+Explicit `se_shutdown: "main-menu-v1"` uses native `Game.QuitToMainMenu`,
+observes a fresh contiguous Main Menu opening, then invokes the unique enabled
+stock `$QUIT` entry (index9) and its actual `MainConfirm` selection through the
+native provider. Each transition has a separate durable, one-shot intent. Only
+the exact final desktop-quit intent counts as an owned quit request; returning
+to Main Menu alone does not. The entire route retains its original45second
+bound on recovery, without replay. It requires the additive QUIT operations in
+[DevBench52f0c4c](https://github.com/Vhodnoylogin/devbench/commit/52f0c4ca92231226a99032b0e305f9cf6c3030a9).
+A native callback or closed menu is not actual process-exit proof. Unavailable
+menu/API state is retained before the caller's existing guarded fallback.
+Legacy configurations without this explicit policy retain the QQQ route.
+
 SE cleanup records one owned quit request and waits for its original bounded
 grace before considering the existing window-close fallback. Recovery never
 replays that request or extends its deadline. `gameTermination` comes from exact
