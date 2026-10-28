@@ -117,6 +117,9 @@ before/after hashes and archives the reduced copied profile at ordinary cleanup.
 Borrowed/reused profiles and VR reject this option. It is useful for a basic
 control-chain test that does not require unrelated character/physics plugins;
 it does not repair or conceal a prior failure in another recorded composition.
+MO2's informational `*DLC:`, `*Creation Club:` and `*Unmanaged:` rows are retained
+verbatim and listed separately as `unmanagedEntries`; the selected set describes
+managed mods. Filtering cannot remove unmanaged files from the physical game.
 
 | Field | Meaning |
 |---|---|

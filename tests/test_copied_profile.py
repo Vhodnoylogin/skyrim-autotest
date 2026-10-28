@@ -145,6 +145,26 @@ class CopiedProfileTests(unittest.TestCase):
         self.assertIsNone(copied_profile.apply(self.session, {}))
         self.assertEqual(self.session.saves, 0)
 
+    def test_standard_unmanaged_dlc_and_creation_club_rows_are_preserved_and_reported(self):
+        unmanaged=b'*Creation Club: _ResourcePack\r\n*Creation Club: ccBGSSSE001-Fish\r\n*DLC: Dawnguard\r\n*Unmanaged: loose_assets\r\n'
+        for folder in (self.source,self.target):
+            p=folder/'modlist.txt'
+            p.write_bytes(p.read_bytes()+unmanaged)
+        before=self.inventory(self.source)
+        result=copied_profile.apply(self.session,self.configuration)
+        self.assertEqual(self.inventory(self.source),before)
+        self.assertTrue((self.target/'modlist.txt').read_bytes().endswith(unmanaged))
+        self.assertEqual(result['enabledMods'],['DevBench','Realm'])
+        self.assertEqual(result['unmanagedEntries'],['Creation Club: _ResourcePack','Creation Club: ccBGSSSE001-Fish','DLC: Dawnguard','Unmanaged: loose_assets'])
+
+    def test_unknown_or_pathlike_unmanaged_rows_reject_before_writes(self):
+        original=(self.source/'modlist.txt').read_bytes()
+        for row in (b'*RaceMenu\n',b'*DLC: ../outside\n',b'*Creation Club: \n'):
+            for folder in (self.source,self.target):(folder/'modlist.txt').write_bytes(original+row)
+            before=self.inventory(self.target)
+            with self.assertRaises(ValueError):copied_profile.apply(self.session,self.configuration)
+            self.assertEqual(self.inventory(self.target),before)
+
 
 if __name__ == '__main__':
     unittest.main()

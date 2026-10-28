@@ -70,10 +70,18 @@ def _rows(data, *, mods):
             rows.append((line, None, None))
             continue
         if mods:
-            if body[:1] not in ('+', '-'):
+            if body[:1] not in ('+', '-', '*'):
                 raise ValueError('Malformed copied/source modlist row')
             marker, name = body[0], body[1:]
-            if name.casefold().endswith('_separator'):
+            if marker == '*':
+                # MO2's unmanaged game content is informational and cannot be
+                # disabled through managed +/- mod rows. Keep it explicit.
+                prefixes = ('DLC: ', 'Creation Club: ', 'Unmanaged: ')
+                prefix = next((p for p in prefixes if name.startswith(p)), None)
+                if prefix is None:
+                    raise ValueError('Unknown unmanaged MO2 modlist row')
+                _name(name[len(prefix):])
+            elif name.casefold().endswith('_separator'):
                 if not name or name != name.strip() or any(ord(c) < 32 or c in '/\\:' for c in name):
                     raise ValueError('Malformed mod separator')
             else:
@@ -91,7 +99,7 @@ def _rows(data, *, mods):
 def _encode(rows, original, desired, *, mods):
     lines = []
     for line, marker, name in rows:
-        if name is None or mods and name.casefold().endswith('_separator'):
+        if name is None or mods and (marker == '*' or name.casefold().endswith('_separator')):
             lines.append(line)
         elif mods:
             lines.append(('+' if name in desired else '-') + line[1:])
@@ -161,6 +169,7 @@ def apply(session, configuration):
                 raise ValueError('Copied plugin names/order/markers differ from the actual source profile')
         outputs[filename] = _encode(copied_rows, originals[filename], desired, mods=filename == 'modlist.txt')
     record = {'status': 'preparing', 'policy': policy, 'profile': str(target), 'sourceProfile': str(source),
+              'unmanagedEntries': [name for _, marker, name in _rows(outputs['modlist.txt'], mods=True) if marker == '*'],
               'scope': 'owned temporary copy only; original source profile and lifecycle inventory unchanged',
               'files': [{'path': str(target / name), 'beforeSha256': _hash(originals[name]),
                          'afterSha256': _hash(outputs[name]), 'sourcePath': str(source / name),
