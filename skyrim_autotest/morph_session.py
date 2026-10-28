@@ -24,6 +24,7 @@ DOMAINS = frozenset(("actor-fixture", "actor-fixture-identity", "human-preset-ca
                     "actor-morph-link-evaluation", "save-state", "actor-fixture-visibility"))
 ROLES = frozenset(("status", "error", "assigned", "humanWeight", "beastWeight", "clear", "refresh", "configure", "race"))
 READ_ROLES = frozenset(("status", "error", "assigned", "humanWeight", "beastWeight"))
+PRESET_CATEGORIES = frozenset(("female", "male", "female_blacklisted", "male_blacklisted"))
 
 
 def _text(value, label, *, empty=False):
@@ -143,6 +144,7 @@ def validate(operation, req):
             names.add(pair)
     elif domain == "human-provider-config":
         required |= {"presetPoolPolicy", "baseSelectionPolicy", "otherActorsPolicy", "requiredDisablePresetDistribution"}
+        optional.add("allowedAdditionalLoadedPresets")
         if req.get("presetPoolPolicy") != "exact-six-existing-human-preset-elements" or req.get("requiredDisablePresetDistribution") != "none":
             raise BindingError("Unsupported stock distribution configuration contract")
         _text(req.get("otherActorsPolicy"), "other actor policy")
@@ -158,6 +160,22 @@ def validate(operation, req):
             if type(pool) is not list or not 1 <= len(pool) <= 64: raise BindingError("Each base requires a bounded nonempty actual preset pool")
             for name in pool: _text(name, "allowed preset")
             if len(set(pool)) != len(pool): raise BindingError("Duplicate base preset identity")
+        if "allowedAdditionalLoadedPresets" in req:
+            extras = req["allowedAdditionalLoadedPresets"]
+            targets = set().union(*(set(item["allowedHumanPresets"]) for item in policies))
+            if len(targets) != 6:
+                raise BindingError("Pinned additional catalog requires exactly six target preset names in the complete base policy")
+            if type(extras) is not list or len(extras) > 4096:
+                raise BindingError("Pinned additional catalog requires at most4096 explicit category/name identities")
+            identities = set()
+            for item in extras:
+                if (type(item) is not dict or set(item) != {"name", "category"} or
+                        not isinstance(item["category"], str) or item["category"] not in PRESET_CATEGORIES):
+                    raise BindingError("Additional preset requires exact native category and name")
+                identity = (item["category"], _text(item["name"], "additional preset name"))
+                if identity in identities or item["name"] in targets:
+                    raise BindingError("Duplicate additional identity or target preset overlap")
+                identities.add(identity)
     elif domain == "human-preset":
         required |= {"action", "actor"}
         if action == "assign":
@@ -349,6 +367,19 @@ def _catalog(backend):
             offset += len(values)
         by_category[category] = names
     return {"categories": by_category, "counts": counts, "providerEpoch": epoch}
+
+
+def required_target_presets(request, requested_presets):
+    """Cross-check declarations only; current availability requires a fresh catalog."""
+    if "allowedAdditionalLoadedPresets" not in request: return None
+    if type(requested_presets) is not list or len(requested_presets) != 6:
+        raise BindingError("Pinned additional catalog requires a prior catalog declaration of exactly six targets")
+    validate("world.read", {"domain": "human-preset-catalog", "presets": requested_presets, "wolfPresetRequirement": "none"})
+    names = [item["name"] for item in requested_presets]
+    expected = set().union(*(set(item["allowedHumanPresets"]) for item in request["baseSelectionPolicy"]))
+    if len(set(names)) != 6 or set(names) != expected:
+        raise BindingError("Six target catalog declarations must exactly cover the complete base policy")
+    return {(item["sex"], item["name"]) for item in requested_presets}
 
 
 def _guard(backend, tag):
@@ -718,6 +749,7 @@ def execute(session, args, deadline, policy):
             "femaleRequestedCount": sum(item["sex"] == "female" for item in request["presets"]), "missing": missing, "actual": catalog,
             "sourceSetDeclarationObservedInNativeAPI": False}}
     if domain == "human-provider-config":
+        target_identities = required_target_presets(request, state.get("requestedPresets"))
         if len(request["baseSelectionPolicy"]) > config.get("maximumFixtures", 6):
             raise BindingError("Complete base policy exceeds the frozen platform fixture opt-in")
         if "providerConfigSha256" not in config: raise BindingError("Actual VFS configuration read requires a frozen expected config SHA256")
@@ -736,9 +768,23 @@ def execute(session, args, deadline, policy):
         if mappings != expected: raise BindingError("Actual stock base preset selections differ from the reviewed complete base policy")
         catalog = _catalog(backend); expected_names = set().union(*expected.values())
         actual_names = {name for values in catalog["categories"].values() for name in values}
+        active_names = set(catalog["categories"]["male"]) | set(catalog["categories"]["female"])
+        missing_targets = sorted(expected_names - active_names)
+        unexpected = sorted(actual_names - expected_names)
+        missing_extras = []
+        if target_identities is not None:
+            additional = {(item["category"], item["name"]) for item in request["allowedAdditionalLoadedPresets"]}
+            observed = {(category, name) for category, names in catalog["categories"].items() for name in names}
+            def identities(values):
+                return [{"category": category, "name": name} for category, name in sorted(values)]
+            missing_targets = identities(target_identities - observed)
+            missing_extras = identities(additional - observed)
+            unexpected = identities(observed - target_identities - additional)
         readiness = _obody(backend)
         return {"human": {"officialApiReady": readiness["obody"]["provider"]["ready"], "config": {"disablePresetDistribution": actual,
-            "unexpectedLoadedPresetCount": len(actual_names - expected_names), "missingExpectedPresetCount": len(expected_names - actual_names),
+            "unexpectedLoadedPresetCount": len(unexpected), "missingExpectedPresetCount": len(missing_targets),
+            "missingAllowedAdditionalPresetCount": len(missing_extras), "unexpectedLoadedPresets": unexpected,
+            "missingExpectedPresets": missing_targets, "missingAllowedAdditionalPresets": missing_extras,
             "sha256": digest, "inMemoryConfigObserved": False, "baseSelectionMatch": True, "actualVfsRead": raw}}, "catalogObservation": catalog, "providerObservation": readiness}
     if domain == "actor-fixture":
         tag = _actor(request["actor"])

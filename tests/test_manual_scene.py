@@ -16,6 +16,7 @@ class SceneBackend:
         self.drift_after_six = False
         self.missing_automatic = False
         self.bad_visibility = False
+        self.missing_additional_presets = 0
 
     def exchange(self, envelope):
         self.calls.append(copy.deepcopy(envelope))
@@ -30,7 +31,8 @@ class SceneBackend:
             return {'catalog': {'missingRequestedPresetCount': 0}}
         if domain == 'human-provider-config':
             return {'human': {'officialApiReady': True, 'config': {'disablePresetDistribution': self.distribution,
-                    'unexpectedLoadedPresetCount': 0, 'missingExpectedPresetCount': 0}}}
+                    'unexpectedLoadedPresetCount': 0, 'missingExpectedPresetCount': 0,
+                    'missingAllowedAdditionalPresetCount': self.missing_additional_presets}}}
         tag = r['actor']['fixtureTag']
         if domain == 'actor-fixture':
             a = next(a for a in self.spec['actors'] + self.spec.get('wildActors', []) if a['tag'] == tag)
@@ -251,6 +253,48 @@ class ManualSceneTests(unittest.TestCase):
         for mutate in (lambda s: s.update(presetMod='automatic-stock'),
                        lambda s: s['wildActors'][-1].update(initialRace=s['actors'][0]['humanRace']),
                        lambda s: s['wildActors'][-1].update(tag=s['actors'][0]['tag'])):
+            original = copy.deepcopy(self.spec); mutate(self.spec)
+            backend = SceneBackend(self.spec)
+            with self.assertRaises(ValueError): self.run_scene([], backend)
+            self.assertEqual(backend.calls, [])
+            self.spec = original
+
+    def pinned_additional_catalog(self, wild=False):
+        self.automatic(wild=wild)
+        self.spec['catalogRequest']['presets'] = [
+            {'name': a['humanPreset'], 'sex': a['sex'], 'set': 'Diagnostic'} for a in self.spec['actors']]
+        mappings = []
+        for actor in self.spec['actors'] + self.spec.get('wildActors', []):
+            index = int(actor['tag'].removeprefix('Actor').removeprefix('Wild'))
+            mappings.append({'plugin': actor['base']['plugin'], 'baseFormId': actor['base']['formId'],
+                             'allowedHumanPresets': ['Preset' + str(index)]})
+        self.spec['configurationRequest'].update(baseSelectionPolicy=mappings,
+            allowedAdditionalLoadedPresets=[{'category': 'female', 'name': 'Declared official stock'}])
+        if wild:
+            self.spec['wildConfigurationRequest'] = copy.deepcopy(self.spec['configurationRequest'])
+
+    def test_pinned_additional_catalog_preserves_untouched_origins_and_lazy_wild(self):
+        self.pinned_additional_catalog(wild=True)
+        _, backend, _, notices = self.run_scene([{'sequence': 1, 'sourceRef': 'stop', 'action': 'finish'}])
+        self.assertEqual(len(backend.states), 6)
+        self.assertTrue(any(k == 'scene-ready' for k, _ in notices))
+        self.assertFalse(any(c.get('args', {}).get('request', {}).get('domain') in ('human-preset', 'morph-link', 'actor-race')
+                             for c in backend.calls))
+
+    def test_missing_pinned_additional_preset_stops_before_creation(self):
+        self.pinned_additional_catalog()
+        backend = SceneBackend(self.spec); backend.missing_additional_presets = 1
+        with self.assertRaises(AssertionError): self.run_scene([], backend)
+        self.assertFalse(backend.states)
+
+    def test_pinned_catalog_declaration_errors_refuse_before_exchange(self):
+        self.pinned_additional_catalog(wild=True)
+        for mutate in (
+                lambda s: s.pop('catalogRequest'),
+                lambda s: s['catalogRequest']['presets'].pop(),
+                lambda s: s['catalogRequest']['presets'][0].update(name='Different target'),
+                lambda s: s['wildConfigurationRequest'].pop('allowedAdditionalLoadedPresets'),
+                lambda s: s['wildConfigurationRequest']['allowedAdditionalLoadedPresets'][0].update(category='male')):
             original = copy.deepcopy(self.spec); mutate(self.spec)
             backend = SceneBackend(self.spec)
             with self.assertRaises(ValueError): self.run_scene([], backend)

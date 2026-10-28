@@ -63,6 +63,19 @@ null-light patch or an assertion that the original graphics defect is diagnosed.
 
 ## Automatic distribution and retained groups candidate
 
+For ordinary installed body mods, keep their original preset XML files and list
+their additional native category/name identities in
+`configurationRequest.allowedAdditionalLoadedPresets`; see
+[the exact installed-catalog contract](morph-sessions.md#ordinary-installed-body-preset-catalogs).
+`catalogRequest.presets` still declares exactly the six required diagnostic
+targets with their actual sexes, matching the union of the full six/twelve-base
+map. Spec validation cross-checks this before any exchange. If
+`wildConfigurationRequest` is present, it must include the same complete extra
+identity set as the initial configuration request. Missing declared stock extras,
+missing targets and undeclared catalog identities stop preparation before NPC
+creation. The change does not relax per-sex morph templates, singleton mappings,
+untouched automatic-origin evidence or born-beast restrictions.
+
 The opt-in `presetMode:"automatic-stock"` observes natural assignment before
 fixture name/gear inspection and never calls AssignPreset, GenActor, Clear,
 Refresh or family configuration as an initialization fallback. Human actors

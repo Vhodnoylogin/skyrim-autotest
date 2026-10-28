@@ -48,6 +48,8 @@ class Session:
         self.fail_mutation, self.unsafe_guard, self.unavailable, self.event_gap = False, False, False, False
         self.events, self.next_sequence = [], 10
         self.fixture_values = {}
+        self.catalog = {"female": ["F1", "F2", "F3"], "male": ["M1", "M2", "M3"],
+                        "female_blacklisted": [], "male_blacklisted": []}
         self.weights = {"humanWeight": .5, "beastWeight": .5}
         settings = {"bindings": {role: role for role in subject.ROLES}, "testKeys": TEST_KEYS,
                     "providerOwnKeys": ["Provider"], "providerKeyEvidence": {"sourceCommit": "a" * 40, "providerSha256": "b" * 64},
@@ -120,9 +122,12 @@ class Session:
             action = args["action"]
             if action == "actor_status": return {"pid": 123, "identity": self.control(), "identityCurrentAfterRead": True}
             if action == "catalog":
-                names = {"female": ["F1", "F2", "F3"], "male": ["M1", "M2", "M3"], "female_blacklisted": [], "male_blacklisted": []}[args["category"]]
+                names = self.catalog[args["category"]]
                 values = names[args["offset"]:args["offset"] + args["limit"]]
-                return {"pid": 123, "providerEpoch": self.epoch, "counts": {"female": 3, "femaleBlacklisted": 0, "male": 3, "maleBlacklisted": 0}, "names": values, "returnedCount": len(values)}
+                counts = {field: len(self.catalog[category]) for category, field in
+                          (("female", "female"), ("male", "male"),
+                           ("female_blacklisted", "femaleBlacklisted"), ("male_blacklisted", "maleBlacklisted"))}
+                return {"pid": 123, "providerEpoch": self.epoch, "counts": counts, "names": values, "returnedCount": len(values)}
             if args["guard"] != self.control(): raise AssertionError("provider received a different guarded actor")
             if action == "assign_preset": self.assigned = args["presetName"]
             elif action == "unassign_preset": self.assigned = ""
@@ -371,6 +376,114 @@ class MorphSessionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "complete base policy"): self.execute(wrong)
         empty = copy.deepcopy(request); empty["baseSelectionPolicy"][0]["allowedHumanPresets"] = []
         with self.assertRaises(ValueError): subject.validate("world.read", empty)
+
+    def closed_catalog_request(self, extras=()):
+        presets = [{"name": f"{prefix}{i}", "sex": sex, "set": "Reviewed diagnostic source"}
+                   for sex, prefix in (("female", "F"), ("male", "M")) for i in (1, 2, 3)]
+        self.execute({"domain": "human-preset-catalog", "presets": presets, "wolfPresetRequirement": "none"})
+        policies = [{"plugin": "Example.esm", "baseFormId": f"0x{i:08X}", "allowedHumanPresets": [name]}
+                    for i, name in enumerate(["M1", "M2", "M3", "F1", "F2", "F3"] * 2, 1)]
+        parsed = {"disablePresetDistribution": "none", "npcFormID": {"Example.esm": {
+            p["baseFormId"][2:]: p["allowedHumanPresets"] for p in policies}}}
+        text = json.dumps(parsed)
+        settings = self.session.state["configuration"]["interactive_session"]["morphSession"]
+        settings.update(maximumFixtures=12, providerConfigSha256=hashlib.sha256(text.encode()).hexdigest())
+        self.session.config_read = {"pid": 123, "rawText": text, "bytes": len(text), "inMemoryConfigObserved": False}
+        return {"domain": "human-provider-config", "presetPoolPolicy": "exact-six-existing-human-preset-elements",
+                "baseSelectionPolicy": policies, "otherActorsPolicy": "Reviewed complete stock installation policy",
+                "requiredDisablePresetDistribution": "none", "allowedAdditionalLoadedPresets": list(extras)}
+
+    def test_declared_stock_extras_include_exact_blacklist_categories_without_assignment(self):
+        extras = [{"name": "Stock CBBE", "category": "female"}, {"name": "Stock HIMBO", "category": "male"},
+                  {"name": "Blacklisted Stock CBBE", "category": "female_blacklisted"},
+                  {"name": "Blacklisted Stock HIMBO", "category": "male_blacklisted"}]
+        request = self.closed_catalog_request(extras)
+        for item in extras: self.session.catalog[item["category"]].append(item["name"])
+        config = self.execute(request)["human"]["config"]
+        self.assertTrue(config["baseSelectionMatch"])
+        for field in ("unexpectedLoadedPresetCount", "missingExpectedPresetCount", "missingAllowedAdditionalPresetCount"):
+            self.assertEqual(config[field], 0)
+        self.assertFalse(any(tool == "morph_provider" and args["action"] != "catalog"
+                             for tool, args in self.session.calls))
+        self.assertFalse(self.session.state["morphSession"]["mutations"])
+
+    def test_declared_stock_extras_do_not_allow_arbitrary_active_or_blacklisted_presets(self):
+        request = self.closed_catalog_request()
+        for category in ("female", "male_blacklisted"):
+            with self.subTest(category=category):
+                self.session.catalog[category].append("Undeclared Stock")
+                config = self.execute(request)["human"]["config"]
+                self.assertEqual(config["unexpectedLoadedPresetCount"], 1)
+                self.assertEqual(config["missingExpectedPresetCount"], 0)
+                self.session.catalog[category].pop()
+
+    def test_declared_stock_extra_must_exist_in_its_exact_category(self):
+        request = self.closed_catalog_request([{"name": "Stock CBBE", "category": "female"}])
+        config = self.execute(request)["human"]["config"]
+        self.assertEqual(config["missingAllowedAdditionalPresetCount"], 1)
+        self.assertEqual(config["unexpectedLoadedPresetCount"], 0)
+        self.session.catalog["male_blacklisted"].append("Stock CBBE")
+        config = self.execute(request)["human"]["config"]
+        self.assertEqual(config["missingAllowedAdditionalPresetCount"], 1)
+        self.assertEqual(config["unexpectedLoadedPresetCount"], 1)
+
+    def test_target_wrong_sex_or_blacklisting_never_satisfies_required_availability(self):
+        request = self.closed_catalog_request()
+        self.session.catalog["female"].remove("F1")
+        for category in ("male", "female_blacklisted"):
+            with self.subTest(category=category):
+                self.session.catalog[category].append("F1")
+                config = self.execute(request)["human"]["config"]
+                self.assertEqual(config["missingExpectedPresetCount"], 1)
+                self.assertEqual(config["unexpectedLoadedPresetCount"], 1)
+                self.session.catalog[category].pop()
+
+    def test_legacy_catalog_remains_strict_and_blacklisted_targets_are_missing(self):
+        request = self.closed_catalog_request()
+        del request["allowedAdditionalLoadedPresets"]
+        self.session.catalog["female"].remove("F1")
+        self.session.catalog["female_blacklisted"].append("F1")
+        self.session.catalog["male"].append("Stock HIMBO")
+        config = self.execute(request)["human"]["config"]
+        self.assertEqual(config["missingExpectedPresetCount"], 1)
+        self.assertEqual(config["unexpectedLoadedPresetCount"], 1)
+
+    def test_closed_catalog_requires_exact_six_prior_target_declarations(self):
+        request = self.closed_catalog_request()
+        state = self.session.state["morphSession"]
+        valid = copy.deepcopy(state["requestedPresets"])
+        invalid = [None, valid[:5], valid + [{"name": "M4", "sex": "male", "set": "Other"}],
+                   [dict(item, name="Different") if i == 0 else item for i, item in enumerate(valid)],
+                   [dict(item, name="F1", sex="male") if i == 3 else item for i, item in enumerate(valid)]]
+        for declaration in invalid:
+            with self.subTest(declaration=declaration):
+                if declaration is None: state.pop("requestedPresets", None)
+                else: state["requestedPresets"] = copy.deepcopy(declaration)
+                with self.assertRaises(ValueError): self.execute(request)
+        state["requestedPresets"] = valid
+        self.assertEqual(self.execute(request)["human"]["config"]["missingExpectedPresetCount"], 0)
+
+    def test_additional_loaded_preset_declarations_are_closed_bounded_and_disjoint(self):
+        request = self.closed_catalog_request()
+        invalid = [None, {}, True, [{"name": "Stock", "category": "unknown"}],
+                   [{"name": "Stock", "category": "female", "source": "invented.xml"}],
+                   [{"name": "Stock"}], [{"name": "", "category": "female"}],
+                   [{"name": "Stock", "category": "female"}] * 2,
+                   [{"name": "F1", "category": "female_blacklisted"}],
+                   [{"name": f"Stock{i}", "category": "male"} for i in range(4097)]]
+        for extras in invalid:
+            with self.subTest(extras=repr(extras)[:120]):
+                bad = dict(request, allowedAdditionalLoadedPresets=extras)
+                with self.assertRaises(ValueError): subject.validate("world.read", bad)
+
+    def test_declared_extras_preserve_exact_twelve_singleton_mapping(self):
+        request = self.closed_catalog_request([{"name": "Stock HIMBO", "category": "male"}])
+        self.session.catalog["male"].append("Stock HIMBO")
+        self.assertTrue(self.execute(request)["human"]["config"]["baseSelectionMatch"])
+        subset = copy.deepcopy(request); subset["baseSelectionPolicy"] = subset["baseSelectionPolicy"][:6]
+        with self.assertRaises(ValueError): self.execute(subset)
+        wrong = copy.deepcopy(request); wrong["baseSelectionPolicy"][0]["allowedHumanPresets"] = ["M2"]
+        with self.assertRaises(ValueError): self.execute(wrong)
 
     def test_typed_subject_queue_admission_and_same_reference_race(self):
         result = self.execute({"domain": "morph-link", "action": "clear-own", "actor": {"fixtureTag": "Fixture"}})

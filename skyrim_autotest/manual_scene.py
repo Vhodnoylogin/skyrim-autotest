@@ -145,6 +145,15 @@ def validate_spec(spec):
             if type(spec[key]) is not dict or spec[key].get('domain') != domain:
                 raise ValueError(key + ' requires the exact documented domain')
             morph_session.validate('world.read', spec[key])
+            if domain == 'human-provider-config':
+                morph_session.required_target_presets(spec[key], spec.get('catalogRequest', {}).get('presets'))
+    primary_config, wild_config = spec.get('configurationRequest', {}), spec.get('wildConfigurationRequest', {})
+    if wild_config and ('allowedAdditionalLoadedPresets' in primary_config or 'allowedAdditionalLoadedPresets' in wild_config):
+        def extras(request):
+            return {(item['category'], item['name']) for item in request.get('allowedAdditionalLoadedPresets', [])}
+        if ('allowedAdditionalLoadedPresets' not in primary_config or 'allowedAdditionalLoadedPresets' not in wild_config
+                or extras(primary_config) != extras(wild_config)):
+            raise ValueError('Human and wild configuration must declare the same complete additional installed catalog')
     if {'morphObservationRequest', 'morphObservationRequestsBySex'} <= set(spec):
         raise ValueError('Choose one morph template or exact sex-specific templates, never both')
     templates = []
@@ -296,6 +305,8 @@ def run_plan(spec, exchange, emit, next_command, notify):
         require('stock-distribution-enabled', actual['config']['disablePresetDistribution'], 'none')
         require('no-unexpected-presets', actual['config']['unexpectedLoadedPresetCount'], 0)
         require('no-missing-presets', actual['config']['missingExpectedPresetCount'], 0)
+        if 'allowedAdditionalLoadedPresets' in request:
+            require('no-missing-declared-additional-presets', actual['config']['missingAllowedAdditionalPresetCount'], 0)
 
     def create_actor(a):
         created = domain('object.perform', {'domain': 'actor-fixture', 'action': 'create', 'base': a['base'],

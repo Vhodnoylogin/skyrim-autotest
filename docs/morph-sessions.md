@@ -66,6 +66,43 @@ also requires a matching native OBody event after creation intent, no event loss
 correct provider/world continuity and no prior manual generation/assignment.
 Direct GenActor cannot satisfy it and is never invoked by this adapter.
 
+### Ordinary installed body preset catalogs
+
+The six diagnostic targets are not the whole catalog of an ordinary CBBE/HIMBO
+installation. `human-provider-config` optionally accepts
+`allowedAdditionalLoadedPresets`, an exact list of native-observable identities:
+
+```json
+"allowedAdditionalLoadedPresets": [
+  {"name": "Exact stock preset name from the native catalog", "category": "female"},
+  {"name": "Another exact installed name", "category": "male_blacklisted"}
+]
+```
+
+Categories are exactly `male`, `female`, `male_blacklisted`, and
+`female_blacklisted`; names are case sensitive. Declare every additional identity
+including blacklisted ones (0..4096 entries); no glob, ignored unknown name, or
+target-name overlap is accepted. Source archive/XML hashes belong in preparation
+pins: the native API exposes names/categories, not the originating XML path.
+Leave official body/preset files intact. This opt-in does not make stock extras
+eligible for assignment to the diagnostic actors.
+
+When the field is present, even if empty, first call `human-preset-catalog` with
+exactly six unique target names and their actual sexes. Those names must exactly
+equal the union of the complete base-selection policy. The stored request is
+only a declaration; each configuration check reads a fresh native catalog.
+Every target must exist in its declared active sex category. A wrong-sex or
+blacklisted target cannot satisfy availability. Every declared additional
+identity must exist in its exact category, and every observed identity must be
+a target or explicitly declared extra. Inspect `missingExpectedPresetCount`,
+`missingAllowedAdditionalPresetCount`, and `unexpectedLoadedPresetCount` (all
+must be zero), their detailed lists and `catalogObservation`.
+
+With the field absent, the existing strict six-name policy remains; blacklisted
+targets alone no longer count as available. The exact full `npcFormID` dictionary,
+frozen VFS configuration SHA256, singleton selections and twelve-fixture opt-in
+are unchanged. There is no subset or alternative-preset fallback.
+
 SKEE aggregates, name presence and complete per-key records come from the
 independent Observer, in batches of at most32 names. Preserve zero, negative and
 available-absent values separately. A missing/truncated/stale read never becomes
