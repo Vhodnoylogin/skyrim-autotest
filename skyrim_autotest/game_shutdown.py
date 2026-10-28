@@ -40,6 +40,18 @@ def _alive(session, game, *, before_request=False):
     return native.alive(game)
 
 
+def _capture_exited(session, game):
+    """A failed live identity lookup is not proof that the retained handle exited."""
+    session.observe_game_exit('graceful-game-exit-observed')
+    observations = session.state.get('gameProcessObservations', [])
+    if not isinstance(observations, list):
+        return False
+    latest = next((row for row in reversed(observations) if isinstance(row, dict)
+                   and row.get('identityVerified') is True and row.get('identity') == game
+                   and row.get('expectedIdentity', game) == game), None)
+    return latest is not None and latest.get('status') == 'exited'
+
+
 def request_and_wait(session, seconds=10):
     """Issue qqq once, then wait before the caller considers another quit path.
 
@@ -58,8 +70,9 @@ def request_and_wait(session, seconds=10):
     alive = _alive(session, game, before_request=existing is None)
     if existing is None:
         if not alive:
-            session.observe_game_exit('graceful-game-exit-observed')
-            return True
+            # No new quit request/grace is created for an already missing live
+            # identity. Report gone only if actual retained telemetry proves it.
+            return _capture_exited(session, game)
         started = time.monotonic()
         record = {'game': game, 'command': 'qqq', 'status': 'request-intent',
                   'startedMonotonic': started, 'deadlineMonotonic': started + seconds,
@@ -92,13 +105,12 @@ def request_and_wait(session, seconds=10):
             raise RuntimeError('Previous graceful exit deadline is unavailable; never replay its request')
     while True:
         alive = _alive(session, game)
+        # Access/identity lookup can become unavailable while the retained
+        # process handle still reports running. Keep observing within the same
+        # deadline; neither that lookup failure nor a missing snapshot is exit.
+        gone = _capture_exited(session, game) if not alive else False
         remaining = record['deadlineMonotonic'] - time.monotonic()
-        if not alive or remaining <= 0:
-            gone = not alive
-            if gone:
-                # Preserve the live retained-handle exit code before the caller's
-                # next mutation barrier or cleanup operation can fail.
-                session.observe_game_exit('graceful-game-exit-observed')
+        if gone or remaining <= 0:
             record.update(status='observed-gone' if gone else 'grace-expired',
                           observedGone=gone, waitFinishedMonotonic=time.monotonic())
             session.save()

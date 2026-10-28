@@ -23,12 +23,20 @@ class Session:
         self.saved, self.events = [], []
         self.guard_shutdown = Mock()
         self.tool = Mock(side_effect=self.request)
-        self.observe_game_exit = Mock()
+        self.observe_game_exit = Mock(side_effect=self.observe)
     def save(self): self.saved.append(copy.deepcopy(self.state))
     def log(self, event, **fields): self.events.append((event, fields))
     def request(self, tool, args, **kwargs):
         assert self.saved[-1]['gracefulGameExit']['status'] == 'request-intent'
         return {'queued': True}
+    def observe(self, stage, *, status=None):
+        running = shutdown.native.alive(self.state['game']) if status is None else status == 'running'
+        self.state.setdefault('gameProcessObservations', []).append({
+            'identity': copy.deepcopy(self.state['game']), 'expectedIdentity': copy.deepcopy(self.state['game']),
+            'identityVerified': True, 'handleRetained': True, 'stage': stage,
+            'status': status or ('running' if running else 'exited'),
+            'exitCodeAvailable': not running and status != 'unavailable',
+            'exitCode': 0 if not running and status != 'unavailable' else None})
 
 
 class GraceTests(unittest.TestCase):
@@ -124,7 +132,9 @@ class GraceTests(unittest.TestCase):
             return result
         self.session.tool.side_effect = request
         observed = []
-        self.session.observe_game_exit.side_effect = lambda stage: observed.append((stage, self.clock.now))
+        def capture(stage):
+            observed.append((stage, self.clock.now)); self.session.observe(stage)
+        self.session.observe_game_exit.side_effect = capture
         self.assertTrue(shutdown.request_and_wait(self.session))
         self.assertEqual(self.session.guard_shutdown.call_count, 2)
         self.assertEqual([stage for stage, _ in observed], ['graceful-game-exit-observed'])
@@ -144,7 +154,9 @@ class GraceTests(unittest.TestCase):
     def test_exit_capture_precedes_persistence_or_caller_failure(self):
         self.gone_after(.2)
         captured = []
-        self.session.observe_game_exit.side_effect = lambda stage: captured.append(stage)
+        def capture(stage):
+            captured.append(stage); self.session.observe(stage)
+        self.session.observe_game_exit.side_effect = capture
         original_save = self.session.save
         def save():
             if self.clock.now >= .2: raise OSError('later persistence failure')
@@ -152,6 +164,39 @@ class GraceTests(unittest.TestCase):
         self.session.save = save
         with self.assertRaisesRegex(OSError, 'persistence failure'): shutdown.request_and_wait(self.session)
         self.assertEqual(captured, ['graceful-game-exit-observed'])
+    def test_unavailable_live_identity_waits_for_retained_running_then_actual_exit(self):
+        def request(*args, **kwargs):
+            response = self.session.request(*args, **kwargs)
+            self.alive.return_value = False; self.identity.return_value = None
+            return response
+        self.session.tool.side_effect = request
+        statuses = iter(['running', 'exited'])
+        snapshots = []
+        def capture(stage):
+            status = next(statuses); snapshots.append((status, self.clock.now))
+            self.session.observe(stage, status=status)
+        self.session.observe_game_exit.side_effect = capture
+        self.assertTrue(shutdown.request_and_wait(self.session, seconds=1))
+        self.assertEqual(snapshots[0], ('running', 0.))
+        self.assertEqual(snapshots[1], ('exited', .2))
+        self.assertEqual(self.session.state['gracefulGameExit']['deadlineMonotonic'], 1.)
+        self.assertEqual(self.session.tool.call_count, 1)
+        self.assertEqual(shutdown.classify_exit(self.session)['kind'], 'normal_close')
+    def test_unavailable_retained_telemetry_cannot_prove_exit_or_extend_grace(self):
+        def request(*args, **kwargs):
+            response = self.session.request(*args, **kwargs)
+            self.alive.return_value = False; self.identity.return_value = None
+            return response
+        self.session.tool.side_effect = request
+        self.session.observe_game_exit.side_effect = lambda stage: self.session.observe(stage, status='unavailable')
+        self.assertFalse(shutdown.request_and_wait(self.session, seconds=.4))
+        self.assertAlmostEqual(self.clock.now, .4)
+        self.assertFalse(self.session.state['gracefulGameExit']['observedGone'])
+        self.assertEqual(self.session.state['gracefulGameExit']['deadlineMonotonic'], .4)
+        self.assertFalse(shutdown.request_and_wait(self.session, seconds=10))
+        self.assertAlmostEqual(self.clock.now, .4)
+        self.assertEqual(self.session.tool.call_count, 1)
+        self.assertEqual(shutdown.classify_exit(self.session)['kind'], 'unknown')
     def test_identity_change_while_waiting_never_sends_another_quit(self):
         def sleep(seconds):
             self.clock.sleep(seconds)
