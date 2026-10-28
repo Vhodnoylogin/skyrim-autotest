@@ -1,5 +1,6 @@
 // Authored debugger fixture. Build/output/CDB/dumps remain outside Git.
 #include <Windows.h>
+#include <intrin.h>
 
 static void mark(const char* path) {
     HANDLE f = CreateFileA(path, GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -12,6 +13,10 @@ static void mark(const char* path) {
 
 __declspec(noinline) static void fault() {
     *static_cast<volatile int*>(nullptr) = 123;
+}
+
+__declspec(noinline) static void fatal_app_exit() {
+    __fastfail(FAST_FAIL_FATAL_APP_EXIT);
 }
 
 static void handled_fault() {
@@ -41,6 +46,10 @@ int main() {
         return wait_for("exit.flag") ? 0 : 4;
     }
     Sleep(100);
+    if (GetFileAttributesA("fastfail.flag") != INVALID_FILE_ATTRIBUTES) {
+        mark("fastfail-entered.flag");
+        fatal_app_exit();  // C0000409, parameter7; no in-process handler runs.
+    }
     fault();  // The unhandled second chance must remain a C0000005 exit.
     return 5;
 }

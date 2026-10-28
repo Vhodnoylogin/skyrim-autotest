@@ -95,6 +95,9 @@ def _script():
     return ('sxd -c "" -c2 "' + fatal + '" av\n'
             'sxd -c "" -c2 "' + fatal + '" 0xe06d7363\n'
             'sxd -c "" -c2 "' + fatal + '" *\n'
+            # The built-in stack-buffer-overrun filter takes precedence over
+            # wildcard commands. __fastfail reports C0000409 on second chance.
+            'sxd -c "" -c2 "' + fatal + '" sbo\n'
             'sx\n.echo AUTOTEST_CRASH_CAPTURE_READY\ng\n')
 
 

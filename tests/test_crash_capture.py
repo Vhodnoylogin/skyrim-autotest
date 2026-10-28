@@ -88,6 +88,10 @@ class CaptureTests(unittest.TestCase):
         self.assertIn('sxd -c "" -c2', script)
         self.assertIn('.dump /mA second-chance.dmp', script)
         self.assertIn('; gn" av', script)
+        # Named built-in filters override wildcard commands: C0000409 must
+        # explicitly retain its own second-chance capture, without handling it.
+        self.assertIn('; gn" sbo', script)
+        self.assertGreater(script.index('; gn" sbo'), script.index('; gn" *'))
         self.assertNotIn('gh', script)
         self.assertTrue(script.endswith('g\n'))
         self.terminate.assert_not_called()
