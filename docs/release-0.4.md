@@ -20,6 +20,13 @@ requirements. No second product or duplicated runner is required.
 
 ## Retained native evidence
 
+The28October manual-group source/build candidate adds untouched stock-generation
+observation, sex-specific complete morph templates, owner-commanded preset A/B,
+lazy born-beast fixtures and typed hide/show of the same references. These additions
+have offline tests and a native build; no new live qualification is implied.
+Natural subject-host origin and rendered appearance remain explicitly unverified.
+The measured execution results below retain their original composition and scope.
+
 The0.4.0 RC6 executor ee9bd5b8a94394e8c9fe230de86aa430a8f3dbe8 passed
 its bounded SE execution on26October2026 with the same provider DLL below.
 Packet SHA2563524b8ae0ea6c5fde4b72b9df3c420f5a66075db53a66e2ca0baef9e9b6c94a3

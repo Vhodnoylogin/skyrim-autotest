@@ -21,7 +21,7 @@ from .platform import Backend
 
 DOMAINS = frozenset(("actor-fixture", "actor-fixture-identity", "human-preset-catalog", "human-provider-config",
                     "human-preset", "human-preset-state", "actor-race", "morph-link", "actor-morph-fixture",
-                    "actor-morph-link-evaluation", "save-state"))
+                    "actor-morph-link-evaluation", "save-state", "actor-fixture-visibility"))
 ROLES = frozenset(("status", "error", "assigned", "humanWeight", "beastWeight", "clear", "refresh", "configure", "race"))
 READ_ROLES = frozenset(("status", "error", "assigned", "humanWeight", "beastWeight"))
 
@@ -48,10 +48,12 @@ def _actor(value):
 
 def validate_config(value, native_policy=None):
     if value is None: return None
-    optional = {"providerOwnKeys", "providerKeyEvidence", "providerConfigSha256", "sourceMorphsBySex"}
+    optional = {"providerOwnKeys", "providerKeyEvidence", "providerConfigSha256", "sourceMorphsBySex", "maximumFixtures"}
     if type(value) is not dict or not {"bindings", "testKeys"} <= set(value) or set(value) - {"bindings", "testKeys"} - optional:
         raise BindingError("morphSession requires bindings/testKeys and only documented evidence fields")
     mapping = value["bindings"]
+    if "maximumFixtures" in value and (type(value["maximumFixtures"]) is not int or value["maximumFixtures"] not in (6, 12)):
+        raise BindingError("maximumFixtures must explicitly select six or twelve owned references")
     if type(mapping) is not dict or set(mapping) != ROLES or any(not isinstance(v, str) or not v for v in mapping.values()):
         raise BindingError("morphSession must map all nine exact semantic binding roles")
     keys = value["testKeys"]
@@ -100,6 +102,9 @@ def validate_config(value, native_policy=None):
 
 
 def validate(operation, req):
+    if isinstance(req, dict) and req.get("domain") == "actor-fixture-visibility":
+        from . import fixture_visibility
+        return fixture_visibility.validate(operation, req)
     if isinstance(req, dict) and req.get("domain") == "actor-fixture-inspection":
         from . import actor_inspection
         return actor_inspection.validate(operation, req)
@@ -110,8 +115,9 @@ def validate(operation, req):
     required, optional = {"domain"}, set()
     if domain == "actor-fixture":
         required |= {"action", "actor", "base", "placement", "persistence", "maximumCreations"}
-        if action != "create" or req.get("persistence") != "save-load-witness-required" or req.get("maximumCreations") != 6:
-            raise BindingError("Only the bounded persistent six-actor fixture contract is supported")
+        if (action != "create" or req.get("persistence") != "save-load-witness-required" or
+                type(req.get("maximumCreations")) is not int or req["maximumCreations"] not in (6, 12)):
+            raise BindingError("Only explicitly bounded persistent six/twelve-actor fixtures are supported")
         base = req.get("base")
         if type(base) is not dict or set(base) != {"plugin", "formId"}: raise BindingError("Exact plugin/local base record required")
         _text(base["plugin"], "base plugin"); actor_domain.form(base["formId"])
@@ -141,7 +147,7 @@ def validate(operation, req):
             raise BindingError("Unsupported stock distribution configuration contract")
         _text(req.get("otherActorsPolicy"), "other actor policy")
         policies = req.get("baseSelectionPolicy")
-        if type(policies) is not list or len(policies) != 6: raise BindingError("Six explicit base mappings are required")
+        if type(policies) is not list or len(policies) not in (6, 12): raise BindingError("Six or twelve explicit complete base mappings are required")
         seen = set()
         for item in policies:
             if type(item) is not dict or set(item) != {"plugin", "baseFormId", "allowedHumanPresets"}: raise BindingError("Invalid base selection mapping")
@@ -149,8 +155,9 @@ def validate(operation, req):
             if int(identity[1], 16) > 0xffffff or identity in seen: raise BindingError("Invalid/duplicate plugin-local base mapping")
             seen.add(identity)
             pool = item["allowedHumanPresets"]
-            if type(pool) is not list or len(pool) != 3 or len(set(pool)) != 3: raise BindingError("Each base requires three exact existing preset identities")
+            if type(pool) is not list or not 1 <= len(pool) <= 64: raise BindingError("Each base requires a bounded nonempty actual preset pool")
             for name in pool: _text(name, "allowed preset")
+            if len(set(pool)) != len(pool): raise BindingError("Duplicate base preset identity")
     elif domain == "human-preset":
         required |= {"action", "actor"}
         if action == "assign":
@@ -193,7 +200,7 @@ def validate(operation, req):
         else: raise BindingError("Unknown supplementary morph fixture mutation")
     elif domain == "actor-morph-link-evaluation":
         required |= {"actor", "stage", "captureSnapshot", "familyId", "rows", "publicTargets", "ownKey", "sourceValueMeaning"}
-        optional |= {"compareSnapshot", "preserveOtherActors", "minimumObservationSpanSeconds", "adoption", "manualFamilyConfigurationCallsBeforeThisObservation", "requireFullSourceKeyEnumeration", "zeroMeaning", "aggregateMeaning", "expectedSourcePolicy"}
+        optional |= {"compareSnapshot", "preserveOtherActors", "minimumObservationSpanSeconds", "adoption", "manualFamilyConfigurationCallsBeforeThisObservation", "manualTesterMutationsBeforeThisObservation", "requireFullSourceKeyEnumeration", "zeroMeaning", "aggregateMeaning", "expectedSourcePolicy"}
         if req.get("stage") not in ("human-own-clear", "suppressed-own-clear", "linked-beast") or req.get("sourceValueMeaning") != "actual-SKEE-aggregate": raise BindingError("Unsupported stage or non-observed source aggregate semantics")
         _tag(req.get("captureSnapshot")); _text(req.get("familyId"), "familyId"); _text(req.get("ownKey"), "own key")
         rows, public = req.get("rows"), req.get("publicTargets")
@@ -207,6 +214,8 @@ def validate(operation, req):
         if "compareSnapshot" in req: _tag(req["compareSnapshot"])
         if "minimumObservationSpanSeconds" in req: actor_domain.bounded(req["minimumObservationSpanSeconds"], 0, 5)
         if "manualFamilyConfigurationCallsBeforeThisObservation" in req and req["manualFamilyConfigurationCallsBeforeThisObservation"] != 0: raise BindingError("Only pre-manual automatic family adoption is supported")
+        if "manualTesterMutationsBeforeThisObservation" in req and (type(req["manualTesterMutationsBeforeThisObservation"]) is not int or req["manualTesterMutationsBeforeThisObservation"] != 0):
+            raise BindingError("Pre-manual origin observation requires exact zero tester mutations")
         if "requireFullSourceKeyEnumeration" in req and req["requireFullSourceKeyEnumeration"] is not True: raise BindingError("Full independent key enumeration cannot be waived")
         peers = req.get("preserveOtherActors", [])
         if type(peers) is not list or len(peers) > 5: raise BindingError("At most five explicit peer preservation reads")
@@ -456,8 +465,22 @@ def _human(backend, tag, request=None, source_evidence=None):
     value = {"assignedPreset": name, "officialApiReady": True, "appliedSourceReadUnavailableCount": 0,
              "appliedSourceReadCount": len(names), "assignmentBasis": "official_current_epoch_assignment_not_morph_completion",
              "sourceReadBasis": "complete_independent_SKEE_storage_reads_not_applied_or_rendered_completion"}
+    history = _tester_mutations(backend.s, tag)
+    value["testerMutationCounts"] = history
+    intent = semantic["eventIntent"]
+    same_epoch = (raw["sessionId"] == intent["observerSession"] and
+                  raw["loadGeneration"] == intent["observerGeneration"] and
+                  raw["obody"]["provider"]["epoch"] == intent["providerEpoch"])
+    value["generationEvidence"] = {
+        "sameCreationEpoch": same_epoch, "afterSequence": intent["afterSequence"],
+        "events": copy.deepcopy([event for event in raw["obody"]["events"]
+            if event.get("sequence", 0) > intent["afterSequence"] and
+               event.get("actorForm") == spec["reference"] and event.get("event") == "OnActorGenerated"]),
+        "automaticHostOriginVerified": False,
+        "meaning": "raw_native_generation_events_not_proof_of_natural_host_invocation"}
     if request and request.get("requireAutomaticOrigin"):
-        if semantic.get("manualHumanCalls") != 0 or semantic.get("worldGeneration") != backend.s.state["ownedWorldGeneration"]:
+        if (semantic.get("manualHumanCalls") != 0 or any(history.values()) or
+                semantic.get("worldGeneration") != backend.s.state["ownedWorldGeneration"]):
             raise BindingError("Manual provider action or world load invalidated pre-manual stock origin")
         intent = semantic["eventIntent"]
         if raw["sessionId"] != intent["observerSession"] or raw["loadGeneration"] != intent["observerGeneration"] or raw["obody"]["provider"]["epoch"] != intent["providerEpoch"]:
@@ -483,8 +506,22 @@ def _human(backend, tag, request=None, source_evidence=None):
     return {"human": value, "providerObservation": raw, "sourceObservations": source_raw}
 
 
+def _tester_mutations(session, tag):
+    """Count durable intents, including uncertain calls and old counter formats."""
+    counts = {"humanProvider": 0, "family": 0, "race": 0, "testMorph": 0}
+    domains = {"human-preset": "humanProvider", "morph-link": "family",
+               "actor-race": "race", "actor-morph-fixture": "testMorph"}
+    for intent in _state(session)["mutations"]:
+        request = intent.get("request", {})
+        if intent.get("fixtureTag") == tag and request.get("domain") in domains:
+            counts[domains[request["domain"]]] += 1
+    return counts
+
+
 def _capture_once(backend, config, policy, request):
     tag = _actor(request["actor"]); entry, spec, semantic = _fixture(backend.s, tag)
+    if "manualTesterMutationsBeforeThisObservation" in request and any(_tester_mutations(backend.s, tag).values()):
+        raise BindingError("Tester mutation intent preceded the declared untouched origin observation")
     source_names = list(dict.fromkeys(row["sourceMorph"] for row in request["rows"]))
     extra_names = [item["morph"] for item in semantic.get("fixtureValues", [])]
     provider_before = _obody(backend, spec["reference"])
@@ -665,6 +702,9 @@ def execute(session, args, deadline, policy):
     operation, request = args.get("operation"), args.get("request")
     if not validate(operation, request): raise BindingError("Unrelated request passed to morph session executor")
     config, policy = _config(session, policy)
+    if request["domain"] == "actor-fixture-visibility":
+        from . import fixture_visibility
+        return fixture_visibility.perform(session, request, deadline, policy)
     if request["domain"] == "actor-fixture-inspection":
         from . import actor_inspection
         return actor_inspection.execute(session, args, deadline, policy)
@@ -678,6 +718,8 @@ def execute(session, args, deadline, policy):
             "femaleRequestedCount": sum(item["sex"] == "female" for item in request["presets"]), "missing": missing, "actual": catalog,
             "sourceSetDeclarationObservedInNativeAPI": False}}
     if domain == "human-provider-config":
+        if len(request["baseSelectionPolicy"]) > config.get("maximumFixtures", 6):
+            raise BindingError("Complete base policy exceeds the frozen platform fixture opt-in")
         if "providerConfigSha256" not in config: raise BindingError("Actual VFS configuration read requires a frozen expected config SHA256")
         raw = _call(backend, "fixture_config", {"action": "obody"})
         text = raw.get("rawText"); encoded = text.encode("utf-8") if isinstance(text, str) else b""
@@ -691,7 +733,7 @@ def execute(session, args, deadline, policy):
             if type(forms) is not dict: raise BindingError("Actual stock base mapping is malformed")
             for form, names in forms.items(): mappings[(plugin, actor_domain.form("0x" + form.removeprefix("0x")))] = set(names)
         expected = {(item["plugin"], actor_domain.form(item["baseFormId"])): set(item["allowedHumanPresets"]) for item in request["baseSelectionPolicy"]}
-        if mappings != expected: raise BindingError("Actual stock base preset selections differ from the reviewed six-base policy")
+        if mappings != expected: raise BindingError("Actual stock base preset selections differ from the reviewed complete base policy")
         catalog = _catalog(backend); expected_names = set().union(*expected.values())
         actual_names = {name for values in catalog["categories"].values() for name in values}
         readiness = _obody(backend)
@@ -700,7 +742,11 @@ def execute(session, args, deadline, policy):
             "sha256": digest, "inMemoryConfigObserved": False, "baseSelectionMatch": True, "actualVfsRead": raw}}, "catalogObservation": catalog, "providerObservation": readiness}
     if domain == "actor-fixture":
         tag = _actor(request["actor"])
-        if tag in state["fixtures"] or len(state["fixtures"]) >= 6: raise BindingError("Six unique fixture attempts only; never replay a tag")
+        maximum = config.get("maximumFixtures", 6)
+        if request["maximumCreations"] > maximum:
+            raise BindingError("Requested fixture count exceeds the frozen platform opt-in")
+        if tag in state["fixtures"] or len(state["fixtures"]) >= min(maximum, request["maximumCreations"]):
+            raise BindingError("Owned fixture attempt bound reached; never replay a tag")
         base = actor_domain.form(backend.resolve({"plugin": request["base"]["plugin"], "localId": f'{int(request["base"]["formId"],16):06X}'}))
         if base not in policy["fixtureActorBases"]: raise BindingError("Resolved base is outside the frozen disposable allowlist")
         observed = _obody(backend)
@@ -741,7 +787,7 @@ def execute(session, args, deadline, policy):
         extras = [request["race"]] if role == "race" else [request["familyId"]] if role == "configure" else []
         unused, bound = _binding_request(policy, config, role, spec, extras)
         intent = _begin(session, request, fixtureTag=tag, bindingRequest=bound)
-        if role == "configure": semantic["manualFamilyCalls"] += 1
+        if role != "race": semantic["manualFamilyCalls"] += 1
         session.save()
         receipt = bindings.guarded_call(session, bound, deadline, policy)
         intent.update(status="returned", receipt=copy.deepcopy(receipt)); session.save()

@@ -6,6 +6,7 @@
 #include <fstream>
 #include <set>
 #include <filesystem>
+#include <unordered_map>
 
 namespace dvb::NPCPersistence {
 namespace {
@@ -16,6 +17,9 @@ std::vector<RE::VMHandle> retained;
 std::set<std::string> preparationCommands;
 const std::string session=std::format("{}-{}",GetCurrentProcessId(),GetTickCount64());
 bool initialized=false;
+std::uint64_t visibilityWorldGeneration=1;
+bool visibilityWorldLoading=true;
+std::unordered_map<std::string,json> visibilityCommands;
 auto* Policy() { auto* vm=RE::BSScript::Internal::VirtualMachine::GetSingleton();return vm?vm->GetObjectHandlePolicy():nullptr; }
 bool Token(const std::string& s) { return s.size()==32&&s.find_first_not_of("0123456789abcdef")==std::string::npos; }
 bool Label(const std::string& s) { return !s.empty()&&s.size()<=96&&s.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")==std::string::npos; }
@@ -33,6 +37,34 @@ RE::Actor* Actor(std::uint32_t id) {
     auto* form=RE::TESForm::LookupByID(id);auto* actor=form?form->As<RE::Actor>():nullptr;
     if(!actor||actor->IsDeleted()||!actor->IsPersistent()||(id>>24)!=0xff)
         throw ToolError(422,"Actual persistent dynamic NPC required");return actor;
+}
+json Visibility(RE::Actor* actor) {
+    auto* player=RE::PlayerCharacter::GetSingleton();auto* ui=RE::UI::GetSingleton();
+    if(visibilityWorldLoading||!player||!player->Get3D(false)||!player->GetParentCell()||!ui||
+       ui->IsMenuOpen(RE::MainMenu::MENU_NAME)||ui->IsMenuOpen(RE::LoadingMenu::MENU_NAME))
+        throw ToolError(409,"Loaded gameplay world required for fixture visibility");
+    auto* base=actor->GetActorBase();auto* cell=actor->GetParentCell();auto* policy=Policy();
+    if(actor->IsDeleted()||!actor->IsPersistent()||(actor->GetFormID()>>24)!=0xff||
+       !base||!cell||cell!=player->GetParentCell()||!policy||!actor->GetHandle().native_handle())
+        throw ToolError(422,"Persistent fixture identity in current player cell unavailable");
+    const auto h=policy->GetHandleForObject(static_cast<RE::VMTypeID>(actor->GetFormType()),actor);
+    if(h==policy->EmptyHandle()||!policy->IsHandleObjectAvailable(h)||
+       policy->GetObjectForHandle(static_cast<RE::VMTypeID>(actor->GetFormType()),h)!=actor)
+        throw ToolError(422,"Fixture visibility VM correspondence unavailable");
+    return {{"protocol","npc-visibility/1"},{"pid",GetCurrentProcessId()},{"providerSession",session},
+        {"worldGeneration",visibilityWorldGeneration},{"currentReference",Hex(actor->GetFormID())},
+        {"base",Hex(base->GetFormID())},{"currentVmHandle",std::to_string(h)},
+        {"runtimeHandle",actor->GetHandle().native_handle()},{"parentCell",Hex(cell->GetFormID())},
+        {"persistent",true},{"disabled",actor->IsDisabled()},{"loaded3D",actor->Get3D(false)!=nullptr}};
+}
+void VisibilityGuard(const json& observed,const json& args,bool mutation) {
+    for(const auto* key:{"providerSession","currentVmHandle","runtimeHandle","parentCell"})
+        if(!args.contains(key)||args.at(key)!=observed.at(key))throw ToolError(409,"Fixture visibility identity guard changed");
+    if((mutation||args.contains("worldGeneration"))&&
+       (!args.contains("worldGeneration")||args.at("worldGeneration")!=observed.at("worldGeneration")))
+        throw ToolError(409,"Fixture visibility world guard changed");
+    if(observed.at("currentReference")!=args.at("reference")||observed.at("base")!=args.at("base"))
+        throw ToolError(409,"Fixture visibility reference/base mismatch");
 }
 json Inspection(RE::Actor* actor) {
     json slots=json::array();
@@ -137,11 +169,37 @@ json Handle(const json& args,const ToolContext&) {
         action=="read"?std::set<std::string>{"action","bindingId","timeoutMs"}:
         action=="mapping_probe"?std::set<std::string>{"action","marker","nonce","timeoutMs"}:
         (action=="identity"||action=="inspection")?std::set<std::string>{"action","reference","base","timeoutMs"}:
-        action=="prepare"?std::set<std::string>{"action","reference","base","kind","displayName","requestId","timeoutMs"}:std::set<std::string>{};
+        action=="prepare"?std::set<std::string>{"action","reference","base","kind","displayName","requestId","timeoutMs"}:
+        action=="visibility_state"?std::set<std::string>{"action","reference","base","providerSession","worldGeneration","currentVmHandle","runtimeHandle","parentCell","timeoutMs"}:
+        action=="set_visibility"?std::set<std::string>{"action","reference","base","providerSession","worldGeneration","currentVmHandle","runtimeHandle","parentCell","requestId","visible","expectedDisabled","timeoutMs"}:std::set<std::string>{};
     if(allowed.empty())throw ToolError(400,"Unknown NPC persistence action");
     for(const auto& [key,unused]:args.items())if(!allowed.contains(key))throw ToolError(400,"Unknown NPC persistence field");
     const auto ms=args.value("timeoutMs",3000);if(ms<1||ms>5000)throw ToolError(400,"Timeout outside1..5000");
     return MainThread::RunAndWait([args,action]()->json {
+        if(action=="visibility_state"||action=="set_visibility") {
+            auto* actor=Actor(FormID(args.at("reference").get<std::string>()));
+            RE::NiPointer<RE::Actor> retainedActor(actor);
+            auto before=Visibility(actor);VisibilityGuard(before,args,action=="set_visibility");
+            if(action=="visibility_state")return before;
+            const auto token=args.at("requestId").get<std::string>();
+            if(!Token(token)||!args.at("visible").is_boolean()||!args.at("expectedDisabled").is_boolean())
+                throw ToolError(400,"Exact visibility command UUID and Boolean states required");
+            if(args.at("expectedDisabled")!=before.at("disabled"))throw ToolError(409,"Fixture visibility state changed before mutation");
+            const bool visible=args.at("visible").get<bool>();
+            if(visible==!before.at("disabled").get<bool>())throw ToolError(409,"Fixture already in requested visibility; observe without mutation");
+            if(visibilityCommands.size()>=256||visibilityCommands.contains(token))throw ToolError(409,"Visibility command consumed or bound reached; never replay");
+            // Consume the command before the engine call, including uncertain outcomes.
+            visibilityCommands.emplace(token,json{{"status","intent"},{"before",before}});
+            try {
+                if(visible)actor->Enable(false);else actor->Disable();
+                if(RE::TESForm::LookupByID(actor->GetFormID())!=actor||actor->IsDeleted())
+                    throw ToolError(409,"Fixture identity disappeared during visibility mutation");
+                auto after=Visibility(actor);VisibilityGuard(after,args,true);
+                after["requestId"]=token;after["mutationIssued"]=true;
+                after["resetInventory"]=false;after["completionBasis"]="Native call returned; observe disabled/loaded3D to establish requested state";
+                visibilityCommands[token]={{"status","call-returned"},{"after",after}};return after;
+            }catch(...) {visibilityCommands[token]["status"]="uncertain";throw;}
+        }
         if(action=="inspection"||action=="prepare") {
             auto* actor=Actor(FormID(args.at("reference").get<std::string>()));
             if(!actor->GetActorBase()||Hex(actor->GetActorBase()->GetFormID())!=args.at("base").get<std::string>())throw ToolError(422,"Inspection actor base mismatch");
@@ -219,8 +277,16 @@ void Register(ToolRegistry& registry) {
         {"saveTag",{{"type","string"}}},{"bindingId",{{"type","string"}}},{"actors",{{"type","array"}}},
         {"reference",{{"type","string"}}},{"base",{{"type","string"}}},{"kind",{{"type","string"}}},
         {"displayName",{{"type","string"}}},{"requestId",{{"type","string"}}},
+        {"providerSession",{{"type","string"}}},{"worldGeneration",{{"type","integer"}}},
+        {"currentVmHandle",{{"type","string"}}},{"runtimeHandle",{{"type","integer"}}},
+        {"parentCell",{{"type","string"}}},{"visible",{{"type","boolean"}}},{"expectedDisabled",{{"type","boolean"}}},
         {"marker",{{"type","string"}}},{"nonce",{{"type","string"}}},{"timeoutMs",{{"type","integer"}}}}}};
     registry.Register(std::move(d),Handle);
 }
-void OnSKSEMessage(std::uint32_t type) { if(type==SKSE::MessagingInterface::kPreLoadGame)Release(); }
+void OnSKSEMessage(std::uint32_t type) {
+    if(type==SKSE::MessagingInterface::kPreLoadGame||type==SKSE::MessagingInterface::kNewGame) {
+        ++visibilityWorldGeneration;visibilityWorldLoading=type==SKSE::MessagingInterface::kPreLoadGame;
+        if(type==SKSE::MessagingInterface::kPreLoadGame)Release();
+    }else if(type==SKSE::MessagingInterface::kPostLoadGame)visibilityWorldLoading=false;
+}
 }

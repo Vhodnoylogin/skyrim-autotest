@@ -1,0 +1,426 @@
+{
+  "presetMode": "automatic-stock",
+  "automaticObservationSeconds": 10,
+  "wildOriginPolicy": "observe-natural-host",
+  "beastRace": "0x000CDD84",
+  "actors": [
+    {
+      "tag": "Human1",
+      "displayName": "Human 1",
+      "sex": "male",
+      "base": {
+        "plugin": "ExampleHumanFixtures.esp",
+        "formId": "0x00000800"
+      },
+      "humanRace": "0x00013746",
+      "allowedHumanPresets": [
+        "Example Human Male Slim",
+        "Example Human Male Muscular",
+        "Example Human Male Heavy"
+      ],
+      "placement": {
+        "forwardGameUnits": 200,
+        "rightGameUnits": -240
+      }
+    },
+    {
+      "tag": "Human2",
+      "displayName": "Human 2",
+      "sex": "male",
+      "base": {
+        "plugin": "ExampleHumanFixtures.esp",
+        "formId": "0x00000801"
+      },
+      "humanRace": "0x00013746",
+      "allowedHumanPresets": [
+        "Example Human Male Slim",
+        "Example Human Male Muscular",
+        "Example Human Male Heavy"
+      ],
+      "placement": {
+        "forwardGameUnits": 200,
+        "rightGameUnits": 0
+      }
+    },
+    {
+      "tag": "Human3",
+      "displayName": "Human 3",
+      "sex": "male",
+      "base": {
+        "plugin": "ExampleHumanFixtures.esp",
+        "formId": "0x00000802"
+      },
+      "humanRace": "0x00013746",
+      "allowedHumanPresets": [
+        "Example Human Male Slim",
+        "Example Human Male Muscular",
+        "Example Human Male Heavy"
+      ],
+      "placement": {
+        "forwardGameUnits": 200,
+        "rightGameUnits": 240
+      }
+    },
+    {
+      "tag": "Human4",
+      "displayName": "Human 4",
+      "sex": "female",
+      "base": {
+        "plugin": "ExampleHumanFixtures.esp",
+        "formId": "0x00000803"
+      },
+      "humanRace": "0x00013746",
+      "allowedHumanPresets": [
+        "Example Human Female Slim",
+        "Example Human Female Muscular",
+        "Example Human Female Heavy"
+      ],
+      "placement": {
+        "forwardGameUnits": 420,
+        "rightGameUnits": -240
+      }
+    },
+    {
+      "tag": "Human5",
+      "displayName": "Human 5",
+      "sex": "female",
+      "base": {
+        "plugin": "ExampleHumanFixtures.esp",
+        "formId": "0x00000804"
+      },
+      "humanRace": "0x00013746",
+      "allowedHumanPresets": [
+        "Example Human Female Slim",
+        "Example Human Female Muscular",
+        "Example Human Female Heavy"
+      ],
+      "placement": {
+        "forwardGameUnits": 420,
+        "rightGameUnits": 0
+      }
+    },
+    {
+      "tag": "Human6",
+      "displayName": "Human 6",
+      "sex": "female",
+      "base": {
+        "plugin": "ExampleHumanFixtures.esp",
+        "formId": "0x00000805"
+      },
+      "humanRace": "0x00013746",
+      "allowedHumanPresets": [
+        "Example Human Female Slim",
+        "Example Human Female Muscular",
+        "Example Human Female Heavy"
+      ],
+      "placement": {
+        "forwardGameUnits": 420,
+        "rightGameUnits": 240
+      }
+    }
+  ],
+  "wildActors": [
+    {
+      "tag": "Wild1",
+      "displayName": "Wild 1",
+      "sex": "male",
+      "base": {
+        "plugin": "ExampleBornBeastFixtures.esp",
+        "formId": "0x00000800"
+      },
+      "allowedHumanPresets": [
+        "Example Human Male Slim",
+        "Example Human Male Muscular",
+        "Example Human Male Heavy"
+      ],
+      "placement": {
+        "forwardGameUnits": 200,
+        "rightGameUnits": -240
+      },
+      "initialRace": "0x000CDD84"
+    },
+    {
+      "tag": "Wild2",
+      "displayName": "Wild 2",
+      "sex": "male",
+      "base": {
+        "plugin": "ExampleBornBeastFixtures.esp",
+        "formId": "0x00000801"
+      },
+      "allowedHumanPresets": [
+        "Example Human Male Slim",
+        "Example Human Male Muscular",
+        "Example Human Male Heavy"
+      ],
+      "placement": {
+        "forwardGameUnits": 200,
+        "rightGameUnits": 0
+      },
+      "initialRace": "0x000CDD84"
+    },
+    {
+      "tag": "Wild3",
+      "displayName": "Wild 3",
+      "sex": "male",
+      "base": {
+        "plugin": "ExampleBornBeastFixtures.esp",
+        "formId": "0x00000802"
+      },
+      "allowedHumanPresets": [
+        "Example Human Male Slim",
+        "Example Human Male Muscular",
+        "Example Human Male Heavy"
+      ],
+      "placement": {
+        "forwardGameUnits": 200,
+        "rightGameUnits": 240
+      },
+      "initialRace": "0x000CDD84"
+    },
+    {
+      "tag": "Wild4",
+      "displayName": "Wild 4",
+      "sex": "female",
+      "base": {
+        "plugin": "ExampleBornBeastFixtures.esp",
+        "formId": "0x00000803"
+      },
+      "allowedHumanPresets": [
+        "Example Human Female Slim",
+        "Example Human Female Muscular",
+        "Example Human Female Heavy"
+      ],
+      "placement": {
+        "forwardGameUnits": 420,
+        "rightGameUnits": -240
+      },
+      "initialRace": "0x000CDD84"
+    },
+    {
+      "tag": "Wild5",
+      "displayName": "Wild 5",
+      "sex": "female",
+      "base": {
+        "plugin": "ExampleBornBeastFixtures.esp",
+        "formId": "0x00000804"
+      },
+      "allowedHumanPresets": [
+        "Example Human Female Slim",
+        "Example Human Female Muscular",
+        "Example Human Female Heavy"
+      ],
+      "placement": {
+        "forwardGameUnits": 420,
+        "rightGameUnits": 0
+      },
+      "initialRace": "0x000CDD84"
+    },
+    {
+      "tag": "Wild6",
+      "displayName": "Wild 6",
+      "sex": "female",
+      "base": {
+        "plugin": "ExampleBornBeastFixtures.esp",
+        "formId": "0x00000805"
+      },
+      "allowedHumanPresets": [
+        "Example Human Female Slim",
+        "Example Human Female Muscular",
+        "Example Human Female Heavy"
+      ],
+      "placement": {
+        "forwardGameUnits": 420,
+        "rightGameUnits": 240
+      },
+      "initialRace": "0x000CDD84"
+    }
+  ],
+  "catalogRequest": {
+    "domain": "human-preset-catalog",
+    "presets": [
+      {
+        "name": "Example Human Male Slim",
+        "sex": "male",
+        "set": "Example actual installed human presets"
+      },
+      {
+        "name": "Example Human Male Muscular",
+        "sex": "male",
+        "set": "Example actual installed human presets"
+      },
+      {
+        "name": "Example Human Male Heavy",
+        "sex": "male",
+        "set": "Example actual installed human presets"
+      },
+      {
+        "name": "Example Human Female Slim",
+        "sex": "female",
+        "set": "Example actual installed human presets"
+      },
+      {
+        "name": "Example Human Female Muscular",
+        "sex": "female",
+        "set": "Example actual installed human presets"
+      },
+      {
+        "name": "Example Human Female Heavy",
+        "sex": "female",
+        "set": "Example actual installed human presets"
+      }
+    ],
+    "wolfPresetRequirement": "none"
+  },
+  "configurationRequest": {
+    "domain": "human-provider-config",
+    "presetPoolPolicy": "exact-six-existing-human-preset-elements",
+    "otherActorsPolicy": "unchanged",
+    "requiredDisablePresetDistribution": "none",
+    "baseSelectionPolicy": [
+      {
+        "plugin": "ExampleHumanFixtures.esp",
+        "baseFormId": "0x00000800",
+        "allowedHumanPresets": [
+          "Example Human Male Slim",
+          "Example Human Male Muscular",
+          "Example Human Male Heavy"
+        ]
+      },
+      {
+        "plugin": "ExampleHumanFixtures.esp",
+        "baseFormId": "0x00000801",
+        "allowedHumanPresets": [
+          "Example Human Male Slim",
+          "Example Human Male Muscular",
+          "Example Human Male Heavy"
+        ]
+      },
+      {
+        "plugin": "ExampleHumanFixtures.esp",
+        "baseFormId": "0x00000802",
+        "allowedHumanPresets": [
+          "Example Human Male Slim",
+          "Example Human Male Muscular",
+          "Example Human Male Heavy"
+        ]
+      },
+      {
+        "plugin": "ExampleHumanFixtures.esp",
+        "baseFormId": "0x00000803",
+        "allowedHumanPresets": [
+          "Example Human Female Slim",
+          "Example Human Female Muscular",
+          "Example Human Female Heavy"
+        ]
+      },
+      {
+        "plugin": "ExampleHumanFixtures.esp",
+        "baseFormId": "0x00000804",
+        "allowedHumanPresets": [
+          "Example Human Female Slim",
+          "Example Human Female Muscular",
+          "Example Human Female Heavy"
+        ]
+      },
+      {
+        "plugin": "ExampleHumanFixtures.esp",
+        "baseFormId": "0x00000805",
+        "allowedHumanPresets": [
+          "Example Human Female Slim",
+          "Example Human Female Muscular",
+          "Example Human Female Heavy"
+        ]
+      },
+      {
+        "plugin": "ExampleBornBeastFixtures.esp",
+        "baseFormId": "0x00000800",
+        "allowedHumanPresets": [
+          "Example Human Male Slim",
+          "Example Human Male Muscular",
+          "Example Human Male Heavy"
+        ]
+      },
+      {
+        "plugin": "ExampleBornBeastFixtures.esp",
+        "baseFormId": "0x00000801",
+        "allowedHumanPresets": [
+          "Example Human Male Slim",
+          "Example Human Male Muscular",
+          "Example Human Male Heavy"
+        ]
+      },
+      {
+        "plugin": "ExampleBornBeastFixtures.esp",
+        "baseFormId": "0x00000802",
+        "allowedHumanPresets": [
+          "Example Human Male Slim",
+          "Example Human Male Muscular",
+          "Example Human Male Heavy"
+        ]
+      },
+      {
+        "plugin": "ExampleBornBeastFixtures.esp",
+        "baseFormId": "0x00000803",
+        "allowedHumanPresets": [
+          "Example Human Female Slim",
+          "Example Human Female Muscular",
+          "Example Human Female Heavy"
+        ]
+      },
+      {
+        "plugin": "ExampleBornBeastFixtures.esp",
+        "baseFormId": "0x00000804",
+        "allowedHumanPresets": [
+          "Example Human Female Slim",
+          "Example Human Female Muscular",
+          "Example Human Female Heavy"
+        ]
+      },
+      {
+        "plugin": "ExampleBornBeastFixtures.esp",
+        "baseFormId": "0x00000805",
+        "allowedHumanPresets": [
+          "Example Human Female Slim",
+          "Example Human Female Muscular",
+          "Example Human Female Heavy"
+        ]
+      }
+    ]
+  },
+  "morphObservationRequestsBySex": {
+    "male": {
+      "domain": "actor-morph-link-evaluation",
+      "familyId": "Example.male.Geometry",
+      "rows": [
+        {
+          "sourceMorph": "ExampleMaleSource",
+          "targetMorph": "ExampleMaleTarget",
+          "gain": 1.0,
+          "cap": 1.0
+        }
+      ],
+      "publicTargets": [
+        "ExampleMaleTarget"
+      ],
+      "ownKey": "Example.Subject",
+      "sourceValueMeaning": "actual-SKEE-aggregate"
+    },
+    "female": {
+      "domain": "actor-morph-link-evaluation",
+      "familyId": "Example.female.Geometry",
+      "rows": [
+        {
+          "sourceMorph": "ExampleFemaleSource",
+          "targetMorph": "ExampleFemaleTarget",
+          "gain": 1.0,
+          "cap": 1.0
+        }
+      ],
+      "publicTargets": [
+        "ExampleFemaleTarget"
+      ],
+      "ownKey": "Example.Subject",
+      "sourceValueMeaning": "actual-SKEE-aggregate"
+    }
+  }
+}

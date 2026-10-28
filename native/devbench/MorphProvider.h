@@ -12,7 +12,9 @@ void Register(ToolRegistry&);
 void OnSKSEMessage(std::uint32_t type);
 
 namespace Policy {
-inline constexpr std::size_t MaxCommands = 512, MaxActorsPerWorld = 6;
+// External platforms retain six by default; an explicit twelve-ref manual
+// group opt-in can use the same provider without changing the six-ref save ABI.
+inline constexpr std::size_t MaxCommands = 512, MaxActorsPerWorld = 12;
 inline constexpr std::size_t MaxCatalogPage = 256, MaxPresetBytes = 512;
 inline constexpr bool Token(std::string_view text) {
     return text.size() == 32 && text.find_first_not_of("0123456789abcdef") == std::string_view::npos;

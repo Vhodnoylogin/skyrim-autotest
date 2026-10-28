@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from skyrim_autotest import manual_scene, morph_session
 
@@ -13,6 +14,8 @@ class SceneBackend:
         self.fail_action = None
         self.distribution = 'none'
         self.drift_after_six = False
+        self.missing_automatic = False
+        self.bad_visibility = False
 
     def exchange(self, envelope):
         self.calls.append(copy.deepcopy(envelope))
@@ -30,12 +33,14 @@ class SceneBackend:
                     'unexpectedLoadedPresetCount': 0, 'missingExpectedPresetCount': 0}}}
         tag = r['actor']['fixtureTag']
         if domain == 'actor-fixture':
-            a = next(a for a in self.spec['actors'] if a['tag'] == tag)
+            a = next(a for a in self.spec['actors'] + self.spec.get('wildActors', []) if a['tag'] == tag)
             if tag in self.states: raise AssertionError('Duplicate creation')
             self.states[tag] = {'reference': '0xFF%06X' % (len(self.states) + 1),
-                                'baseFormId': a['base']['formId'], 'race': a['humanRace'],
-                                'displayName': '', 'preset': '', 'dontMove': True}
-            return {'created': True}
+                                'baseFormId': a['base']['formId'], 'race': a.get('initialRace', a.get('humanRace')),
+                                'displayName': '', 'preset': '', 'dontMove': True, 'sex': a['sex']}
+            if self.spec.get('presetMode') == 'automatic-stock' and not self.missing_automatic:
+                self.states[tag]['preset'] = a['allowedHumanPresets'][0]
+            return {'created': True, 'actor': {'base': a['base']['formId']}}
         state = self.states[tag]
         if domain == 'actor-fixture-identity': return {'actor': dict(state)}
         if domain == 'actor-fixture-inspection':
@@ -48,7 +53,17 @@ class SceneBackend:
             state['preset'] = r['presetName']
             return {'request': {'assignmentAccepted': True}}
         if domain == 'human-preset-state':
-            return {'human': {'assignedPreset': state['preset'], 'appliedSourceReadUnavailableCount': 0}}
+            return {'human': {'assignedPreset': state['preset'], 'appliedSourceReadUnavailableCount': 0,
+                    'automaticGenerationWitnessCount': int(bool(state['preset']))},
+                    'providerObservation': {'events': ['actual mocked raw assignment witness']}}
+        if domain == 'actor-morph-link-evaluation':
+            return {'raw': {'sources': {'SignedSource': -0.4, 'ZeroSource': 0}, 'targetKeys': {'Target': [{'key': 'Own', 'value': .2}]}},
+                    'captureSnapshot': r['captureSnapshot'], 'stage': r['stage'], 'renderedMorphsVerified': False}
+        if domain == 'actor-fixture-visibility':
+            if r['action'] != 'read': state['disabled'] = r['action'] == 'hide'
+            disabled = state.get('disabled', False)
+            return {'actor': {'reference': '0xFF000BAD' if self.bad_visibility else state['reference'], 'base': state['baseFormId']},
+                    'disabled': disabled, 'loaded3D': not disabled, 'unchangedIdentity': True}
         if domain == 'actor-race':
             state['race'] = r['race']; return {'request': {'admitted': True}}
         raise AssertionError(domain)
@@ -140,6 +155,151 @@ class ManualSceneTests(unittest.TestCase):
             manual_scene.run_plan(self.spec, backend.exchange, lambda r: None, lambda: None,
                                   lambda k, v: notices.append(k))
         self.assertNotIn('scene-ready', notices)
+
+    def automatic(self, wild=False):
+        self.spec.update(presetMode='automatic-stock', automaticObservationSeconds=1)
+        for actor in self.spec['actors']:
+            actor['allowedHumanPresets'] = [actor['humanPreset'], actor['humanPreset'] + '-B']
+        if wild:
+            self.spec['wildOriginPolicy'] = 'observe-natural-host'
+            self.spec['wildActors'] = []
+            for i, human in enumerate(self.spec['actors']):
+                actor = copy.deepcopy(human)
+                actor.update(tag='Wild' + str(i), displayName='Wild ' + str(i), initialRace=self.spec['beastRace'])
+                actor.pop('humanRace')
+                actor['base']['formId'] = '0x%08X' % (300 + i)
+                self.spec['wildActors'].append(actor)
+
+    def test_automatic_origin_precedes_inspection_without_manual_assignment(self):
+        self.automatic()
+        _, backend, _, notices = self.run_scene([{'sequence': 1, 'sourceRef': 'stop', 'action': 'finish'}])
+        requests = [c['args']['request'] for c in backend.calls if 'args' in c]
+        self.assertFalse(any(r['domain'] == 'human-preset' for r in requests))
+        for actor in self.spec['actors']:
+            own = [r for r in requests if r.get('actor', {}).get('fixtureTag') == actor['tag']]
+            read = next(i for i, r in enumerate(own) if r['domain'] == 'human-preset-state')
+            inspect = next(i for i, r in enumerate(own) if r['domain'] == 'actor-fixture-inspection')
+            self.assertLess(read, inspect)
+            self.assertTrue(own[read]['requireAutomaticOrigin'])
+        ready = next(v for k, v in notices if k == 'scene-ready')
+        self.assertTrue(all(v['automaticOriginVerified'] for v in ready['automaticOrigins'].values()))
+
+    def test_missing_automatic_result_stays_unavailable_without_forced_generation(self):
+        self.automatic()
+        backend = SceneBackend(self.spec); backend.missing_automatic = True
+        clock = iter(range(1000))
+        with patch.object(manual_scene.time, 'monotonic', side_effect=lambda: next(clock)), patch.object(manual_scene.time, 'sleep'):
+            _, backend, _, notices = self.run_scene([{'sequence': 1, 'sourceRef': 'stop', 'action': 'finish'}], backend)
+        origins = [v for k, v in notices if k == 'automatic-origin']
+        self.assertEqual(len(origins), 6)
+        self.assertTrue(all(v['status'] == 'unavailable' and not v['automaticOriginVerified'] for v in origins))
+        self.assertFalse(any(c.get('args', {}).get('request', {}).get('domain') in ('human-preset', 'morph-link') for c in backend.calls))
+
+    def test_groups_create_wild_only_on_first_add_and_preserve_refs(self):
+        self.automatic(wild=True)
+        commands = [{'sequence': i + 1, 'sourceRef': 'owner-' + str(i), 'action': action, 'group': group}
+                    for i, (action, group) in enumerate([
+                        ('remove-group', 'wild'), ('remove-group', 'humans'), ('add-group', 'wild'),
+                        ('remove-group', 'wild'), ('add-group', 'wild'), ('add-group', 'humans')])]
+        commands.append({'sequence': 7, 'sourceRef': 'stop', 'action': 'finish'})
+        _, backend, _, notices = self.run_scene(commands)
+        ready = next(v for k, v in notices if k == 'scene-ready')
+        self.assertEqual(ready['wildCreatedCount'], 0)
+        requests = [c['args']['request'] for c in backend.calls if 'args' in c]
+        self.assertEqual(sum(r['domain'] == 'actor-fixture' for r in requests), 12)
+        self.assertFalse(any(r['domain'] in ('actor-race', 'human-preset', 'morph-link') for r in requests))
+        self.assertTrue(all(s['race'] == self.spec['beastRace'] for tag, s in backend.states.items() if tag.startswith('Wild')))
+        self.assertEqual(len({s['reference'] for s in backend.states.values()}), 12)
+        origins = [v for k, v in notices if k == 'automatic-origin' and v['actor'].startswith('Wild')]
+        self.assertEqual(len(origins), 6)
+        self.assertTrue(all(v['naturalHostOrigin'] == 'unverified-raw-evidence' and not v['automaticOriginVerified'] for v in origins))
+        human_mutations = [r for r in requests if r['domain'] == 'actor-fixture-visibility' and r['actor']['fixtureTag'].startswith('Actor')]
+        self.assertEqual([r['action'] for r in human_mutations], ['hide'] * 6 + ['show'] * 6)
+
+    def test_preset_diagnostic_is_only_owner_requested_and_keeps_origin_evidence(self):
+        self.automatic()
+        commands = [{'sequence': 1, 'sourceRef': 'owner-preset-B', 'action': 'assign-preset', 'actor': 'Actor1', 'presetName': 'Preset1-B'},
+                    {'sequence': 2, 'sourceRef': 'owner-preset-A', 'action': 'assign-preset', 'actor': 'Actor1', 'presetName': 'Preset1'},
+                    {'sequence': 3, 'sourceRef': 'stop', 'action': 'finish'}]
+        _, backend, _, notices = self.run_scene(commands)
+        assignments = [c['args']['request'] for c in backend.calls if c.get('args', {}).get('request', {}).get('domain') == 'human-preset']
+        self.assertEqual([r['presetName'] for r in assignments], ['Preset1-B', 'Preset1'])
+        self.assertTrue(all(v['separateOwnerPresetDiagnostic'] for k, v in notices if k == 'command-result'))
+        with self.assertRaisesRegex(ValueError, 'outside the declared'):
+            self.run_scene([{'sequence': 1, 'sourceRef': 'owner', 'action': 'assign-preset', 'actor': 'Actor1', 'presetName': 'Foreign'}])
+
+    def test_full_morph_template_preserves_raw_signed_zero_and_target_evidence(self):
+        from test_morph_session import evaluation
+        self.automatic()
+        template = evaluation()
+        for key in ('actor', 'captureSnapshot', 'stage'): template.pop(key)
+        self.spec['morphObservationRequest'] = template
+        commands = [{'sequence': 1, 'sourceRef': 'owner-transform', 'action': 'to-beast', 'actor': 'Actor1'},
+                    {'sequence': 2, 'sourceRef': 'stop', 'action': 'finish'}]
+        _, backend, records, notices = self.run_scene(commands)
+        requests = [c['args']['request'] for c in backend.calls if c.get('args', {}).get('request', {}).get('domain') == 'actor-morph-link-evaluation']
+        self.assertEqual(len(requests), 7)
+        self.assertTrue(all(r['manualTesterMutationsBeforeThisObservation'] == 0 for r in requests[:6]))
+        self.assertNotIn('manualTesterMutationsBeforeThisObservation', requests[-1])
+        self.assertEqual(requests[-1]['stage'], 'linked-beast')
+        evidence = next(v['morphObservation'] for k, v in notices if k == 'command-result')
+        self.assertEqual(evidence['raw']['sources'], {'SignedSource': -.4, 'ZeroSource': 0})
+        self.assertEqual(len({r['captureSnapshot'] for r in requests}), 7)
+
+    def test_invalid_complete_spec_refuses_before_first_exchange(self):
+        self.automatic(wild=True)
+        for mutate in (lambda s: s.update(presetMod='automatic-stock'),
+                       lambda s: s['wildActors'][-1].update(initialRace=s['actors'][0]['humanRace']),
+                       lambda s: s['wildActors'][-1].update(tag=s['actors'][0]['tag'])):
+            original = copy.deepcopy(self.spec); mutate(self.spec)
+            backend = SceneBackend(self.spec)
+            with self.assertRaises(ValueError): self.run_scene([], backend)
+            self.assertEqual(backend.calls, [])
+            self.spec = original
+
+    def test_mixed_sex_templates_select_actual_actor_sex_and_single_template_refuses(self):
+        from test_morph_session import evaluation
+        self.automatic()
+        for actor in self.spec['actors'][3:]: actor['sex'] = 'female'
+        template = evaluation()
+        for key in ('actor', 'captureSnapshot', 'stage'): template.pop(key)
+        self.spec['morphObservationRequest'] = template
+        backend = SceneBackend(self.spec)
+        with self.assertRaisesRegex(ValueError, 'Mixed-sex'):
+            self.run_scene([], backend)
+        self.assertEqual(backend.calls, [])
+        self.spec.pop('morphObservationRequest')
+        self.spec['morphObservationRequestsBySex'] = {
+            sex: dict(copy.deepcopy(template), familyId='Example.' + sex) for sex in ('male', 'female')}
+        _, backend, _, _ = self.run_scene([{'sequence': 1, 'sourceRef': 'stop', 'action': 'finish'}])
+        reads = [c['args']['request'] for c in backend.calls if c.get('args', {}).get('request', {}).get('domain') == 'actor-morph-link-evaluation']
+        self.assertEqual([r['familyId'] for r in reads], ['Example.male'] * 3 + ['Example.female'] * 3)
+
+    def test_native_name_bound_and_zero_race_refuse_before_creation(self):
+        for mutate in (lambda s: s['actors'][-1].update(displayName='я' * 65),
+                       lambda s: s.update(beastRace='0x00000000')):
+            original = copy.deepcopy(self.spec); mutate(self.spec)
+            backend = SceneBackend(self.spec)
+            with self.assertRaises(ValueError): self.run_scene([], backend)
+            self.assertEqual(backend.calls, [])
+            self.spec = original
+
+    def test_bad_visibility_readback_stops_without_recreation_or_finish(self):
+        self.automatic(wild=True)
+        backend = SceneBackend(self.spec); backend.bad_visibility = True
+        with self.assertRaisesRegex(ValueError, 'visibility readback'):
+            self.run_scene([{'sequence': 1, 'sourceRef': 'owner-hide', 'action': 'remove-group', 'group': 'humans'}], backend)
+        self.assertEqual(len(backend.states), 6)
+        self.assertFalse(any(c['operation'] == 'finish' for c in backend.calls))
+
+    def test_born_beast_never_gets_human_transition(self):
+        self.automatic(wild=True)
+        backend = SceneBackend(self.spec)
+        commands = [{'sequence': 1, 'sourceRef': 'owner-add', 'action': 'add-group', 'group': 'wild'},
+                    {'sequence': 2, 'sourceRef': 'owner-human', 'action': 'to-human', 'actor': 'Wild1'}]
+        with self.assertRaisesRegex(ValueError, 'never create a human history'):
+            self.run_scene(commands, backend)
+        self.assertFalse(any(c.get('args', {}).get('request', {}).get('domain') == 'actor-race' for c in backend.calls))
 
     def test_world_control_keeps_owner_open_and_measures_actual_position(self):
         calls, notices, records = [], [], []

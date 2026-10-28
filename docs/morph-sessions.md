@@ -6,6 +6,28 @@ executor, command channel, guardian, common startup/world readiness and restored
 temporary MO2 profile. Physics and rendered geometry remain outside this contract.
 Build/offline checks alone do not establish a qualified installed platform.
 
+The manual group source candidate can explicitly set `morphSession.maximumFixtures`
+to12; absent retains six. Creation requests cannot exceed that frozen choice.
+The owned save/load contract still requires exactly six and rejects twelve.
+`actor-fixture-visibility` exposes read/show/hide of actual witnessed persistent
+references, including disabled references, through a typed native operation.
+It pins the VM/runtime identity, provider/world and current cell, then requires
+fresh disabled/loaded-state readback. An unknown action is not replayed. Native
+runtime-handle stability through hide/show still needs live qualification.
+
+Distribution configuration reads compare the whole installed `npcFormID` map
+with the declared complete six- or twelve-base map. Each base can have a bounded
+nonempty pool, including a singleton; twelve requires the explicit opt-in. A
+six-base subset does not verify an installed twelve-base configuration.
+
+Human state retains raw native generation events and tester mutation intents.
+Internal stock generation and natural subject-host calls are distinct: a caller
+event is not reclassified as stock or proof of natural host invocation. The
+optional `manualTesterMutationsBeforeThisObservation:0` on a full morph read
+rejects any earlier tester provider/family/race/test-morph intent, even uncertain
+ones. Clear and refresh count as manual family interventions as well as configure.
+Use that field only on the initial untouched observation, not owner-mutated A/B.
+
 The three layers remain separate: DevBench supplies registered native tools;
 World Observer supplies independent read-only measurements; this external executor
 performs bounded actions, preserves evidence and maps semantic results. No mutation

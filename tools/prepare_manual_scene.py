@@ -34,6 +34,11 @@ def prepare(base_config, scene_inputs, output, maximum_seconds=6900, initial_wor
         raise ValueError('Existing native SE New Game configuration required')
     if len(spec['actors']) != 6:
         raise ValueError('Existing exact six-actor scene inputs required')
+    manual_scene.validate_spec(spec)
+    if spec.get('wildActors'):
+        # The qualified provider still resolves each declared base through its
+        # frozen native allowlist; expanding capacity does not expand that list.
+        config['interactive_session']['morphSession']['maximumFixtures'] = 12
     config.pop('crash_capture', None)  # Optional debugger is not part of manual play.
     cell = 'RealmLorkhan' if initial_world_only else 'QASmoke'
     if initial_world_only:

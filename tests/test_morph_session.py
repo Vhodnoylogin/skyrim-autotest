@@ -350,6 +350,28 @@ class MorphSessionTests(unittest.TestCase):
         self.session.config_read["rawText"] += " "
         with self.assertRaisesRegex(ValueError, "frozen staged pin"): self.execute(request)
 
+    def test_complete_twelve_base_singletons_match_actual_config_without_subset_acceptance(self):
+        policies = [{"plugin": "Example.esm", "baseFormId": f"0x{i:08X}", "allowedHumanPresets": [name]}
+                    for i, name in enumerate(["M1", "M2", "M3", "F1", "F2", "F3"] * 2, 1)]
+        parsed = {"disablePresetDistribution": "none", "npcFormID": {"Example.esm": {
+            p["baseFormId"][2:]: p["allowedHumanPresets"] for p in policies}}}
+        text = json.dumps(parsed)
+        settings = self.session.state["configuration"]["interactive_session"]["morphSession"]
+        settings["providerConfigSha256"] = hashlib.sha256(text.encode()).hexdigest()
+        self.session.config_read = {"pid": 123, "rawText": text, "bytes": len(text), "inMemoryConfigObserved": False}
+        request = {"domain": "human-provider-config", "presetPoolPolicy": "exact-six-existing-human-preset-elements",
+                   "baseSelectionPolicy": policies, "otherActorsPolicy": "Reviewed complete policy",
+                   "requiredDisablePresetDistribution": "none"}
+        with self.assertRaisesRegex(ValueError, "fixture opt-in"): self.execute(request)
+        settings["maximumFixtures"] = 12
+        self.assertTrue(self.execute(request)["human"]["config"]["baseSelectionMatch"])
+        subset = copy.deepcopy(request); subset["baseSelectionPolicy"] = policies[:6]
+        with self.assertRaisesRegex(ValueError, "complete base policy"): self.execute(subset)
+        wrong = copy.deepcopy(request); wrong["baseSelectionPolicy"][0]["allowedHumanPresets"] = ["M2"]
+        with self.assertRaisesRegex(ValueError, "complete base policy"): self.execute(wrong)
+        empty = copy.deepcopy(request); empty["baseSelectionPolicy"][0]["allowedHumanPresets"] = []
+        with self.assertRaises(ValueError): subject.validate("world.read", empty)
+
     def test_typed_subject_queue_admission_and_same_reference_race(self):
         result = self.execute({"domain": "morph-link", "action": "clear-own", "actor": {"fixtureTag": "Fixture"}})
         self.assertTrue(result["request"]["admitted"]); self.assertFalse(result["request"]["completed"])
@@ -471,6 +493,52 @@ class MorphSessionTests(unittest.TestCase):
         result["raw"]["sources"][SOURCES[0]]["keys"][0]["value"] = 88
         self.assertEqual(retained["raw"]["sources"][SOURCES[0]]["keys"][0]["value"], 9)
         self.assertEqual(logged["rawResult"]["raw"]["sources"][SOURCES[0]]["keys"][0]["value"], 9)
+
+
+    def test_natural_host_events_remain_raw_and_never_become_stock_proof(self):
+        event = {"sequence": 2, "event": "OnActorGenerated", "actorForm": REF,
+                 "responsibility": "external_caller", "responsibleOwner": {"value": "subject-host"}}
+        self.session.events = [event]
+        result = self.execute({"domain": "human-preset-state", "actor": {"fixtureTag": "Fixture"}})
+        evidence = result["human"]["generationEvidence"]
+        self.assertEqual(evidence["events"], [event])
+        self.assertFalse(evidence["automaticHostOriginVerified"])
+        self.assertTrue(evidence["sameCreationEpoch"])
+        self.assertEqual(self.session.state["morphSession"]["mutations"], [])
+
+    def test_untouched_origin_rejects_all_prior_tester_mutation_intents(self):
+        for domain in ("human-preset", "morph-link", "actor-race", "actor-morph-fixture"):
+            with self.subTest(domain=domain):
+                self.session.state["morphSession"]["mutations"] = [
+                    {"fixtureTag": "Fixture", "status": "intent", "request": {"domain": domain}}]
+                with self.assertRaisesRegex(ValueError, "Tester mutation intent"):
+                    self.execute(evaluation("untouched", manualTesterMutationsBeforeThisObservation=0))
+        self.assertFalse(any(tool == "morph_provider" and args["action"] != "actor_status"
+                             for tool, args in self.session.calls))
+
+    def test_stock_origin_rejects_uncertain_refresh_even_with_old_zero_counter(self):
+        self.session.state["morphSession"]["mutations"] = [{"fixtureTag": "Fixture", "status": "intent",
+            "request": {"domain": "morph-link", "action": "refresh"}}]
+        request = {"domain": "human-preset-state", "actor": {"fixtureTag": "Fixture"},
+            "requireStockGenerationWitness": True, "requireAutomaticOrigin": True,
+            "expectedStockEventResponsibleInterface": None, "allowedHumanPresets": ["F1"],
+            "manualGenerationOrAssignmentCallsBeforeThisObservation": 0}
+        with self.assertRaisesRegex(ValueError, "Manual provider action"):
+            self.execute(request)
+
+    def test_twelve_refs_require_explicit_frozen_config(self):
+        config = copy.deepcopy(self.session.state["configuration"]["interactive_session"]["morphSession"])
+        self.assertNotIn("maximumFixtures", subject.validate_config(config))
+        config["maximumFixtures"] = 12
+        self.assertEqual(subject.validate_config(config)["maximumFixtures"], 12)
+        for invalid in (True, 0, 7, 13, 12.0):
+            config["maximumFixtures"] = invalid
+            with self.assertRaises(ValueError): subject.validate_config(config)
+        request = {"domain": "actor-fixture", "action": "create", "actor": {"fixtureTag": "Additional"},
+            "base": {"plugin": "Skyrim.esm", "formId": BASE},
+            "placement": {"forwardGameUnits": 200, "rightGameUnits": 0},
+            "persistence": "save-load-witness-required", "maximumCreations": 12}
+        with self.assertRaisesRegex(ValueError, "frozen platform opt-in"): self.execute(request)
 
 
 if __name__ == "__main__": unittest.main()

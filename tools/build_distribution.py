@@ -40,6 +40,9 @@ def main():
         for p in (ROOT/folder).rglob('*'):
             if p.is_file() and '__pycache__' not in p.parts and p.suffix in suffixes:
                 entries[str(p.relative_to(ROOT)).replace('\\','/')] = p.read_bytes()
+    # This declared data contract is part of the manual-scene instructions.
+    # Keep the inclusion explicit rather than sweeping arbitrary JSON from docs.
+    entries['docs/manual-scene-spec.example.json'] = (ROOT/'docs/manual-scene-spec.example.json').read_bytes()
     portable = output / ('skyrim-autotest-' + VERSION + '-portable.zip')
     write_archive(portable, entries)
     kit_entries = dict(entries)
@@ -54,6 +57,7 @@ def main():
     wheel_entries[INFO+'/licenses/LICENSE'] = (ROOT/'LICENSE').read_bytes()
     for p in (ROOT/'docs').glob('*.md'):
         wheel_entries['skyrim_autotest/docs/' + p.name] = p.read_bytes()
+    wheel_entries['skyrim_autotest/docs/manual-scene-spec.example.json'] = entries['docs/manual-scene-spec.example.json']
     for p in (ROOT/'integrations').glob('*.js'):
         wheel_entries['skyrim_autotest/integrations/' + p.name] = p.read_bytes()
     wheel_entries['skyrim_autotest/dependencies.json'] = (ROOT/'dependencies.json').read_bytes()
