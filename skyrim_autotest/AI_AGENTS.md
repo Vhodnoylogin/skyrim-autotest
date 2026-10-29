@@ -1,5 +1,10 @@
 # AI-agent instructions: Skyrim Autotest
 
+For all mods and SE/VR, automatic testing primarily establishes fundamental
+operability; manual testing primarily evaluates result quality. These priorities
+overlap. Do not claim visual/player-experience quality from state/callback checks,
+or replace functional state evidence with visual inspection alone.
+
 For explicit SE morph/persistence platforms read docs/morph-sessions.md. Only the
 frozen npcPersistence/morphSession opt-ins admit the owned six-reference save/load
 exception; raw save/world bindings and restarts remain forbidden. Require actual
