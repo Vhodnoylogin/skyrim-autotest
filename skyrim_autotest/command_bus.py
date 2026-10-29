@@ -358,11 +358,28 @@ class CommandBus:
             self._event(con, sessionId, "command.uncertain" if table == "commands" else "outbox.uncertain",
                         {"id": row["id"], "reason": "claim_expired; delivery must be reconciled explicitly"})
 
-    def next(self, sessionId, binding):
+    def next(self, sessionId, binding, *, reviewOf=None):
+        # Internal executor review lane. It never reconciles or reclaims an
+        # uncertain row. The caller must admit only reads/finish while held.
+        if reviewOf is not None:
+            if (type(reviewOf) is not list or not reviewOf or len(reviewOf) > 128 or
+                    len(set(reviewOf)) != len(reviewOf)):
+                raise BusError("reviewOf requires unique prior uncertain command ids")
+            for item in reviewOf:
+                _identifier(item, "reviewOf commandId")
         with self._transaction() as con:
             session = self._session(con, sessionId, binding)
             self._expire(con, "commands", sessionId)
-            row = con.execute("SELECT * FROM commands WHERE session_id=? AND state!='completed' ORDER BY seq LIMIT 1", (sessionId,)).fetchone()
+            if reviewOf is not None:
+                rows = con.execute("SELECT * FROM commands WHERE session_id=? ORDER BY seq", (sessionId,)).fetchall()
+                for item in reviewOf:
+                    prior = next((row for row in rows if row['id'] == item), None)
+                    if (prior is None or prior['binding'] != session['binding'] or
+                            prior['state'] not in ('uncertain', 'completed')):
+                        return {"command": None, "blocked": {"id": item, "state": "review-binding-changed"}}
+                row = next((row for row in rows if row['state'] != 'completed' and row['id'] not in reviewOf), None)
+            else:
+                row = con.execute("SELECT * FROM commands WHERE session_id=? AND state!='completed' ORDER BY seq LIMIT 1", (sessionId,)).fetchone()
             if row is None:
                 return {"command": None, "blocked": None}
             if row["state"] != "received":
@@ -373,6 +390,8 @@ class CommandBus:
             con.execute("UPDATE commands SET state='claimed',claim_id=?,claim_until=? WHERE id=?",
                         (claim, self.clock() + self.claim_timeout, row["id"]))
             self._event(con, sessionId, "command.claimed", {"commandId": row["id"], "binding": binding_value(binding)})
+            if reviewOf is not None:
+                self._event(con, sessionId, "command.review-claimed", {"commandId": row['id'], "reviewOf": reviewOf})
             return {"command": self._command(con.execute("SELECT * FROM commands WHERE id=?", (row["id"],)).fetchone(), True), "blocked": None}
 
     def _claimed(self, con, sessionId, commandId, claimId, binding):

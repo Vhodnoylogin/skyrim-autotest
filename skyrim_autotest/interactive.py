@@ -30,7 +30,7 @@ class InteractiveError(ValueError):
 
 def validate(settings):
     required = {'channelConfig', 'maximumSeconds', 'allowedTools', 'sourceId'}
-    if (type(settings) is not dict or not required <= set(settings) or set(settings) - required - {'nativeBindings','npcPersistence','morphSession','manageCommandEndpoint'} or
+    if (type(settings) is not dict or not required <= set(settings) or set(settings) - required - {'nativeBindings','npcPersistence','morphSession','manageCommandEndpoint','timeoutPolicy'} or
             not isinstance(settings['channelConfig'], str) or not Path(settings['channelConfig']).is_absolute()):
         raise InteractiveError('interactive_session requires explicit channelConfig, maximumSeconds, allowedTools and sourceId')
     maximum, allowed = settings['maximumSeconds'], settings['allowedTools']
@@ -42,6 +42,8 @@ def validate(settings):
     if settings['sourceId'] != 'operator.actions':
         raise InteractiveError('interactive_session sourceId must be operator.actions')
     result = dict(settings, channelConfig=str(Path(settings['channelConfig']).resolve()), allowedTools=list(allowed))
+    if settings.get('timeoutPolicy', 'stop') not in ('stop', 'preserve-manual'):
+        raise InteractiveError('timeoutPolicy must be stop or preserve-manual')
     if 'manageCommandEndpoint' in settings and type(settings['manageCommandEndpoint']) is not bool:
         raise InteractiveError('manageCommandEndpoint requires an explicit boolean')
     if 'nativeBindings' in settings:
@@ -247,6 +249,24 @@ def _completion_result(session, command_id, result):
     return {'outcome': 'result-recorded', 'evidence': evidence}
 
 
+def _manual_hold(session, bus, session_id, binding, metadata, command, request, error, end):
+    # Delivery uncertainty survives even if a later native read shows the target
+    # state. No automatic reconciliation, replay or new mutations in this run.
+    bus.reconcile(session_id, command['id'], binding, 'uncertain',
+                  'Manual action result requires review; game retained; no replay: ' + str(error)[:2000])
+    ids = metadata.setdefault('uncertainCommandIds', [])
+    if command['id'] not in ids:
+        ids.append(command['id'])
+    metadata.update(mutationsPaused=True, reason='manual-result-review', ready=True)
+    session.save()
+    session.log('interactive-manual-action-uncertain', commandId=command['id'], request=request,
+                error=str(error), replayed=False, gameRetained=True)
+    from .manual_timeout import observe
+    observed = observe(session, request, min(end, time.monotonic() + 6))
+    metadata['lastUncertainObservation'] = {'commandId': command['id'], **observed}
+    session.save()
+
+
 def run(session, settings):
     """Use the caller's mutex/guardian/session; every request is single-attempt."""
     settings = validate(settings)
@@ -272,7 +292,7 @@ def run(session, settings):
     end = time.monotonic() + settings['maximumSeconds']
     metadata = {'sessionId': session_id, 'binding': binding, 'sourceId': settings['sourceId'],
         'channelConfig': settings['channelConfig'], 'maximumSeconds': settings['maximumSeconds'],
-        'ready': True, 'liveQualified': False}
+        'ready': True, 'liveQualified': False, 'timeoutPolicy': settings.get('timeoutPolicy', 'stop')}
     if endpoint_metadata is not None:
         metadata['commandEndpoint'] = endpoint_metadata
     session.state['interactiveSession'] = metadata
@@ -288,8 +308,12 @@ def run(session, settings):
                 raise InteractiveError('Owned game exited or changed identity during interactive hold')
             if time.monotonic() >= end:
                 raise InteractiveError('Interactive maximumSeconds expired; no automatic extension or relaunch')
-            delivery = bus.next(session_id, binding)
+            review_ids = metadata.get('uncertainCommandIds')
+            delivery = bus.next(session_id, binding, **({'reviewOf': review_ids} if review_ids else {}))
             if delivery['blocked']:
+                if settings.get('timeoutPolicy') == 'preserve-manual':
+                    time.sleep(min(.1, max(0, end - time.monotonic())))
+                    continue
                 raise InteractiveError('Interactive delivery is active or uncertain; explicit review is required')
             command = delivery['command']
             if command is None:
@@ -299,66 +323,77 @@ def run(session, settings):
                 if command['sourceId'] != settings['sourceId'] or command['kind'] != 'text':
                     raise InteractiveError('Only explicit operator.actions machine text is accepted; raw ASR is never interpreted')
                 request = _request(command['text'], settings, session)
+                if metadata.get('mutationsPaused'):
+                    from .manual_timeout import read_only
+                    if not read_only(request):
+                        raise InteractiveError('Manual action outcome is uncertain: mutations paused; use native reads or explicit finish; no replay')
             except (ValueError, TypeError, KeyError) as rejected:
                 _reject(bus, session, session_id, binding, command, rejected)
                 command = None
                 continue
-            now = time.monotonic()
-            deadline = min(end, now + request.get('timeoutSeconds', 1), now + command['claimUntil'] - time.time() - .25)
-            if deadline <= now:
-                raise InteractiveError('Action deadline/claim expired before delivery')
-            if _mutation(request, settings):
-                from .readiness_state import gameplay_ready
-                scene = session.tool('inspect', {'kind': 'scene'}, timeout=min(3, deadline - time.monotonic()), deadline=deadline)
-                menus = session.tool('menu', {'action': 'list', 'includeFlags': True}, timeout=min(3, deadline - time.monotonic()), deadline=deadline)
-                ready = gameplay_ready(scene, menus)
-                if request.get('tool') == 'input':
-                    caps = session.tool('input', {'action': 'capabilities'}, timeout=min(3, deadline - time.monotonic()), deadline=deadline)
-                    keyboard = caps.get('capabilities', {}).get('keyboard', {})
-                    ready = ready and (caps.get('contract') == INPUT_CONTRACT and
-                        keyboard.get('version') == 1 and keyboard.get('available') is True and keyboard.get('ready') is True and
-                        keyboard.get('injection') == 'Skyrim.BSInputEventQueue' and keyboard.get('encoding') == 'DirectInputScanCode' and
-                        {'down', 'up', 'status', 'releaseAll'} <= set(keyboard.get('actions', [])) and
-                        request['args']['key'].lower() in {row.get('key') for row in keyboard.get('keys', []) if isinstance(row, dict)})
-                if not ready or _lease(request) > deadline - time.monotonic():
-                    _reject(bus, session, session_id, binding, command, 'Fresh native gameplay/input readiness or remaining lease budget is unavailable')
-                    command = None
-                    continue
-            bus.delivered(session_id, command['id'], command['claimId'], binding)
-            session.log('interactive-action-delivered', commandId=command['id'], request=request)
-            if request['operation'] == 'finish':
-                result = {'outcome': 'owner-finished'}
-            else:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0 or _lease(request) > remaining:
-                    _reject(bus, session, session_id, binding, command, 'Remaining deadline cannot contain this action/lease; nothing executed')
-                    command = None
-                    continue
-                if not native.alive(session.state.get('game')):
-                    raise InteractiveError('Owned game identity changed before action invocation')
-                if request['operation'] == 'binding':
-                    from .interactive_bindings import guarded_call
-                    arguments = {key: request[key] for key in ('bindingId', 'args', 'self') if key in request}
-                    result = guarded_call(session, arguments, deadline, settings['nativeBindings'])
-                elif request['operation'] == 'fixture-create':
-                    from .fixture_actors import create
-                    result = create(session, request['request'], deadline, settings['nativeBindings'])
+            try:
+                now = time.monotonic()
+                deadline = min(end, now + request.get('timeoutSeconds', 1), now + command['claimUntil'] - time.time() - .25)
+                if deadline <= now:
+                    raise InteractiveError('Action deadline/claim expired before delivery')
+                if _mutation(request, settings):
+                    from .readiness_state import gameplay_ready
+                    scene = session.tool('inspect', {'kind': 'scene'}, timeout=min(3, deadline - time.monotonic()), deadline=deadline)
+                    menus = session.tool('menu', {'action': 'list', 'includeFlags': True}, timeout=min(3, deadline - time.monotonic()), deadline=deadline)
+                    ready = gameplay_ready(scene, menus)
+                    if request.get('tool') == 'input':
+                        caps = session.tool('input', {'action': 'capabilities'}, timeout=min(3, deadline - time.monotonic()), deadline=deadline)
+                        keyboard = caps.get('capabilities', {}).get('keyboard', {})
+                        ready = ready and (caps.get('contract') == INPUT_CONTRACT and
+                            keyboard.get('version') == 1 and keyboard.get('available') is True and keyboard.get('ready') is True and
+                            keyboard.get('injection') == 'Skyrim.BSInputEventQueue' and keyboard.get('encoding') == 'DirectInputScanCode' and
+                            {'down', 'up', 'status', 'releaseAll'} <= set(keyboard.get('actions', [])) and
+                            request['args']['key'].lower() in {row.get('key') for row in keyboard.get('keys', []) if isinstance(row, dict)})
+                    if not ready or _lease(request) > deadline - time.monotonic():
+                        _reject(bus, session, session_id, binding, command, 'Fresh native gameplay/input readiness or remaining lease budget is unavailable')
+                        command = None
+                        continue
+                bus.delivered(session_id, command['id'], command['claimId'], binding)
+                session.log('interactive-action-delivered', commandId=command['id'], request=request)
+                if request['operation'] == 'finish':
+                    result = {'outcome': 'owner-finished'}
                 else:
-                    keyboard_owned |= request['tool'] == 'input' and request['args'].get('action') == 'down'
-                    if (request['tool'] == 'platform' and request['args'].get('operation') == 'object.perform' and
-                            not request['args'].get('request',{}).get('domain')):
-                        from .fixture_actors import guard
-                        guard(session, request['args']['request']['actor'], deadline, settings['nativeBindings'])
-                    if request['tool']=='platform': session.state['activeSemanticCommandId']=command['id']
-                    try:
-                        result = session.tool(request['tool'], request['args'], timeout=remaining, deadline=deadline)
-                    finally:
-                        session.state.pop('activeSemanticCommandId',None)
-                result = _completion_result(session, command['id'], result)
-                session.log('interactive-action-result', commandId=command['id'], result=result)
-                if time.monotonic() > deadline:
-                    raise InteractiveError('Action returned after its deadline; outcome requires review and is never replayed')
-            bus.complete(session_id, command['id'], command['claimId'], binding, result)
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0 or _lease(request) > remaining:
+                        _reject(bus, session, session_id, binding, command, 'Remaining deadline cannot contain this action/lease; nothing executed')
+                        command = None
+                        continue
+                    if not native.alive(session.state.get('game')):
+                        raise InteractiveError('Owned game identity changed before action invocation')
+                    if request['operation'] == 'binding':
+                        from .interactive_bindings import guarded_call
+                        arguments = {key: request[key] for key in ('bindingId', 'args', 'self') if key in request}
+                        result = guarded_call(session, arguments, deadline, settings['nativeBindings'])
+                    elif request['operation'] == 'fixture-create':
+                        from .fixture_actors import create
+                        result = create(session, request['request'], deadline, settings['nativeBindings'])
+                    else:
+                        keyboard_owned |= request['tool'] == 'input' and request['args'].get('action') == 'down'
+                        if (request['tool'] == 'platform' and request['args'].get('operation') == 'object.perform' and
+                                not request['args'].get('request',{}).get('domain')):
+                            from .fixture_actors import guard
+                            guard(session, request['args']['request']['actor'], deadline, settings['nativeBindings'])
+                        if request['tool']=='platform': session.state['activeSemanticCommandId']=command['id']
+                        try:
+                            result = session.tool(request['tool'], request['args'], timeout=remaining, deadline=deadline)
+                        finally:
+                            session.state.pop('activeSemanticCommandId',None)
+                    result = _completion_result(session, command['id'], result)
+                    session.log('interactive-action-result', commandId=command['id'], result=result)
+                    if time.monotonic() > deadline:
+                        raise InteractiveError('Action returned after its deadline; outcome requires review and is never replayed')
+                bus.complete(session_id, command['id'], command['claimId'], binding, result)
+            except Exception as action_error:
+                if settings.get('timeoutPolicy') != 'preserve-manual':
+                    raise
+                _manual_hold(session, bus, session_id, binding, metadata, command, request, action_error, end)
+                command = None
+                continue
             command = None
             if request['operation'] == 'finish':
                 metadata.update(ready=False, reason='owner-finished')

@@ -47,6 +47,7 @@ subject orders:
   "interactive_session": {
     "channelConfig": "C:/TestBench/se/config-040/command-channel.json",
     "manageCommandEndpoint": true,
+    "timeoutPolicy": "preserve-manual",
     "maximumSeconds": 1800,
     "allowedTools": ["inspect", "menu", "input", "platform"],
     "sourceId": "operator.actions"
@@ -59,6 +60,37 @@ nonempty subset of `inspect`, `menu`, `input`, `papyrus`, `platform`, `native14`
 and `driver`. SE rejects VR-only native14/driver requests. A selected tool still
 needs its existing acquired/configured provider; listing it grants no native
 capability or live qualification.
+
+For an owner-controlled manual session explicitly select
+`timeoutPolicy:"preserve-manual"`. A failed, timed-out or late-returning action
+then retains the same game, MO2, copied profile, endpoint and external microphone.
+The original command becomes durable `uncertain`; the executor first records one
+bounded read-only native scene/actor sample. It checks the original PID/birth/path,
+world generation and same-run fixture reference/base/incarnation, with no Papyrus
+identity wrapper or second mutation. A matching current race is observed state,
+not a causal completion receipt; an old race cannot prove a queued task will
+never execute. Missing evidence remains unknown.
+
+The session publishes `mutationsPaused:true`, `uncertainCommandIds` and
+`lastUncertainObservation`. Subsequent validated inspect/menu/platform reads and
+an explicit owner `finish` can use the same action channel. New setters, fixture
+creation, input and typed bindings are rejected without execution. The internal
+review lane never reconciles/reclaims an uncertain command; a changed delivery
+record cannot cause replay. Even externally reconciling it does not silently
+resume mutations. Preserve request IDs, late result logs and original claims.
+
+During this explicit manual hold, connection loss or pending-task/frame stall
+is watchdog diagnostic evidence. Exact process ownership, heartbeat, actual game
+exit and the original finite session/outer authority deadlines remain enforced;
+this option does not renew a window or keep an abandoned runner indefinitely.
+Announce the remaining owner window before it expires. Explicit owner finish
+performs ordinary restoration/collection; if any command was uncertain the run
+is `blocked`, never `passed`. Audio remains owned by the separate voice operator.
+Absent policy or `timeoutPolicy:"stop"` preserves automatic failure/cleanup.
+
+Recurring actor observation obtains base identity from both native Observer
+snapshots. The old `Actor.GetActorBase` VM wrapper is no longer required there;
+other existing getters can still time out and follow the policy above.
 
 An optional `nativeBindings` platform policy can declare a finite typed native
 interface. Its absence disables binding requests. The policy is validated and

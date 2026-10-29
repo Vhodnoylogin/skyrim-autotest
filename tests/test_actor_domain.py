@@ -24,11 +24,12 @@ class Backend:
             return {'queued': False, 'completed': True}
         return {'ok': True, 'sessionId': 's', 'loadGeneration': self.generation, 'refs': [
             {'status': 'available', 'deleted': False, 'disabled': False, 'loaded3D': True,
+             'baseForm': self.base,
              'identity': {'form': ACTOR['reference'], 'loadGeneration': self.generation, 'runtimeHandle': self.handle}}]}
     def pap(self, script, function, values=None, target=None):
         self.calls.append((function, values))
         if self.fail == function: raise TimeoutError('started call timed out')
-        if function == 'GetActorBase': return {'formId': self.base}
+        if function == 'GetActorBase': raise AssertionError('Actor base must come from native Observer evidence')
         if function == 'GetSex': return self.sex
         if function == 'GetRace': return {'formId': self.race}
         if function == 'GetWeight': return self.weight
@@ -72,6 +73,55 @@ class ActorDomainTests(unittest.TestCase):
         b = Backend(); b.base = '0x8'
         with self.assertRaisesRegex(ValueError, 'base differs'): domain.perform(b, {'action': 'set-weight', 'actor': ACTOR, 'weight': 100})
         self.assertFalse(any(c[0] == 'SetWeight' for c in b.calls))
+
+    def test_missing_native_base_before_mutation_refuses_without_vm_fallback(self):
+        for base in (None, '', '0x00000000'):
+            with self.subTest(base=base):
+                b = Backend(); b.base = base
+                with self.assertRaisesRegex(ValueError, 'base identity unavailable'):
+                    domain.perform(b, {'action': 'set-weight', 'actor': ACTOR, 'weight': 100})
+                self.assertFalse(any(c[0] in ('GetActorBase', 'SetWeight') for c in b.calls))
+        b = Backend(); original = b.call
+        def missing(tool, request):
+            raw = original(tool, request)
+            del raw['refs'][0]['baseForm']
+            return raw
+        b.call = missing
+        with self.assertRaisesRegex(ValueError, 'base identity unavailable'):
+            domain.observe_actor(b, ACTOR)
+
+    def test_native_base_missing_or_changed_after_read_refuses(self):
+        for base in (None, '0x00000008'):
+            with self.subTest(base=base):
+                b = Backend(); original = b.call; samples = []
+                def changed(tool, request):
+                    raw = original(tool, request); samples.append(raw)
+                    if len(samples) == 2:
+                        if base is None: del raw['refs'][0]['baseForm']
+                        else: raw['refs'][0]['baseForm'] = base
+                    return raw
+                b.call = changed
+                with self.assertRaisesRegex(ValueError, 'base identity unavailable|base differs'):
+                    domain.observe_actor(b, ACTOR)
+                self.assertFalse(any(c[0] == 'GetActorBase' for c in b.calls))
+
+    def test_race_change_dispatches_once_without_get_actor_base(self):
+        b = Backend()
+        result = domain.perform(b, {'action': 'set-race', 'actor': ACTOR, 'race': '0x000CDD84'})
+        self.assertEqual(result['actor']['race'], '0x000CDD84')
+        self.assertEqual([c for c in b.calls if c[0] == 'SetRace'], [('SetRace', [{'form': '0x000CDD84'}])])
+        self.assertFalse(any(c[0] == 'GetActorBase' for c in b.calls))
+
+    def test_native_base_changed_after_race_dispatch_never_replays_setter(self):
+        b = Backend(); original = b.pap
+        def pap(script, function, values=None, target=None):
+            result = original(script, function, values, target)
+            if function == 'SetRace': b.base = '0x00000008'
+            return result
+        b.pap = pap
+        with self.assertRaisesRegex(ValueError, 'base differs'):
+            domain.perform(b, {'action': 'set-race', 'actor': ACTOR, 'race': '0x000CDD84'})
+        self.assertEqual(len([c for c in b.calls if c[0] == 'SetRace']), 1)
 
     def test_actual_morph_float_and_native_roundtrip(self):
         b = Backend(); req = {'action': 'set-body-morph', 'actor': ACTOR, 'morph': 'Example', 'key': 'Autotest', 'value': 1}

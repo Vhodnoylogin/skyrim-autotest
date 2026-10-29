@@ -1455,6 +1455,15 @@ def _guardian_audit(directory, record):
         os.fsync(output.fileno())
 
 
+def _manual_health_diagnostic(state):
+    """Only an explicitly held manual world keeps health loss diagnostic."""
+    settings = state.get('configuration', {}).get('interactive_session', {})
+    return (isinstance(settings, dict) and settings.get('timeoutPolicy') == 'preserve-manual'
+            and state.get('phase') == 'interactive-session'
+            and state.get('gameplayBootstrap', {}).get('completed') is True
+            and isinstance(state.get('interactiveSession'), dict))
+
+
 def _guardian_recheck(directory, previous, last_health, health_changed, connection_failed):
     """Fresh evidence may cancel a candidate; a live owner alone never permits kill."""
     from . import runner_monitor
@@ -1468,6 +1477,8 @@ def _guardian_recheck(directory, previous, last_health, health_changed, connecti
     if result['done']:
         return dict(result, cancelled='runner-completed')
     reason = None
+    manual_health = _manual_health_diagnostic(state)
+    diagnostics = []
     stopping = state.get('phase', '').startswith('stop-and-restore')
     restarting = expected_restart(state, time.time())
     if state.get('game') and not stopping and not restarting:
@@ -1485,18 +1496,26 @@ def _guardian_recheck(directory, previous, last_health, health_changed, connecti
                     result['reasons'].append('devbench-identity-changed')
                 elif (marker == last_health and health.get('pendingTasks', 0) > 0
                       and time.monotonic() - health_changed > 20):
-                    reason = 'Game frames and SKSE task completion stalled with pending work'
-                    result['reasons'].append('pending-task-stall')
+                    if manual_health:
+                        diagnostics.append('pending-task-stall')
+                    else:
+                        reason = 'Game frames and SKSE task completion stalled with pending work'
+                        result['reasons'].append('pending-task-stall')
             except (OSError, ValueError, RuntimeError) as error:
                 result['healthError'] = str(error)
                 if connection_failed is not None and time.monotonic() - connection_failed > 20:
-                    reason = 'DevBench connection lost while the owned game remains alive'
-                    result['reasons'].append('devbench-connection-lost')
+                    if manual_health:
+                        diagnostics.append('devbench-connection-lost')
+                    else:
+                        reason = 'DevBench connection lost while the owned game remains alive'
+                        result['reasons'].append('devbench-connection-lost')
     # The health request can cross a phase transition or completion. Read the
     # bound state and heartbeat again after it, immediately before the decision.
     latest = read_json(Path(directory) / 'state.json')
-    if any(latest.get(key) != state.get(key) for key in (*binding, 'phase', 'deadline', 'done')):
+    if any(latest.get(key) != state.get(key) for key in (*binding, 'phase', 'deadline', 'done', 'configuration')):
         return dict(result, reasons=[], cancelled='state-changed-during-recheck')
+    if diagnostics:
+        result['manualHealthDiagnostics'] = diagnostics
     timing = runner_monitor.guardian_deadlines(directory, latest)
     result['timing'] = timing
     result['reasons'].extend(timing['reasons'])
@@ -1531,6 +1550,7 @@ def guardian(directory):
             reason,expired='Executor heartbeat reported failure',True
         from .game_restart import expected_restart
         restarting=expected_restart(state,time.time())
+        manual_health = _manual_health_diagnostic(state)
         if restarting:
             last_health=None;health_changed=time.monotonic();connection_failed=None;since=0
         if state.get('game') and not state.get('phase', '').startswith('stop-and-restore') and not restarting:
@@ -1543,22 +1563,35 @@ def guardian(directory):
                         reason, expired = 'DevBench process identity changed', True
                     connection_failed = None
                     marker = (health.get('frame'), health.get('lastTaskFrame'))
+                    diagnostics = []
                     if marker != last_health:
                         last_health, health_changed = marker, time.monotonic()
                     elif health.get('pendingTasks', 0) > 0 and time.monotonic() - health_changed > 20:
-                        reason, expired = 'Game frames and SKSE task completion stalled with pending work', True
+                        if manual_health:
+                            diagnostics.append('pending-task-stall')
+                        else:
+                            reason, expired = 'Game frames and SKSE task completion stalled with pending work', True
                     with (Path(directory) / 'health.jsonl').open('a', encoding='utf-8') as f:
-                        f.write(json.dumps({'at': time.time(), 'health': health}) + '\n')
+                        record = {'at': time.time(), 'health': health}
+                        if diagnostics:
+                            record.update(diagnosticOnly=True, manualHealthDiagnostics=diagnostics)
+                        f.write(json.dumps(record) + '\n')
                     events = request(state['port'], f'api/events?since={since}', timeout=2)
                     if events.get('events'):
                         with (Path(directory) / 'events.jsonl').open('a', encoding='utf-8') as f:
                             for event in events['events']:
                                 f.write(json.dumps(event) + '\n')
                         since = max(e['seq'] for e in events['events'])
-                except (OSError, ValueError, RuntimeError):
+                except (OSError, ValueError, RuntimeError) as error:
                     connection_failed = connection_failed or time.monotonic()
                     if time.monotonic() - connection_failed > 20:
-                        reason, expired = 'DevBench connection lost while the owned game remains alive', True
+                        if manual_health:
+                            with (Path(directory) / 'health.jsonl').open('a', encoding='utf-8') as f:
+                                f.write(json.dumps({'at': time.time(), 'healthError': str(error),
+                                    'diagnosticOnly': True,
+                                    'manualHealthDiagnostics': ['devbench-connection-lost']}) + '\n')
+                        else:
+                            reason, expired = 'DevBench connection lost while the owned game remains alive', True
         owner_alive = native.alive(owner)
         if owner_alive and not expired:
             time.sleep(2)
@@ -1766,7 +1799,9 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
             execute(session, scenario)
             if P.value.get('interactive_session'):
                 from .interactive import run as interactive_run
-                interactive_run(session, P.value['interactive_session'])
+                interactive_result = interactive_run(session, P.value['interactive_session'])
+                if interactive_result.get('uncertainCommandIds'):
+                    raise Blocked('Manual owner finished with uncertain command outcomes; inspect retained evidence; no replay')
             from .actor_scene import finish_captures
             finish_captures(session)
             if any(sha(Path(__file__).parent / name) != digest for name, digest in state['executorHashes'].items()):

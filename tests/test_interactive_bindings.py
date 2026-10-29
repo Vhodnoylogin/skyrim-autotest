@@ -61,6 +61,7 @@ class Session:
             ref = args["refs"][0]
             return {"ok": True, "sessionId": "observer-session", "loadGeneration": self.generation,
                     "refs": [{"status": "available", "deleted": self.deleted, "disabled": self.disabled, "loaded3D": self.loaded,
+                              "baseForm": self.base,
                               "identity": {"form": ref, "runtimeHandle": self.handle, "loadGeneration": self.generation}}]}
         if tool != "papyrus":
             raise AssertionError("Unexpected tool")

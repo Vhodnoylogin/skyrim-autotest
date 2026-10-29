@@ -133,6 +133,94 @@ class GuardianDecisionTests(unittest.TestCase):
                                               time.monotonic()-25, time.monotonic()-25)
         self.assertIn('devbench-connection-lost', result['reasons'])
 
+    def enable_manual_preservation(self):
+        self.state.update(phase='interactive-session', done=False,
+            configuration={'interactive_session': {'timeoutPolicy': 'preserve-manual'}},
+            gameplayBootstrap={'completed': True}, interactiveSession={'sessionId': 'game-guardian-race'})
+        self.write_state()
+
+    def test_manual_stall_and_connection_loss_are_diagnostic_at_fresh_recheck(self):
+        self.enable_manual_preservation()
+        result = self.recheck(health=dict(self.health, frame=167, lastTaskFrame=-1, pendingTasks=5))
+        self.assertFalse(result['expired'])
+        self.assertEqual(result['manualHealthDiagnostics'], ['pending-task-stall'])
+        with patch.object(runner.native, 'alive', return_value=True), \
+             patch.object(runner, 'request', side_effect=OSError('listener unavailable')):
+            result = runner._guardian_recheck(self.root, self.state, (167, -1),
+                                              time.monotonic()-25, time.monotonic()-25)
+        self.assertFalse(result['expired'])
+        self.assertEqual(result['manualHealthDiagnostics'], ['devbench-connection-lost'])
+        self.assertEqual(result['healthError'], 'listener unavailable')
+
+    def test_manual_policy_does_not_waive_identity_deadline_or_heartbeat(self):
+        self.enable_manual_preservation()
+        wrong_pid = self.recheck(health=dict(self.health, pid=999))
+        self.assertTrue(wrong_pid['expired'])
+        self.assertIn('devbench-identity-changed', wrong_pid['reasons'])
+        self.state['deadline'] = time.time()-16
+        self.write_state()
+        self.assertIn('phase-deadline-exceeded', self.recheck()['reasons'])
+        self.state['deadline'] = time.time()+90
+        self.write_state()
+        self.pulse(healthy=False, error={'message': 'monitor failure'})
+        self.assertIn('heartbeat-reported-failure', self.recheck()['reasons'])
+        with patch.object(runner.native, 'alive', side_effect=lambda ident: ident == self.owner), \
+             patch.object(runner, 'request', side_effect=AssertionError('No request to absent game')):
+            result = runner._guardian_recheck(self.root, self.state, None, 0, None)
+        self.assertIn('owned-game-unavailable', result['reasons'])
+
+    def test_manual_policy_is_not_applied_during_startup_or_without_ready_world(self):
+        self.enable_manual_preservation()
+        for changes in ({'phase': 'gameplay-ready'}, {'gameplayBootstrap': {'completed': False}},
+                        {'interactiveSession': None},
+                        {'configuration': {'interactive_session': {'timeoutPolicy': 'fail'}}}):
+            with self.subTest(changes=changes):
+                original = copy.deepcopy(self.state)
+                self.state.update(changes)
+                self.write_state()
+                result = self.recheck(health=dict(self.health, frame=167, lastTaskFrame=-1, pendingTasks=5))
+                self.assertIn('pending-task-stall', result['reasons'])
+                self.state = original
+
+    def test_manual_guardian_primary_observation_keeps_stall_and_loss_alive(self):
+        for connection_lost in (False, True):
+            with self.subTest(connection_lost=connection_lost):
+                self.enable_manual_preservation()
+                ticks = iter(range(0, 1000, 25))
+                sleeps = []
+                def request(port, route, **kwargs):
+                    if connection_lost:
+                        raise OSError('listener unavailable')
+                    return dict(self.health, pendingTasks=5) if route == 'api/health' else {'events': []}
+                def sleep(_):
+                    sleeps.append(1)
+                    if len(sleeps) >= 3:
+                        self.state['done'] = True
+                        self.write_state()
+                with patch.object(runner.native, 'alive', return_value=True), \
+                     patch.object(runner.native, 'terminate', side_effect=AssertionError('No timeout termination')), \
+                     patch.object(runner.native, 'SessionMutex', side_effect=AssertionError('No recovery claim')), \
+                     patch.object(runner, 'request', side_effect=request), \
+                     patch.object(runner.time, 'monotonic', side_effect=lambda: next(ticks)), \
+                     patch.object(runner.time, 'sleep', side_effect=sleep):
+                    runner.guardian(self.root)
+                records = [json.loads(line) for line in (self.root/'health.jsonl').read_text().splitlines()]
+                expected = 'devbench-connection-lost' if connection_lost else 'pending-task-stall'
+                self.assertTrue(any(expected in row.get('manualHealthDiagnostics', []) and row['diagnosticOnly']
+                                    for row in records))
+
+    def test_policy_change_during_request_cancels_old_decision(self):
+        self.enable_manual_preservation()
+        previous = copy.deepcopy(self.state)
+        def request(*args, **kwargs):
+            self.state['configuration']['interactive_session']['timeoutPolicy'] = 'fail'
+            self.write_state()
+            return dict(self.health, frame=167, lastTaskFrame=-1, pendingTasks=5)
+        with patch.object(runner.native, 'alive', return_value=True), \
+             patch.object(runner, 'request', side_effect=request):
+            result = runner._guardian_recheck(self.root, previous, (167, -1), time.monotonic()-25, None)
+        self.assertEqual(result['cancelled'], 'state-changed-during-recheck')
+
     def test_real_expiry_is_audited_before_exact_owner_termination_and_recovery(self):
         self.state['deadline'] = time.time()-16
         self.write_state()

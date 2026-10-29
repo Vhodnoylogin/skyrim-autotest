@@ -98,13 +98,24 @@ def base_state(b, base):
 def observe_actor(b, spec):
     spec = actor_spec(spec); ref = spec['reference']
     before, row, raw = anchor(b, ref)
-    base = returned_form(b.pap('Actor', 'GetActorBase', target=ref))
+    # Both SE and VR Observer reference snapshots copy the native base identity.
+    # The stock GetActorBase Papyrus wrapper can stall after a race transition.
+    # Missing native evidence refuses explicitly; it never falls back to the VM.
+    try:
+        base = form(row.get('baseForm'))
+    except ValueError:
+        raise ValueError('Native observed actor base identity unavailable') from None
     if base != spec['base']: raise ValueError('Observed actor base differs from required identity')
     result = dict(reference=ref, base=base, loaded3D=row['loaded3D'], **base_state(b, base))
     # Actor race can differ from its base during transformations.
     result['race'] = returned_form(b.pap('Actor', 'GetRace', target=ref))
     after, final_row, final = anchor(b, ref)
     if before != after: raise ValueError('Actor incarnation changed across native observation')
+    try:
+        final_base = form(final_row.get('baseForm'))
+    except ValueError:
+        raise ValueError('Native observed actor base identity unavailable') from None
+    if final_base != base: raise ValueError('Observed actor base differs across native observation')
     result['loaded3D'] = row['loaded3D'] and final_row['loaded3D']
     b.s.log('platform-actor-observation', actor=result, incarnation=after,
             sampleId=final.get('sampleId'), atomicSnapshot=False)
