@@ -30,7 +30,10 @@ class NativeSessionTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         previous = copy.deepcopy(config.P.value)
+        previous_root, previous_runs = runner.ROOT, runner.RUNS
         self.addCleanup(lambda: setattr(config.P, 'value', previous))
+        self.addCleanup(lambda: setattr(runner, 'ROOT', previous_root))
+        self.addCleanup(lambda: setattr(runner, 'RUNS', previous_runs))
 
     def test_finite_configuration_requires_exact_native_policy_and_no_manual_fields(self):
         value = finite_configuration(self.root)
