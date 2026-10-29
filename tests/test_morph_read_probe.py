@@ -1,6 +1,8 @@
 import copy
 import importlib.util
+import json
 from pathlib import Path
+import tempfile
 import unittest
 
 MODULE = Path(__file__).resolve().parents[1] / "tools/prepare_morph_read_probe.py"
@@ -104,6 +106,30 @@ class ProbeTests(unittest.TestCase):
                 req["editBaseNPC"] = True
                 break
         with self.assertRaisesRegex(ValueError, "invalid or unsupported"): self.build(value)
+
+    def test_actual_semantic_companion_preparation_accepts_tool_subject_roles(self):
+        bridge_spec = importlib.util.spec_from_file_location("probe_bridge", MODULE.with_name("prepare_semantic_companion.py"))
+        bridge = importlib.util.module_from_spec(bridge_spec)
+        bridge_spec.loader.exec_module(bridge)
+        order, scope = self.build(source())
+        mapping = {"operations": {}}
+        for step in order["subjectPlan"]["steps"]:
+            op = step["operation"]
+            adapter = mapping["operations"].setdefault(op, {"tool": "platform", "args": {"operation": op}, "fields": {}})
+            if op != "state.read": adapter["args"]["request"] = {"$parameter": "request"}
+            for rule in step.get("assert", []): adapter["fields"][rule["field"]] = rule["field"]
+        compiled = bridge.compile_scenario(order, mapping)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, data in (("order.json", order), ("mapping.json", mapping), ("compiled.json", compiled)):
+                (root / name).write_text(json.dumps(data), encoding="utf-8")
+            result = bridge.prepare(root / "order.json", root / "mapping.json", root / "compiled.json", root / "held", 1200, 256)
+            self.assertFalse(result["admitted"])
+            self.assertFalse(result["qualified"])
+            plan = json.loads((root / "held/execution-plan.json").read_text())
+            self.assertEqual(len(plan["checks"]), 59)
+            self.assertTrue(all(row["role"] == "subject" for row in plan["checks"]))
+        self.assertIn("never the original mod", scope["testingRoleMeaning"])
 
     def test_duplicate_actor_selector_cannot_hide_another_fixture(self):
         for domain in ("human-preset-state", "actor-race", "actor-morph-link-evaluation"):

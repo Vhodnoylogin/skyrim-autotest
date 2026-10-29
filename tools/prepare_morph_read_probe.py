@@ -149,9 +149,10 @@ def build_probe(source, identifier, *, source_chat, source_thread_id):
                     "Actual normal owned exit, restoration and archived removed temporary profile"],
         "subjectPlan": {**copy.deepcopy(source["subjectPlan"]), "steps": result},
         "testing": {"start": {"kind": "check", "name": result[0]["name"]},
-                    "checks": [{"name": step["name"], "role": "tooling"} for step in result]}}
+                    "checks": [{"name": step["name"], "role": "subject"} for step in result]}}
     return probe, {"qualified": False, "gameStarted": False, "subjectModAccepted": False,
         "fixtureTags": list(fixtures), "inspectionRepresentatives": sorted(representatives), "vectorCoverage": coverage,
+        "testingRoleMeaning": "The subject of this separate tool qualification is the adapter, never the original mod",
         "limitations": ["Main VFS file does not prove the effective merged OBody configuration",
                         "No tester assignment, generation, family configuration or morph setter",
                         "No rendered geometry, physics, save/load or audio acceptance"]}
