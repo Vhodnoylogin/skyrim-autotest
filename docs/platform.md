@@ -1,5 +1,24 @@
 # Semantic platform backend
 
+Automatic tests primarily establish fundamental operability; manual tests primarily
+evaluate result quality. These priorities apply to every mod and SE/VR, with overlap
+between modes. State/callback/frame checks do not alone certify visual quality.
+
+`world.read` request `{"domain":"game-frame-progress","observationSeconds":0.3,
+"minimumAdvance":1}` reads actual DevBench `api/health` counters twice within the
+same owned process incarnation and guarded world. Assert `gameFrames.advanced:true`
+or a minimum `gameFrames.delta`. A responding endpoint with a frozen counter returns
+false; missing/wrong/regressing counters, world changes and errors refuse evidence.
+This measures game-update advancement, not raster output or mesh deformation.
+
+Standard scenario calls now receive deterministic semantic command identities tied
+to their frozen step. Existing mutation-domain intent ledgers reject replay after
+an uncertain call; this does not add retries or broaden mutation authority. Mapping
+fields expose actual creation `fixture.status`, preparation `preparation.completed`
+and guarded race readback `action.completed`. Select the appropriate field for each
+action; a native callback alone is not a rendered-result assertion. Qualified external
+mappings must explicitly expose these fields; old frozen mappings stay unchanged.
+
 Candidate `controller.perform` action `exchange_grip` accepts `fromHand`,
 `toHand` (different physical left/right hands), an existing `referenceTag` and
 `settleSeconds` in0.1..2. It requires the exact native reference in the source
