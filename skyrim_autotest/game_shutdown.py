@@ -101,7 +101,7 @@ def request_and_wait(session, seconds=10, *, route='qqq'):
                     if route == 'window-close':
                         record['requestAttempted'] = True
                         session.save()  # Before the single possibly uncertain PostMessage operation.
-                        response = native.close(game)
+                        response = native.close_game_window(game, expected_class='Skyrim Special Edition')
                         record['windowClose'] = copy.deepcopy(response)
                     else:
                         response = session.tool('console', {'action': 'exec', 'command': 'qqq'},

@@ -21,19 +21,21 @@ class WindowExitTests(unittest.TestCase):
         self.stack.enter_context(patch.object(shutdown.time, 'sleep', self.clock.sleep))
         self.alive = self.stack.enter_context(patch.object(shutdown.native, 'alive', side_effect=lambda g: self.clock.now < .6))
         self.stack.enter_context(patch.object(shutdown.native, 'identity', side_effect=lambda pid: GAME if self.clock.now < .6 else None))
-        self.close = self.stack.enter_context(patch.object(shutdown.native, 'close', side_effect=self.post))
+        self.close = self.stack.enter_context(patch.object(shutdown.native, 'close_game_window', side_effect=self.post))
+        self.generic_close = self.stack.enter_context(patch.object(shutdown.native, 'close'))
         self.kill = self.stack.enter_context(patch.object(shutdown.native, 'terminate'))
         self.addCleanup(self.check_no_force_or_console)
     def check_no_force_or_console(self):
-        self.kill.assert_not_called(); self.s.tool.assert_not_called()
-    def post(self, game):
+        self.kill.assert_not_called(); self.s.tool.assert_not_called(); self.generic_close.assert_not_called()
+    def post(self, game, *, expected_class):
         self.assertEqual(game, GAME)
+        self.assertEqual(expected_class, 'Skyrim Special Edition')
         r = self.s.saved[-1]['gracefulGameExit']
         self.assertEqual(r['command'], 'window-close'); self.assertTrue(r['requestAttempted'])
         return receipt()
     def test_post_is_intent_not_exit_then_actual_zero_qualifies(self):
         self.assertTrue(shutdown.request_and_wait(self.s, seconds=30, route='window-close'))
-        self.close.assert_called_once_with(GAME)
+        self.close.assert_called_once_with(GAME, expected_class='Skyrim Special Edition')
         self.assertGreaterEqual(self.clock.now, .6)
         r = self.s.state['gracefulGameExit']
         self.assertEqual(r['deadlineMonotonic'], 30.)
@@ -60,7 +62,7 @@ class WindowExitTests(unittest.TestCase):
         value = receipt(); value['windows'].append({'hwnd': 889, 'message': 16, 'accepted': False, 'error': 5})
         self.assertTrue(shutdown.window_close_receipt(value))
     def test_exit_without_accepted_receipt_remains_unknown(self):
-        self.close.side_effect = lambda game: receipt(windows=[])
+        self.close.side_effect = lambda game, **kwargs: receipt(windows=[])
         self.assertTrue(shutdown.request_and_wait(self.s, route='window-close'))
         self.assertEqual(shutdown.classify_exit(self.s)['kind'], 'unknown')
     def test_nonzero_or_forced_exit_still_fails_despite_successful_post(self):
