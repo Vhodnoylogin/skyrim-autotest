@@ -66,6 +66,55 @@ also requires a matching native OBody event after creation intent, no event loss
 correct provider/world continuity and no prior manual generation/assignment.
 Direct GenActor cannot satisfy it and is never invoked by this adapter.
 
+The stock-origin request may omit `expectedStockEventResponsibleInterface` or
+explicitly set it to `null`. Both require the real event's copied responsible
+owner to be null. The automatic-origin flags, allowed preset pool and integer
+zero manual-call count remain mandatory; a non-null expected owner is refused.
+No missing selector is taken as evidence of a generation event.
+
+Native catalog pages must match the exact owned PID, provider epoch, world
+generation, category, offset, limit and all four counts. Pages retain their raw
+native stamps. Missing, duplicate, stale or incomplete entries fail the read.
+Fixed-file configuration parsing rejects duplicate JSON keys, colliding normalized
+plugin/local IDs, malformed preset pools and a path outside the owned game's
+fixed VFS target. It compares every declared base mapping, including twelve-entry
+singleton maps, rather than accepting a subset.
+
+OBody 5.2.2 can merge `OBody/obody_includes` files. This reader observes the
+fixed main file only: `configObservationScope` is `fixed_main_game_vfs_file_only`,
+`inMemoryConfigObserved:false` and `includeConfigurationObserved:false`.
+Actual assignment/generation events and an independently reviewed VFS/include
+inventory remain necessary; a matching main-file hash does not certify the
+effective merged distribution policy.
+
+### Untouched component qualification preparation
+
+`tools/prepare_morph_read_probe.py` accepts an unchanged schema2 semantic source
+order and writes a separate tool-only probe, never the original order or a queue
+entry. It retains all six creation/identity/automatic-generation routes, eighteen
+complete human/beast/return vector reads and twelve same-reference race changes.
+Two representative references also exercise reference naming, unequipping and
+position holds, keeping the ordinary companion's 64-case bound. All sources,
+public targets and signed mapping rows are retained. It refuses preset assignment,
+generation, family configuration, test-morph setters and unknown domains.
+
+The probe asserts independent read coverage, identities and availability. Actual
+subject statuses, coefficients, numerical errors and preservation differences are
+retained as measurements; their desired values are not tool acceptance assertions.
+This does not accept the subject mod, physics, rendering, audio or save/load.
+Prepare its ordinary semantic companion through `prepare_semantic_companion.py`,
+then let Polygon independently review a separate schema1 tool qualification with
+the exact frozen executor/configuration/provider pins. Source preparation and
+offline tests are not live qualification and never activate a platform.
+
+The OBody 5.2.2 API header is available from official commit
+`27515bb44d1b6e973035ae3218877eac5ff09239`,
+[include/API/API.h](https://github.com/Aietos/OBody-NG/blob/27515bb44d1b6e973035ae3218877eac5ff09239/include/API/API.h).
+Its SHA256 is `f04945202d9daa6408d7555e46eb2a553a1041ab5d84a8f4efc288168563ea18`.
+It matches the existing API header bytes; no OBody source or binary modification
+is required to observe stock `OnActorGenerated` events. API compatibility does
+not establish the provenance or runtime behavior of an installed DLL.
+
 ### Ordinary installed body preset catalogs
 
 The six diagnostic targets are not the whole catalog of an ordinary CBBE/HIMBO

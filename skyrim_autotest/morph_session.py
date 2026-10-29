@@ -187,7 +187,11 @@ def validate(operation, req):
         required.add("actor")
         optional |= {"requireStockGenerationWitness", "requireAutomaticOrigin", "expectedStockEventResponsibleInterface", "allowedHumanPresets", "manualGenerationOrAssignmentCallsBeforeThisObservation"}
         if set(req) & optional:
-            if not optional <= set(req) or req["requireStockGenerationWitness"] is not True or req["requireAutomaticOrigin"] is not True or req["expectedStockEventResponsibleInterface"] is not None or req["manualGenerationOrAssignmentCallsBeforeThisObservation"] != 0:
+            automatic_fields = optional - {"expectedStockEventResponsibleInterface"}
+            if (not automatic_fields <= set(req) or req["requireStockGenerationWitness"] is not True or
+                    req["requireAutomaticOrigin"] is not True or req.get("expectedStockEventResponsibleInterface") is not None or
+                    type(req["manualGenerationOrAssignmentCallsBeforeThisObservation"]) is not int or
+                    req["manualGenerationOrAssignmentCallsBeforeThisObservation"] != 0):
                 raise BindingError("Automatic origin requires the complete stock event/no-prior-manual-call contract")
             if type(req["allowedHumanPresets"]) is not list or not req["allowedHumanPresets"]: raise BindingError("Explicit allowed human preset pool required")
             for name in req["allowedHumanPresets"]: _text(name, "allowed human preset")
@@ -345,28 +349,8 @@ def _assignment(raw, ref):
 
 
 def _catalog(backend):
-    by_category, epoch, counts = {}, None, None
-    count_fields = {"female": "female", "female_blacklisted": "femaleBlacklisted", "male": "male", "male_blacklisted": "maleBlacklisted"}
-    for category, count_field in count_fields.items():
-        names, offset = [], 0
-        while True:
-            page = _call(backend, "morph_provider", {"action": "catalog", "category": category, "offset": offset, "limit": 256})
-            if page.get("pid") != backend.s.state["game"]["pid"] or type(page.get("providerEpoch")) is not int or type(page.get("counts")) is not dict:
-                raise BindingError("Native catalog process/readiness/count identity unavailable")
-            if epoch is None: epoch, counts = page["providerEpoch"], page["counts"]
-            if epoch != page["providerEpoch"] or counts != page["counts"]: raise BindingError("Catalog changed during bounded paging")
-            total = counts.get(count_field)
-            values = page.get("names")
-            if type(total) is not int or not 0 <= total <= 4096 or type(values) is not list or page.get("returnedCount") != len(values) or len(values) > 256:
-                raise BindingError("Complete bounded catalog page unavailable")
-            names.extend(_text(name, "catalog name") for name in values)
-            if len(names) >= total:
-                if len(names) != total or len(set(names)) != len(names): raise BindingError("Catalog count/unique-name mismatch")
-                break
-            if not values: raise BindingError("Catalog ended before its actual reported count")
-            offset += len(values)
-        by_category[category] = names
-    return {"categories": by_category, "counts": counts, "providerEpoch": epoch}
+    from .human_provider_config import read_catalog
+    return read_catalog(lambda request: _call(backend, "morph_provider", request), backend.s.state["game"]["pid"])
 
 
 def required_target_presets(request, requested_presets):
@@ -749,43 +733,19 @@ def execute(session, args, deadline, policy):
             "femaleRequestedCount": sum(item["sex"] == "female" for item in request["presets"]), "missing": missing, "actual": catalog,
             "sourceSetDeclarationObservedInNativeAPI": False}}
     if domain == "human-provider-config":
-        target_identities = required_target_presets(request, state.get("requestedPresets"))
+        from .human_provider_config import inspect_config
+        required_target_presets(request, state.get("requestedPresets"))
         if len(request["baseSelectionPolicy"]) > config.get("maximumFixtures", 6):
             raise BindingError("Complete base policy exceeds the frozen platform fixture opt-in")
         if "providerConfigSha256" not in config: raise BindingError("Actual VFS configuration read requires a frozen expected config SHA256")
         raw = _call(backend, "fixture_config", {"action": "obody"})
-        text = raw.get("rawText"); encoded = text.encode("utf-8") if isinstance(text, str) else b""
-        digest = hashlib.sha256(encoded).hexdigest()
-        if raw.get("pid") != session.state["game"]["pid"] or raw.get("bytes") != len(encoded) or raw.get("inMemoryConfigObserved") is not False or digest != config["providerConfigSha256"]:
-            raise BindingError("Actual game-VFS stock configuration differs from its frozen staged pin")
-        parsed = json.loads(encoded.decode("utf-8-sig")); actual = parsed.get("disablePresetDistribution")
-        if actual not in ("none", "all", "male", "female"): raise BindingError("Actual stock distribution setting is missing/unknown")
-        mappings = {}
-        for plugin, forms in parsed.get("npcFormID", {}).items():
-            if type(forms) is not dict: raise BindingError("Actual stock base mapping is malformed")
-            for form, names in forms.items(): mappings[(plugin, actor_domain.form("0x" + form.removeprefix("0x")))] = set(names)
-        expected = {(item["plugin"], actor_domain.form(item["baseFormId"])): set(item["allowedHumanPresets"]) for item in request["baseSelectionPolicy"]}
-        if mappings != expected: raise BindingError("Actual stock base preset selections differ from the reviewed complete base policy")
-        catalog = _catalog(backend); expected_names = set().union(*expected.values())
-        actual_names = {name for values in catalog["categories"].values() for name in values}
-        active_names = set(catalog["categories"]["male"]) | set(catalog["categories"]["female"])
-        missing_targets = sorted(expected_names - active_names)
-        unexpected = sorted(actual_names - expected_names)
-        missing_extras = []
-        if target_identities is not None:
-            additional = {(item["category"], item["name"]) for item in request["allowedAdditionalLoadedPresets"]}
-            observed = {(category, name) for category, names in catalog["categories"].items() for name in names}
-            def identities(values):
-                return [{"category": category, "name": name} for category, name in sorted(values)]
-            missing_targets = identities(target_identities - observed)
-            missing_extras = identities(additional - observed)
-            unexpected = identities(observed - target_identities - additional)
+        catalog = _catalog(backend)
+        observed = inspect_config(raw, request, expected_pid=session.state["game"]["pid"],
+            expected_sha256=config["providerConfigSha256"], maximum_fixtures=config.get("maximumFixtures", 6),
+            requested_presets=state.get("requestedPresets"), catalog=catalog, expected_game_path=session.state["game"]["path"])
         readiness = _obody(backend)
-        return {"human": {"officialApiReady": readiness["obody"]["provider"]["ready"], "config": {"disablePresetDistribution": actual,
-            "unexpectedLoadedPresetCount": len(unexpected), "missingExpectedPresetCount": len(missing_targets),
-            "missingAllowedAdditionalPresetCount": len(missing_extras), "unexpectedLoadedPresets": unexpected,
-            "missingExpectedPresets": missing_targets, "missingAllowedAdditionalPresets": missing_extras,
-            "sha256": digest, "inMemoryConfigObserved": False, "baseSelectionMatch": True, "actualVfsRead": raw}}, "catalogObservation": catalog, "providerObservation": readiness}
+        return {"human": {"officialApiReady": readiness["obody"]["provider"]["ready"], "config": observed},
+                "catalogObservation": catalog, "providerObservation": readiness}
     if domain == "actor-fixture":
         tag = _actor(request["actor"])
         maximum = config.get("maximumFixtures", 6)

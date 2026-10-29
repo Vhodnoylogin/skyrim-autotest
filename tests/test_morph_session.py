@@ -54,7 +54,7 @@ class Session:
         settings = {"bindings": {role: role for role in subject.ROLES}, "testKeys": TEST_KEYS,
                     "providerOwnKeys": ["Provider"], "providerKeyEvidence": {"sourceCommit": "a" * 40, "providerSha256": "b" * 64},
                     "sourceMorphsBySex": {"female": SOURCES, "male": SOURCES}}
-        self.state = {"id": "test-run", "game": {"pid": 123, "path": "owned.exe", "birth": 456}, "testProfile": "Disposable",
+        self.state = {"id": "test-run", "game": {"pid": 123, "path": "C:/TestGame/SkyrimSE.exe", "birth": 456}, "testProfile": "Disposable",
             "ownedWorldGeneration": 1, "gameplayBootstrap": {"completed": True}, "activeSemanticCommandId": "command-1",
             "configuration": {"game_edition": "se", "interactive_session": {"morphSession": settings, "nativeBindings": policy(), "npcPersistence": True}}}
         entry = {"tag": "Fixture", "status": "created", "runId": "test-run", "game": copy.deepcopy(self.state["game"]), "base": BASE,
@@ -116,7 +116,9 @@ class Session:
     def tool(self, tool, args, timeout, deadline):
         self.calls.append((tool, copy.deepcopy(args)))
         if tool == "inspect": return self.observer(args)
-        if tool == "fixture_config": return copy.deepcopy(self.config_read)
+        if tool == "fixture_config":
+            return {"path": "C:/TestGame/Data/SKSE/Plugins/OBody_presetDistributionConfig.json",
+                    "basis": "actual fixed game-VFS file bytes", **copy.deepcopy(self.config_read)}
         if tool == "npc_persistence": return copy.deepcopy(self.state["interactiveActorFixtures"]["Fixture"]["nativePersistentIdentity"])
         if tool == "morph_provider":
             action = args["action"]
@@ -127,7 +129,10 @@ class Session:
                 counts = {field: len(self.catalog[category]) for category, field in
                           (("female", "female"), ("male", "male"),
                            ("female_blacklisted", "femaleBlacklisted"), ("male_blacklisted", "maleBlacklisted"))}
-                return {"pid": 123, "providerEpoch": self.epoch, "counts": counts, "names": values, "returnedCount": len(values)}
+                return {"pid": 123, "providerEpoch": self.epoch, "counts": counts, "names": values, "returnedCount": len(values),
+                    "schemaVersion": 1, "protocol": "morph-provider/1", "worldGeneration": self.generation,
+                    "worldLoading": False, "frame": 100, "phase": "skse_main_thread_task",
+                    "category": args["category"], "offset": args["offset"], "limit": args["limit"]}
             if args["guard"] != self.control(): raise AssertionError("provider received a different guarded actor")
             if action == "assign_preset": self.assigned = args["presetName"]
             elif action == "unassign_preset": self.assigned = ""
@@ -311,6 +316,36 @@ class MorphSessionTests(unittest.TestCase):
         self.session.state["morphSession"]["fixtures"]["Fixture"]["manualHumanCalls"] = 1
         with self.assertRaisesRegex(ValueError, "Manual provider action"): self.execute(request)
 
+    def test_stock_origin_omitted_null_owner_selector_keeps_native_null_requirement(self):
+        request = {"domain": "human-preset-state", "actor": {"fixtureTag": "Fixture"},
+            "requireStockGenerationWitness": True, "requireAutomaticOrigin": True,
+            "allowedHumanPresets": ["F1"], "manualGenerationOrAssignmentCallsBeforeThisObservation": 0}
+        self.session.events = [{"sequence": 2, "event": "OnActorGenerated", "channel": "obody_native_actor_change",
+            "actorForm": REF, "stockInternalGeneration": True, "responsibility": "obody_internal_stock",
+            "providerReadyAtReceipt": True, "providerEpoch": 3, "producerMonotonicNs": 2000,
+            "responsibleOwner": {"value": None}, "presetName": {"value": "F1", "truncated": False}}]
+        self.assertEqual(self.execute(request)["human"]["automaticGenerationWitnessCount"], 1)
+        self.assertNotIn("expectedStockEventResponsibleInterface", request)
+        self.session.events[0]["responsibleOwner"]["value"] = "external-caller"
+        self.assertEqual(self.execute(request)["human"]["automaticGenerationWitnessCount"], 0)
+        self.assertFalse(any(tool == "morph_provider" and args["action"] not in ("catalog", "actor_status")
+                             for tool, args in self.session.calls))
+
+    def test_stock_origin_optional_selector_does_not_relax_complete_contract(self):
+        request = {"domain": "human-preset-state", "actor": {"fixtureTag": "Fixture"},
+            "requireStockGenerationWitness": True, "requireAutomaticOrigin": True,
+            "allowedHumanPresets": ["F1"], "manualGenerationOrAssignmentCallsBeforeThisObservation": 0}
+        for key in ("requireStockGenerationWitness", "requireAutomaticOrigin", "allowedHumanPresets",
+                    "manualGenerationOrAssignmentCallsBeforeThisObservation"):
+            incomplete = {name: value for name, value in request.items() if name != key}
+            with self.subTest(missing=key), self.assertRaises(ValueError):
+                subject.validate("world.read", incomplete)
+        for changes in ({"expectedStockEventResponsibleInterface": "external"},
+                        {"manualGenerationOrAssignmentCallsBeforeThisObservation": False},
+                        {"manualGenerationOrAssignmentCallsBeforeThisObservation": 0.0}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                subject.validate("world.read", {**request, **changes})
+
     def test_event_gap_or_foreign_responsibility_never_proves_stock_generation(self):
         self.session.event_gap = True
         with self.assertRaisesRegex(ValueError, "Complete current-epoch"): self.execute({"domain": "human-preset-state", "actor": {"fixtureTag": "Fixture"}})
@@ -347,7 +382,7 @@ class MorphSessionTests(unittest.TestCase):
         policies = [{"plugin": "Example.esm", "baseFormId": f"0x{i:08X}", "allowedHumanPresets": [f"{prefix}{n}" for n in (1, 2, 3)]} for i, prefix in enumerate(("M", "M", "M", "F", "F", "F"), 1)]
         parsed = {"disablePresetDistribution": "none", "npcFormID": {"Example.esm": {p["baseFormId"][2:]: p["allowedHumanPresets"] for p in policies}}}
         text = json.dumps(parsed); digest = hashlib.sha256(text.encode()).hexdigest()
-        self.session.config_read = {"pid": 123, "path": "SKSE/Plugins/OBody_presetDistributionConfig.json", "rawText": text, "bytes": len(text), "inMemoryConfigObserved": False}
+        self.session.config_read = {"pid": 123, "path": "C:/TestGame/Data/SKSE/Plugins/OBody_presetDistributionConfig.json", "rawText": text, "bytes": len(text), "inMemoryConfigObserved": False}
         self.session.state["configuration"]["interactive_session"]["morphSession"]["providerConfigSha256"] = digest
         request = {"domain": "human-provider-config", "presetPoolPolicy": "exact-six-existing-human-preset-elements", "baseSelectionPolicy": policies,
                    "otherActorsPolicy": "Reviewed bounded base policy", "requiredDisablePresetDistribution": "none"}
