@@ -20,6 +20,7 @@ OBSERVATIONS = {'form.identity', 'body_slot.settings', 'body_slot.display',
                 'reference.state', 'reference.physics', 'form.alchemy', 'save.state', 'lifecycle.state'}
 
 
+from .native_session import settings as native_settings
 from .readiness_state import menus_block_gameplay, world_loaded, gameplay_ready
 
 
@@ -889,7 +890,7 @@ def execute(session, args, deadline):
         return se_gameplay.observe(backend, req) if op == 'world.read' else se_gameplay.perform(backend, req)
     from . import morph_session
     if morph_session.validate(op,req):
-        policy=session.state.get('configuration',{}).get('interactive_session',{}).get('nativeBindings')
+        policy=native_settings(session.state.get('configuration',{})).get('nativeBindings')
         return morph_session.execute(session,args,deadline,policy)
     if op == 'state.read':
         scene = backend.call('inspect', {'kind': 'scene'})

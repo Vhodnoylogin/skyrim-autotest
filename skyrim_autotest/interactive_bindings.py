@@ -10,6 +10,7 @@ import math
 import re
 import time
 
+from .native_session import settings as native_settings
 from . import actor_domain, native
 from .api_contract import validate_description
 from .platform import Backend
@@ -188,7 +189,7 @@ def _compact(observation):
 
 def frozen_policy(session, policy):
     policy = validate(policy)
-    configured = validate(session.state.get("configuration", {}).get("interactive_session", {}).get("nativeBindings"))
+    configured = validate(native_settings(session.state.get("configuration", {})).get("nativeBindings"))
     if policy is None or configured is None or policy != configured:
         raise BindingError("Native bindings are disabled or differ from the frozen run configuration")
     return policy

@@ -10,6 +10,7 @@ import hashlib
 import re
 import uuid
 
+from .native_session import settings as native_settings
 from . import actor_domain, fixture_actors
 from .interactive_bindings import BindingError, bounded_deadline, frozen_policy
 from .platform import Backend
@@ -48,7 +49,7 @@ def perform(session, request, deadline, policy):
     stored_restoration = copy.deepcopy(entry.get("restorationWitness"))
     if restored:
         expected.update({key: restored.get(key) for key in ("currentReference", "currentVmHandle", "runtimeHandle")})
-    if (session.state.get("configuration", {}).get("interactive_session", {}).get("npcPersistence") is not True or
+    if (native_settings(session.state.get("configuration", {})).get("npcPersistence") is not True or
             entry.get("creationWitness", {}).get("forcePersist") is not True or expected.get("protocol") != "npc-persistence/1" or
             expected.get("persistent") is not True or expected.get("currentReference") != spec["reference"] or
             expected.get("base") != spec["base"] or expected.get("pid") != session.state.get("game", {}).get("pid") or

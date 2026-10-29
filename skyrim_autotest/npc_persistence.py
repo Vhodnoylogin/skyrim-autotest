@@ -11,6 +11,7 @@ import re
 import time
 import uuid
 
+from .native_session import settings as native_settings
 from . import actor_domain, fixture_actors, owned_saves
 from .interactive_bindings import BindingError, bounded_deadline, frozen_policy
 from .platform import Backend
@@ -20,7 +21,7 @@ PROTOCOL = "npc-persistence/1"
 
 
 def _enabled(session):
-    if session.state.get("configuration", {}).get("interactive_session", {}).get("npcPersistence") is not True:
+    if native_settings(session.state.get("configuration", {})).get("npcPersistence") is not True:
         raise BindingError("Owned NPC persistence requires the frozen npcPersistence opt-in")
 
 

@@ -5,13 +5,14 @@ import os
 from pathlib import Path
 import time
 
+from .native_session import settings as native_settings
 
 def prepare_required_mapping_probe(session, target):
     """Capability opt-in alone must not require a save in a no-save new game."""
     scenario = session.state['scenario']
     save_actions = {'save_game', 'load_game', 'restart_game'}
     steps = [*scenario.get('steps', []), *scenario.get('postSteps', [])]
-    npc = session.state.get('configuration',{}).get('interactive_session',{}).get('npcPersistence') is True
+    npc = native_settings(session.state.get('configuration',{})).get('npcPersistence') is True
     required = npc or bool(scenario.get('fixture')) or any(
         step.get('tool') == 'platform' and step.get('args', {}).get('operation') == 'input.perform'
         and step['args'].get('request', {}).get('action') in save_actions for step in steps)
@@ -36,7 +37,7 @@ def prepare_mapping_probe(session, target):
     configuration = state.get('configuration', {})
     # A fresh SE New Game has no ESS to copy. Prove the same USVFS alias with
     # the native read-only nonce service instead; no NPC fixture is required.
-    native_nonce = (configuration.get('interactive_session', {}).get('npcPersistence') is True or
+    native_nonce = (native_settings(configuration).get('npcPersistence') is True or
                     (configuration.get('game_edition') == 'se' and
                      configuration.get('allow_owned_save_load') is True and
                      not state.get('fixture') and not state.get('scenario', {}).get('fixture')))

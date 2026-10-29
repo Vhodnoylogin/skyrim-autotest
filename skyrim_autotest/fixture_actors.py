@@ -13,6 +13,7 @@ import re
 import time
 import uuid
 
+from .native_session import settings as native_settings
 from . import actor_domain, native
 from .api_contract import validate_description
 from .interactive_bindings import BindingError, _native_call, bounded_deadline, frozen_policy, validate
@@ -232,7 +233,7 @@ def create(session, request, deadline, policy):
     request = validate_request(request, policy)
     bounded_deadline(deadline)
     if (request.get("persistentForOwnedSave") is True and
-            session.state.get("configuration", {}).get("interactive_session", {}).get("npcPersistence") is not True):
+            native_settings(session.state.get("configuration", {})).get("npcPersistence") is not True):
         raise BindingError("Persistent NPC creation requires the frozen npcPersistence opt-in")
     if not isinstance(session.state.get("id"), str) or not session.state["id"]:
         raise BindingError("Fixture creation requires an exact current run id")

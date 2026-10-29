@@ -14,6 +14,7 @@ import re
 import time
 import uuid
 
+from .native_session import settings as native_settings
 from . import actor_domain, fixture_actors, interactive_bindings as bindings, morph_analysis, npc_persistence
 from .interactive_bindings import BindingError
 from .platform import Backend
@@ -280,7 +281,7 @@ def _config(session, policy):
     frozen = bindings.frozen_policy(session, policy)
     config = session.state.get("configuration", {})
     if config.get("game_edition") != "se": raise BindingError("Morph sessions require the explicitly frozen SE target")
-    settings = validate_config(config.get("interactive_session", {}).get("morphSession"), frozen)
+    settings = validate_config(native_settings(config).get("morphSession"), frozen)
     if settings is None: raise BindingError("Morph sessions are disabled in the frozen owned session")
     return settings, frozen
 
@@ -368,7 +369,7 @@ def required_target_presets(request, requested_presets):
 
 def _guard(backend, tag):
     entry, spec, semantic = _fixture(backend.s, tag)
-    observation = fixture_actors.guard(backend.s, spec, backend.end, backend.s.state["configuration"]["interactive_session"]["nativeBindings"])
+    observation = fixture_actors.guard(backend.s, spec, backend.end, native_settings(backend.s.state["configuration"])["nativeBindings"])
     value = _call(backend, "morph_provider", {"action": "actor_status", "actorFormId": spec["reference"]})
     identity = value.get("identity", {})
     if (value.get("pid") != backend.s.state["game"]["pid"] or identity.get("pid") != value["pid"] or
@@ -463,7 +464,7 @@ def _human(backend, tag, request=None, source_evidence=None):
     entry, spec, semantic = _fixture(backend.s, tag)
     raw = _obody(backend, spec["reference"]); name = _assignment(raw, spec["reference"])
     if source_evidence is None:
-        config = backend.s.state["configuration"]["interactive_session"]["morphSession"]
+        config = native_settings(backend.s.state["configuration"])["morphSession"]
         names = config.get("sourceMorphsBySex", {}).get(entry.get("actor", {}).get("sex"))
         if not names: raise BindingError("Human state requires a frozen complete source catalog for independent SKEE reads")
         measured, identity, source_raw = _read_morphs(backend, spec, names)

@@ -243,3 +243,13 @@ case recipe remains available. New outputs explicitly select
 generated generic order, mapping, compiled scenario and semantic spec. The
 default600second/256command bounds are unchanged; Polygon's900second outer limit
 still includes common startup/restoration. Existing frozen packages are untouched.
+# Finite scenarios and manual holds
+
+The native morph/persistence capabilities may be frozen in top-level
+`native_session` for ordinary finite scenarios, with required `nativeBindings`
+and optional `npcPersistence`/`morphSession`. The runner finishes after the declared
+steps and cleanup. These settings no longer require creating a manual hold.
+
+Legacy `interactive_session` remains the manual option. Declare exactly one of
+the two; ambiguity is refused. Both routes use the same frozen binding validators,
+owned fixture/world guards and durable once-only semantic mutation identities.

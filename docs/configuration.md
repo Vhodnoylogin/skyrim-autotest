@@ -252,3 +252,15 @@ subject files during a run. Bytes written and native settings observed are
 separate evidence. Collection pins every owned variant before restoration.
 These capabilities do not install their providers, release orders or grant
 launch authority. They remain pending live qualification in the paused setup.
+# Finite native capabilities
+
+Finite scenarios declare top-level `native_session` with required `nativeBindings`
+and optional `npcPersistence` and `morphSession`, using the same typed binding and
+morph validators as manual sessions. For setup specifications, place it under
+the existing `configuration` object. Do not include channel/timeout/tool/source
+settings here. `native_session` and `interactive_session` are mutually exclusive.
+
+Native capabilities alone do not enter a manual hold or start a command receiver:
+the ordinary runner executes its finite steps, then completes normal cleanup.
+All frozen policy, owned actor/world, command identity and no-replay guards remain.
+Selecting this configuration does not qualify a provider or authorize a launch.

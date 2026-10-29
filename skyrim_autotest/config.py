@@ -43,7 +43,7 @@ def configure(value, base=None):
     missing = sorted(k for k in required if not value.get(k))
     if missing:
         raise ConfigurationError("Missing configuration fields: " + ", ".join(missing))
-    unknown = set(value) - PATH_KEYS - {"schemaVersion", "game_edition", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings", "allow_steam_client_restart", "boundary_collection", "fixture_actor_allowlist", "fixture_actor_base_allowlist", "photography", "native14_live", "root_builder", "se_new_game_ui", "se_shutdown", "se_fixture_anchor", "se_fixture_transition", "crash_capture", "interactive_session", "copied_profile_mods"}
+    unknown = set(value) - PATH_KEYS - {"schemaVersion", "game_edition", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings", "allow_steam_client_restart", "boundary_collection", "fixture_actor_allowlist", "fixture_actor_base_allowlist", "photography", "native14_live", "root_builder", "se_new_game_ui", "se_shutdown", "se_fixture_anchor", "se_fixture_transition", "crash_capture", "interactive_session", "native_session", "copied_profile_mods"}
     if unknown:
         raise ConfigurationError("Unknown configuration fields: " + ", ".join(sorted(unknown)))
     base = Path(base or Path.cwd()).resolve()
@@ -65,6 +65,12 @@ def configure(value, base=None):
             result['crash_capture'] = validate_crash_capture(result['crash_capture'])
         except (ValueError, TypeError, KeyError) as error:
             raise ConfigurationError('Invalid crash capture policy: ' + str(error)) from error
+    if 'native_session' in result:
+        from .native_session import settings as native_settings
+        try:
+            result['native_session'] = native_settings(result)
+        except (ValueError, TypeError, KeyError) as error:
+            raise ConfigurationError('Invalid native-session policy: ' + str(error)) from error
     if 'interactive_session' in result:
         from .interactive import validate as validate_interactive
         try:
