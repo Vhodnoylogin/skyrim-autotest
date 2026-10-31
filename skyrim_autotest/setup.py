@@ -319,6 +319,24 @@ def _assess(context):
                     'Root Builder needs existing backup/cache and no active BuildData')
         check('root-builder.source', root_source,
               'Preserve the audited plugin, exact existing game/version cache and all three pinned SKSEVR source files. A later run preflight must verify the explicit enabled source profile and unique winning bundle; do not copy a loader into the game manually.')
+    if cfg.get('root_builder_passive'):
+        def passive_source():
+            from . import root_builder_passive as passive, root_builder
+            policy = passive.configuration(cfg['root_builder_passive'])
+            mo2 = Path(cfg['mo2'])
+            require(selected['edition'] == 'se' and Path(cfg['mo2_ini']) == mo2 / 'ModOrganizer.ini' and
+                    Path(cfg['mo2_exe']) == mo2 / 'ModOrganizer.exe' and (mo2 / 'portable.txt').is_file(),
+                    'Passive cold-INI proof requires the exact portable SE instance')
+            require(root_builder.plugin_fingerprint(mo2 / 'plugins/rootbuilder') == policy['pluginTreeSha256'],
+                    'Passive Root Builder package differs from the audited pin')
+            require(root_builder._hash(Path(cfg['mo2_exe']))['sha256'] == policy['mo2ExeSha256'],
+                    'Native MO2 executable differs from the reviewed settings implementation')
+            passive._ini(cfg['mo2_ini'])
+            passive._inventory(cfg, policy)
+            require(root_builder._hash(Path(cfg['game']) / selected['loader'])['sha256'] == policy['loaderSha256'],
+                    'Passive policy cannot supply a missing/different physical SKSE loader')
+        check('root-builder.passive-installation', passive_source,
+              'Read-only installation prerequisites only. Exact source-profile/no-Root checks, cold settings staging, owned Bridge proof and restoration require separately qualified runner preparation; never run a Root Builder build or clear.')
     def mo2_contract():
         text = Path(cfg['mo2_ini']).read_text(encoding='utf-8-sig')
         validate_mo2_loader(text, cfg)

@@ -43,7 +43,7 @@ def configure(value, base=None):
     missing = sorted(k for k in required if not value.get(k))
     if missing:
         raise ConfigurationError("Missing configuration fields: " + ", ".join(missing))
-    unknown = set(value) - PATH_KEYS - {"schemaVersion", "game_edition", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings", "allow_steam_client_restart", "boundary_collection", "fixture_actor_allowlist", "fixture_actor_base_allowlist", "photography", "native14_live", "root_builder", "se_new_game_ui", "se_shutdown", "se_fixture_anchor", "se_fixture_transition", "crash_capture", "interactive_session", "native_session", "copied_profile_mods"}
+    unknown = set(value) - PATH_KEYS - {"schemaVersion", "game_edition", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings", "allow_steam_client_restart", "boundary_collection", "fixture_actor_allowlist", "fixture_actor_base_allowlist", "photography", "native14_live", "root_builder", "root_builder_passive", "se_new_game_ui", "se_shutdown", "se_fixture_anchor", "se_fixture_transition", "crash_capture", "interactive_session", "native_session", "copied_profile_mods"}
     if unknown:
         raise ConfigurationError("Unknown configuration fields: " + ", ".join(sorted(unknown)))
     base = Path(base or Path.cwd()).resolve()
@@ -100,6 +100,14 @@ def configure(value, base=None):
             raise ConfigurationError('Invalid Root Builder policy: ' + str(error)) from error
         if not result.get('root_builder_data') or selected['edition'] != 'vr' or result.get('reuse_test_profile'):
             raise ConfigurationError('Explicit Root Builder requires VR, root_builder_data and a cold-owned MO2 profile')
+    if 'root_builder_passive' in result:
+        from .root_builder_passive import configuration as passive_configuration
+        try:
+            result['root_builder_passive'] = passive_configuration(result['root_builder_passive'])
+        except (ValueError, TypeError, KeyError) as error:
+            raise ConfigurationError('Invalid passive Root Builder policy: ' + str(error)) from error
+        if selected['edition'] != 'se' or result.get('root_builder') or result.get('root_builder_data') or result.get('reuse_test_profile'):
+            raise ConfigurationError('Passive Root Builder requires separate cold-owned SE mode without root deployment')
     if 'native14_live' in result:
         if selected['edition'] != 'vr':
             raise ConfigurationError('Native14 observations require the VR target')

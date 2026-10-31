@@ -76,7 +76,10 @@ default is `--edition vr`. Separate game targets need separate MO2/config/runtim
 directories and Bridge ports. SE skips OpenVR acquisition/configuration and the
 emulator. Follow [qualified SE setup](docs/se-qualified.md) before running SE:
 the21-step smoke applies to the exact documented installation and provider.
-SE Root Builder and borrowed/reusable profiles remain unsupported. Explicit
+SE Root Builder deployment and borrowed/reusable profiles remain unsupported.
+The separate [passive presence candidate](docs/root-builder-passive.md) requires
+an explicitly pinned cold-owned portable instance with automatic hooks disabled,
+no enabled Root sources and separate native qualification. Explicit
 `se_new_game_ui:true` uses the pinned native-startup provider described in
 [native startup acquisition](docs/devbench-native-startup.md); its measured scope
 is recorded in the release status.

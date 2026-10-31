@@ -222,6 +222,7 @@ def preflight(profile, restart_idle_mo2=False):
         if caps.get('profileSelect') != 'nativeQt':
             raise Blocked('Reusable profiles require native Bridge profile selection')
     vrpaths = runtime = config = vive_profile = original = rbdata = None
+    passive_contract = None
     root_contract = None
     if root_policy:
         from . import root_builder
@@ -261,8 +262,15 @@ def preflight(profile, restart_idle_mo2=False):
             raise Blocked('Need exactly one verified stock openvr_api.dll in Root Builder backup')
         original = originals[0]
         rbdata = original.parent.parent
-    elif not vr and ((P.mo2 / 'plugins/data/RootBuilder').exists() or any((m / 'Root').is_dir() for m in P.mods.iterdir())):
-        raise Blocked('SE Root Builder integration is not qualified; no Root Builder files will be modified')
+    elif not vr and (P.value.get('root_builder_passive') or (P.mo2 / 'plugins/data/RootBuilder').exists() or
+                    (P.mo2 / 'plugins/rootbuilder').exists() or any((m / 'Root').is_dir() for m in P.mods.iterdir())):
+        if not P.value.get('root_builder_passive'):
+            raise Blocked('SE Root Builder integration is not qualified; no Root Builder files will be modified')
+        from . import root_builder_passive
+        try:
+            passive_contract = root_builder_passive.preflight(P.snapshot(), source)
+        except (ValueError, OSError, KeyError) as error:
+            raise Blocked('Passive Root Builder preflight: ' + str(error)) from error
     # Fingerprint installed binaries, rather than the stale business index.
     dlls = {}
     for mod in sorted(required):
@@ -281,7 +289,7 @@ def preflight(profile, restart_idle_mo2=False):
     from . import steam_restore
     steam_client = steam_restore.preflight(P.snapshot())
     return {'profile': profile, 'gameEdition': selected['edition'], 'loaderContract': loader_contract, 'bridgeSession': bridge_session, 'originalBridgeProfile': bridge_profile,
-            'rootBuilder': root_contract,
+            'rootBuilder': root_contract, 'rootBuilderPassive': passive_contract,
             'steamClientRestart': steam_client,
             'runtime': str(runtime) if runtime else None, 'settings': str(config) if config else None,
             'viveInputProfile': str(vive_profile) if vive_profile else None, 'viveInputProfileHash': sha(vive_profile) if vive_profile else None,
@@ -376,6 +384,10 @@ class Session:
             except Exception:
                 pass  # close() is diagnostic; never replace a restoration failure.
     def snapshot(self, path):
+        passive = self.state.get('rootBuilderPassive', {}).get('contract') or self.state.get('preflight', {}).get('rootBuilderPassive')
+        if passive:
+            from . import root_builder_passive
+            root_builder_passive.guard_snapshot_target(self.state['configuration'], path)
         path = Path(path).resolve()
         # An immutable shared game executable must never enter generic recovery,
         # even through another hardlink supplied as an extra/staged write target.
@@ -787,6 +799,9 @@ class Session:
                         for name, digest in info['profileHashes'].items())):
                 raise Blocked('Root Builder or source profile changed while closing idle MO2; a new plan is required')
             root_builder.prepare(self, info['rootBuilder'])
+        if info.get('rootBuilderPassive'):
+            from . import root_builder_passive
+            root_builder_passive.before_setup_writes(self, info['rootBuilderPassive'])
         dep = ROOT / 'dependencies/driver-dedb8ab.zip'
         if vr and not dep.exists():
             dep.parent.mkdir(parents=True, exist_ok=True)
@@ -799,7 +814,7 @@ class Session:
             raise Blocked('Pinned driver archive hash mismatch')
         # Snapshot any Root Builder target including targets from disabled OCU.
         targets = {P.game / 'openvr_api.dll'} if vr and not info.get('rootBuilder') else set()
-        for mod in ([] if info.get('rootBuilder') else P.mods.iterdir()):
+        for mod in ([] if info.get('rootBuilder') or info.get('rootBuilderPassive') else P.mods.iterdir()):
             root = mod / 'Root'
             if root.is_dir():
                 for file in root.rglob('*'):
@@ -839,6 +854,9 @@ class Session:
             if sha(path) != digest:
                 raise Blocked('Mod configuration changed after preflight: ' + path)
             self.snapshot(path)
+        if info.get('rootBuilderPassive'):
+            from . import root_builder_passive
+            root_builder_passive.prepare(self, info['rootBuilderPassive'])
         # Existing deployed OCU entries must not be merged into the test build and
         # harvested back into third-party mods when Root Builder clears it.
         old_build = Path(info['rootBuilderData']) / 'BuildData.json' if info.get('rootBuilderData') and not info.get('rootBuilder') else None
@@ -1001,6 +1019,9 @@ class Session:
         if self.state.get('borrowedMO2'):
             self.bridge_profile(self.state['testProfileName'])
         else:
+            if self.state.get('rootBuilderPassive'):
+                from . import root_builder_passive
+                root_builder_passive.before_launch(self)
             self.spawn([str(P.mo2_exe)], 'mo2', str(P.mo2))
         token_file = P.bridge_token
         end = time.monotonic() + 75
@@ -1022,7 +1043,7 @@ class Session:
         if ping.get('game') != selected['bridgeGame'] or Path(ping.get('modsPath', '')).resolve() != P.mods.resolve():
             raise Blocked('MO2 bridge belongs to a different game/instance')
         bridge_identity = None
-        if self.state.get('rootBuilder'):
+        if self.state.get('rootBuilder') or self.state.get('rootBuilderPassive'):
             bridge_identity = request(P.bridge_port, 'session', token=token, timeout=3)
             owned_mo2 = [row['identity'] for row in self.state['owned'] if row['role'] == 'mo2']
             if (len(owned_mo2) != 1 or bridge_identity.get('mo2Pid') != owned_mo2[0]['pid'] or
@@ -1030,6 +1051,9 @@ class Session:
                     not bridge_identity.get('serverBootId') or not bridge_identity.get('instanceId') or
                     Path(bridge_identity.get('profilesPath', '')).resolve() != P.profiles.resolve()):
                 raise Blocked('Root Builder requires the exact live owned MO2 Bridge boot')
+        if self.state.get('rootBuilderPassive'):
+            from . import root_builder_passive
+            root_builder_passive.verify_boot(self, bridge_identity)
         if selected['edition'] == 'vr':
             self.phase('start-steamvr', 90)
             self.spawn([str(Path(self.state['preflight']['runtime']) / 'bin/win64/vrstartup.exe')], 'vr')
@@ -1359,6 +1383,15 @@ class Session:
         with self.lock:
             self.state['restoringFiles'] = True
             self.save()
+        if self.state.get('rootBuilderPassive'):
+            from . import root_builder_passive
+            try:
+                root_builder_passive.restore_precheck(self)
+            except Exception as error:
+                self.state['restored'] = False
+                self.state.setdefault('restoreErrors', []).append({'path': 'root-builder-passive-precheck', 'error': str(error)})
+                self.save()
+                raise
         from . import steam_restore
         steam_restore.prepare(self)
         errors = []
@@ -1366,6 +1399,8 @@ class Session:
         # write it first through the legacy loop, bypassing its immutable checks.
         root_snapshots = {str(Path(path).resolve()).casefold()
                           for path in self.state.get('rootBuilder', {}).get('snapshotPaths', [])}
+        root_snapshots.update(str(Path(path).resolve()).casefold()
+                              for path in self.state.get('rootBuilderPassive', {}).get('snapshotPaths', []))
         for snapshot in reversed(self.state['snapshots']):
             path = Path(snapshot['path'])
             if str(path.resolve()).casefold() in root_snapshots:
@@ -1392,6 +1427,14 @@ class Session:
                 root_builder.restore(self)
             except Exception as error:
                 self.state['restoreErrors'].append({'path': 'root-builder-managed-view', 'error': str(error)})
+                self.save()
+                raise
+        if self.state.get('rootBuilderPassive'):
+            from . import root_builder_passive
+            try:
+                root_builder_passive.restore(self)
+            except Exception as error:
+                self.state['restoreErrors'].append({'path': 'root-builder-passive-view', 'error': str(error)})
                 self.save()
                 raise
         steam_restore.reopen(self)
