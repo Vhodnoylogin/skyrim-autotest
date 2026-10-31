@@ -6,6 +6,8 @@ This source candidate requires independent exact-platform qualification.
 """
 import configparser
 import copy
+import hashlib
+import os
 from pathlib import Path
 import re
 import time
@@ -84,6 +86,31 @@ def _off(path):
     settings = _ini(path)
     if any(settings.get(key, '').lower() != expected for key, expected in OFF.items()):
         raise ValueError('Root Builder autobuild/redirect are not explicitly false')
+    return settings
+
+
+def _ini_evidence(session, stage):
+    """Retain the exact bounded INI examined, including a failed boot's bytes."""
+    source = rb._safe(Path(session.state['configuration']['mo2_ini']))
+    before = rb._hash(source)
+    with source.open('rb') as stream:
+        raw = stream.read(before['size'] + 1)
+    facts = {'sha256': hashlib.sha256(raw).hexdigest(), 'size': len(raw)}
+    if facts != before or rb._hash(source) != before:
+        raise ValueError('MO2 INI changed during passive evidence capture')
+    directory = rb._safe(Path(session.dir) / 'evidence/root-builder-passive')
+    directory.mkdir(parents=True, exist_ok=True)
+    artifact = rb._safe(directory / (stage + '.ini'))
+    with artifact.open('xb') as stream:
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+    if rb._hash(artifact) != facts:
+        raise ValueError('Passive INI evidence does not match captured bytes')
+    evidence = {'path': str(artifact), **facts}
+    session.state['rootBuilderPassive'].setdefault('iniEvidence', {})[stage] = evidence
+    session.save()
+    return evidence
 
 
 def _no_root(value, profile):
@@ -213,6 +240,8 @@ def preflight(value, profile):
     loader = rb._safe(Path(value['game']) / 'skse64_loader.exe')
     if rb._hash(loader)['sha256'] != policy['loaderSha256']:
         raise ValueError('Physical SE SKSE loader absent/changed; passive mode cannot deploy it')
+    from .editions import validate_mo2_loader
+    loader_contract = validate_mo2_loader(ini.read_text(encoding='utf-8-sig'), value)
     extra = {str(Path(path).resolve()).casefold() for path in value.get('extra_files', [])}
     for name in policy['mutableGameFiles']:
         if str((Path(value['game']) / name).resolve()).casefold() not in extra:
@@ -230,7 +259,8 @@ def preflight(value, profile):
         guard_snapshot_target(value, path)
     return {'schemaVersion': 1, 'policy': policy, 'paths': {key: value[key] for key in ('mo2', 'mo2_ini', 'mo2_exe', 'mods', 'overwrite', 'game')},
             'profile': str(Path(profile)), 'profileModlistSha256': rb._hash(Path(profile) / 'modlist.txt')['sha256'],
-            'iniPreimage': rb._hash(ini), 'portablePin': rb._hash(portable), 'data': data, 'game': game}
+            'iniPreimage': rb._hash(ini), 'loaderContract': loader_contract,
+            'portablePin': rb._hash(portable), 'data': data, 'game': game}
 
 
 def before_setup_writes(session, contract):
@@ -302,10 +332,17 @@ def before_launch(session):
     cold_idle()
     _unchanged(session, contract)
     _no_root(session.state['configuration'], session.state['testProfile'])
-    _off(contract['paths']['mo2_ini'])
     if record['phase'] != 'prepared':
         raise ValueError('Passive cold-start proof already consumed')
-    record.update(phase='cold-start-proof', coldStartProof={'iniSha256': rb._hash(contract['paths']['mo2_ini'])['sha256'],
+    evidence = _ini_evidence(session, 'cold-staged')
+    settings = _off(evidence['path'])
+    from .editions import validate_mo2_loader
+    loader = validate_mo2_loader(Path(evidence['path']).read_text(encoding='utf-8-sig'), session.state['configuration'])
+    if loader != contract['loaderContract']:
+        raise ValueError('Registered SE SKSE loader changed before cold MO2 startup')
+    record.update(phase='cold-start-proof', coldStartProof={'iniSha256': evidence['sha256'],
+                  'rootBuilderSettings': settings, 'loaderContract': loader,
+                  'profileModlistSha256': rb._hash(Path(session.state['testProfile']) / 'modlist.txt')['sha256'],
                   'minimumProcessBirth': 116444736000000000 + time.time_ns() // 100, 'method': PROOF})
     session.save()
 
@@ -320,13 +357,21 @@ def verify_boot(session, bridge):
             type(bridge.get('instanceId')) is not str or not bridge['instanceId'] or
             Path(bridge.get('profilesPath', '')) != Path(session.state['configuration']['profiles'])):
         raise ValueError('Passive proof needs exact newly cold-started owned portable MO2 Bridge instance')
-    _off(contract['paths']['mo2_ini'])
-    if rb._hash(contract['paths']['mo2_ini'])['sha256'] != proof['iniSha256']:
-        raise ValueError('Cold-staged native MO2 INI changed before SKSE launch')
+    evidence = _ini_evidence(session, 'post-boot')
+    settings = _off(evidence['path'])
+    if settings != proof['rootBuilderSettings']:
+        raise ValueError('Cold-staged local RootBuilder settings changed before SKSE launch')
+    from .editions import validate_mo2_loader
+    loader = validate_mo2_loader(Path(evidence['path']).read_text(encoding='utf-8-sig'), session.state['configuration'])
+    if loader != proof['loaderContract'] or loader != contract['loaderContract']:
+        raise ValueError('Registered SE SKSE loader changed after MO2 startup')
     _unchanged(session, contract)
     _no_root(session.state['configuration'], session.state['testProfile'])
+    if rb._hash(Path(session.state['testProfile']) / 'modlist.txt')['sha256'] != proof['profileModlistSha256']:
+        raise ValueError('Copied profile modlist changed after MO2 startup')
     record.update(phase='verified-before-game', effectiveSettingsProof={**proof, 'mo2': owned[0], 'bridge': copy.deepcopy(bridge),
-                  'basis': 'Pinned portable native MO2 INI existed before process birth; unchanged after exact owned Bridge boot; audited plugin reads organizer.pluginSetting'})
+                  'postBootIniSha256': evidence['sha256'], 'unrelatedIniSerializationChanged': evidence['sha256'] != proof['iniSha256'],
+                  'basis': 'Pinned portable native MO2 INI existed before process birth; local RootBuilder settings and registered SE loader unchanged after exact owned Bridge boot; copied profile unchanged; audited plugin reads organizer.pluginSetting'})
     session.save()
 
 

@@ -38,6 +38,9 @@ class PassiveRootBuilderTests(unittest.TestCase):
         (self.profile/'modlist.txt').write_text('+Ordinary Mod\n-Disabled Root\n')
         (self.mods/'Disabled Root/Root').mkdir(parents=True)
         self.ini.write_text('[General]\nselected_profile=@ByteArray(Source)\n[Plugins]\nRootBuilder\\migrated=true\nRootBuilder\\copyfiles=**\nRootBuilder\\linkfiles=\nRootBuilder\\usvfsfiles=\nRootBuilder\\redirect=true\n')
+        with self.ini.open('a') as stream:
+            stream.write('[customExecutables]\n1\\title=SKSE\n1\\binary=' + str(loader) +
+                         '\n1\\workingDirectory=' + str(self.game) + '\n1\\arguments=\n')
         self.original = self.ini.read_bytes()
         self.value = {'game_edition':'se','mo2':str(self.mo2),'mo2_ini':str(self.ini),'mo2_exe':str(self.mo2/'ModOrganizer.exe'),
                       'mods':str(self.mods),'game':str(self.game),'profiles':str(self.profile.parent),'overwrite':str(self.overwrite),'extra_files':[],
@@ -76,6 +79,12 @@ class PassiveRootBuilderTests(unittest.TestCase):
             path=Path(row['path'])
             if row['exists']:shutil.copy2(row['backup'],path)
             elif path.exists():path.unlink()
+
+    def boot_identity(self):
+        minimum=self.session.state['rootBuilderPassive']['coldStartProof']['minimumProcessBirth']
+        owned={'pid':100,'path':str(self.mo2/'ModOrganizer.exe'),'birth':minimum+1}
+        self.identities[100]=owned;self.session.state['owned']=[{'role':'mo2','identity':owned}]
+        return {'mo2Pid':100,'serverBootId':'boot','instanceId':'portable','profilesPath':str(self.profile.parent)}
 
     def test_cold_stage_after_snapshot_then_restore_original_bytes(self):
         contract=self.prepare()
@@ -168,14 +177,44 @@ class PassiveRootBuilderTests(unittest.TestCase):
         self.assertEqual(self.session.state['rootBuilderPassive']['phase'],'verified-before-game')
         with self.assertRaises(ValueError):subject.verify_boot(self.session,bridge)
 
-    def test_ini_change_after_cold_proof_refuses_before_game(self):
+    def test_unrelated_mo2_ini_normalization_is_allowed_and_both_versions_retained(self):
         self.prepare();subject.before_launch(self.session)
-        minimum=self.session.state['rootBuilderPassive']['coldStartProof']['minimumProcessBirth']
-        owned={'pid':100,'path':str(self.mo2/'ModOrganizer.exe'),'birth':minimum+1};self.identities[100]=owned
-        self.session.state['owned']=[{'role':'mo2','identity':owned}]
-        self.ini.write_text(self.ini.read_text()+'\nOther=changed\n')
-        with self.assertRaisesRegex(ValueError,'INI changed'):
-            subject.verify_boot(self.session,{'mo2Pid':100,'serverBootId':'boot','instanceId':'portable','profilesPath':str(self.profile.parent)})
+        staged=self.ini.read_bytes();bridge=self.boot_identity()
+        self.ini.write_bytes(staged.replace(b'\n',b'\r\n')+b'\r\n[Geometry]\r\nMainWindow=@ByteArray(normalized)\r\n')
+        normalized=self.ini.read_bytes()
+        subject.verify_boot(self.session,bridge)
+        record=self.session.state['rootBuilderPassive'];proof=record['effectiveSettingsProof']
+        self.assertTrue(proof['unrelatedIniSerializationChanged'])
+        self.assertEqual(Path(record['iniEvidence']['cold-staged']['path']).read_bytes(),staged)
+        self.assertEqual(Path(record['iniEvidence']['post-boot']['path']).read_bytes(),normalized)
+        self.assertEqual(proof['iniSha256'],hashlib.sha256(staged).hexdigest())
+        self.assertEqual(proof['postBootIniSha256'],hashlib.sha256(normalized).hexdigest())
+
+    def test_nonoff_setting_drift_refuses_and_retains_actual_postboot_evidence(self):
+        self.prepare();subject.before_launch(self.session);bridge=self.boot_identity()
+        self.ini.write_bytes(self.ini.read_bytes().replace(b'redirect=false',b'redirect=true'))
+        changed=self.ini.read_bytes()
+        with self.assertRaisesRegex(ValueError,'not explicitly false'):subject.verify_boot(self.session,bridge)
+        record=self.session.state['rootBuilderPassive']
+        self.assertEqual(record['phase'],'cold-start-proof')
+        self.assertNotIn('effectiveSettingsProof',record)
+        self.assertEqual(Path(record['iniEvidence']['post-boot']['path']).read_bytes(),changed)
+
+    def test_other_local_rootbuilder_setting_drift_refuses_even_when_off(self):
+        self.prepare();subject.before_launch(self.session);bridge=self.boot_identity()
+        self.ini.write_text(self.ini.read_text().replace('[Plugins]','[Plugins]\nRootBuilder\\hash=true'))
+        subject._off(self.ini)
+        with self.assertRaisesRegex(ValueError,'local RootBuilder settings changed'):subject.verify_boot(self.session,bridge)
+
+    def test_registered_loader_drift_refuses_after_boot_despite_rootbuilder_off(self):
+        self.prepare();subject.before_launch(self.session);bridge=self.boot_identity()
+        self.ini.write_text(self.ini.read_text().replace('1\\arguments=','1\\arguments=--unexpected'))
+        with self.assertRaisesRegex(ValueError,'Registered SKSE'):subject.verify_boot(self.session,bridge)
+
+    def test_copied_profile_changes_refuse_after_boot(self):
+        self.prepare();subject.before_launch(self.session);bridge=self.boot_identity()
+        (self.profile/'modlist.txt').write_text('+Other ordinary mod\n')
+        with self.assertRaisesRegex(ValueError,'Copied profile modlist changed'):subject.verify_boot(self.session,bridge)
 
     def test_policy_unknown_fields_mutable_globs_and_vr_or_reuse_refuse(self):
         policy=self.value['root_builder_passive']
@@ -253,6 +292,27 @@ class PassiveRunnerIntegrationTests(unittest.TestCase):
         with patch.object(native,'processes',return_value=processes),patch.object(session,'collect',return_value=True):session.cleanup()
         self.assertTrue(session.state['restored'])
         self.assertEqual(config.P.mo2_ini.read_bytes(),original)
+        self.assertEqual(session.state['rootBuilderPassive']['phase'],'restored-unchanged')
+
+    def test_actual_session_accepts_normalized_ini_then_restores_exact_original_bytes(self):
+        original=config.P.mo2_ini.read_bytes();session=self.session()
+        processes=[{'pid':4,'parent':0,'name':'System'}]
+        with patch.object(native,'processes',return_value=processes):
+            session.setup();subject.before_launch(session)
+        minimum=session.state['rootBuilderPassive']['coldStartProof']['minimumProcessBirth']
+        owned={'pid':100,'path':str(config.P.mo2_exe),'birth':minimum+1}
+        session.state['owned']=[{'role':'mo2','identity':owned}]
+        config.P.mo2_ini.write_text(config.P.mo2_ini.read_text()+'\n[Geometry]\nNormalized=true\n')
+        with patch.object(native,'identity',return_value=owned):
+            subject.verify_boot(session,{'mo2Pid':100,'serverBootId':'boot','instanceId':'portable','profilesPath':str(config.P.profiles)})
+        evidence=session.state['rootBuilderPassive']['iniEvidence']['post-boot']
+        self.assertNotEqual(evidence['sha256'],hashlib.sha256(original).hexdigest())
+        self.assertTrue(session.state['rootBuilderPassive']['effectiveSettingsProof']['unrelatedIniSerializationChanged'])
+        session.state['owned']=[]
+        with patch.object(native,'processes',return_value=processes),patch.object(session,'collect',return_value=True):session.cleanup()
+        self.assertTrue(session.state['restored'])
+        self.assertEqual(config.P.mo2_ini.read_bytes(),original)
+        self.assertTrue(Path(evidence['path']).is_file())
         self.assertEqual(session.state['rootBuilderPassive']['phase'],'restored-unchanged')
 
     def test_snapshot_guard_rejects_staged_alias_before_any_write(self):

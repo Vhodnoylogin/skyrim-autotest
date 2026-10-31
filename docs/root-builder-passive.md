@@ -47,12 +47,17 @@ files are additionally snapshotted as protected review evidence. Only two local
 and edits of matching names in other sections are refused/avoided.
 
 The proof is explicitly **cold native INI**, not a live `pluginSetting` API
-readback: the final full INI hash is recorded before the exact owned MO2 process
-birth; its Bridge boot/instance/profile paths must match. Before SKSE, both false
-values and the full INI bytes must still match, and package/data/static-root
-inventories must be unchanged. Startup rewriting the INI causes an honest refusal
-before game launch. It does not authorize weakening this proof. This exact source
-candidate still needs independently reviewed native qualification.
+readback: the final full INI bytes and hash are retained before the exact owned
+MO2 process birth; its Bridge boot/instance/profile paths must match. Another
+exact INI copy and hash are retained after boot, including a rejected settings
+change. Before SKSE, the complete local RootBuilder settings map, including both
+false values and all required settings, must still match. The registered SE SKSE
+loader and actual copied profile modlist must also match; package/data/static-root
+inventories must be unchanged. Unrelated INI serialization and GUI metadata may
+change during ordinary MO2 startup. Their hashes remain visible in evidence, and
+ordinary recovery still restores every original INI byte. A RootBuilder setting,
+loader or copied-profile change remains a refusal. This exact source candidate
+still needs independently reviewed native qualification.
 
 Legitimate game-root logs are explicit exceptions, never wildcard ignores.
 Each named root-level `.log` in `mutableGameFiles` must also be in `extra_files`,
