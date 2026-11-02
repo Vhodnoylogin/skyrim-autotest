@@ -294,8 +294,9 @@ error, heartbeat failure or game identity loss ends the loop with a technical
 reason and retains uncertain delivery records for explicit review. Later queued
 actions are not executed after such a failure.
 
-Results up to 16KiB remain unchanged in the completion receipt. Larger JSON
-results, including full preset catalogues, are preserved without truncation as
+Results up to 16KiB that also fit the command bus completion event's JSON depth
+bound remain unchanged in the completion receipt. Larger or deeper JSON results,
+including full preset catalogues and nested SKEE snapshots, are preserved without truncation as
 exact canonical UTF-8 JSON bytes in
 `<run>/interactive-results/<command UUID>.json`, with a 16MiB maximum. The file
 is atomically created without overwriting another result, verified, and saved in
@@ -304,7 +305,12 @@ is atomically created without overwriting another result, verified, and saved in
 The run collector pins the registered file; a reference is not a subject verdict.
 Duplicate evidence publication verifies identical bytes. Oversized data, changed
 existing evidence or a failed write/save stops with uncertainty and never retries
-the action. Small results retain their ordinary JSON shape.
+the action. Small shallow results retain their ordinary JSON shape. The bus's
+eight-level ingress limit is unchanged; the full completion event is checked
+before choosing inline delivery. Page size no longer needs to be increased to
+force a deep result over the artifact threshold. This source repair requires
+qualification before replacing a frozen live platform; it does not revise old
+uncertain results or authorize their replay.
 
 To end normally, submit a new uniquely identified envelope to the same current
 machine session whose text is:

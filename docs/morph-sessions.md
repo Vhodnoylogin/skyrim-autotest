@@ -129,7 +129,12 @@ installation. `human-provider-config` optionally accepts
 ```
 
 Categories are exactly `male`, `female`, `male_blacklisted`, and
-`female_blacklisted`; names are case sensitive. Declare every additional identity
+`female_blacklisted`; names are case sensitive. The native blacklist arrays may
+contain repeated names from different source presets. Preserve every raw entry
+and count; policy compares category/name identities. Repeated active male/female
+names remain an error, including across page boundaries. Blacklisted entries do
+not satisfy an active target or waive checks for unexpected identities.
+Declare every additional identity
 including blacklisted ones (0..4096 entries); no glob, ignored unknown name, or
 target-name overlap is accepted. Source archive/XML hashes belong in preparation
 pins: the native API exposes names/categories, not the originating XML path.

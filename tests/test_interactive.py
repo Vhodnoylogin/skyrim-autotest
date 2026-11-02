@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from skyrim_autotest import config, interactive
-from skyrim_autotest.command_bus import CommandBus
+from skyrim_autotest.command_bus import BusError, CommandBus, strict_json
 
 
 class Clock:
@@ -452,6 +452,89 @@ class InteractiveTests(unittest.TestCase):
         self.assertEqual(result['evidence'], {key: artifact[key] for key in ('path', 'sha256', 'bytes', 'format')})
         self.assertNotIn('presets', result)
         self.assertEqual(len(self.session.calls), 1)
+
+    def test_small_deep_native_result_completes_once_through_exact_artifact(self):
+        result = {'value': 'Наблюдение', 'present': False, 'gain': 0.125}
+        for _ in range(9):
+            result = {'child': result}
+        raw = json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8')
+        self.assertLess(len(raw), interactive.INLINE_RESULT_BYTES)
+        self.settings['timeoutPolicy'] = 'preserve-manual'
+        self.settings['nativeBindings'] = self.binding_policy()
+        def ready():
+            if self.session.state.get('interactiveSession'):
+                self.send('native', self.binding_request())
+                self.send('finish')
+        self.session.on_save = ready
+        with patch('skyrim_autotest.interactive_bindings.guarded_call', return_value=result) as call:
+            metadata = self.run_loop()
+        call.assert_called_once()
+        self.assertEqual(metadata['reason'], 'owner-finished')
+        self.assertFalse(metadata.get('mutationsPaused', False))
+        self.assertEqual(self.bus.status('game-fresh-run')['commands'], {'completed': 2})
+        artifact, = self.session.state['interactiveArtifacts']
+        self.assertEqual(Path(artifact['path']).read_bytes(), raw)
+        self.assertEqual(artifact['sha256'], hashlib.sha256(raw).hexdigest())
+        self.assertEqual(artifact['bytes'], len(raw))
+
+    def test_inline_choice_accounts_for_completion_event_nesting(self):
+        result = 'leaf'
+        for _ in range(8):
+            result = {'child': result}
+        # This fits as a standalone bus value but cannot fit inside the event.
+        self.assertEqual(strict_json(json.dumps(result)), result)
+        with self.assertRaises(BusError):
+            strict_json(json.dumps({'commandId': 'a' * 32, 'result': result}))
+        receipt = interactive._completion_result(self.session, 'a' * 32, result)
+        self.assertEqual(receipt['outcome'], 'result-recorded')
+        self.assertEqual(json.loads(Path(receipt['evidence']['path']).read_bytes()), result)
+        self.assertEqual(strict_json(json.dumps({'commandId': 'a' * 32, 'result': receipt}))['result'], receipt)
+
+    def test_artifacts_do_not_normalize_non_json_results_at_any_depth(self):
+        for invalid in ({1: 'value'}, {'values': ('a', 'b')}, {'gain': float('nan')}):
+            for depth in (0, 10):
+                result = invalid
+                for _ in range(depth):
+                    result = {'child': result}
+                with self.subTest(invalid=invalid, depth=depth), self.assertRaises(BusError):
+                    interactive._completion_result(self.session, 'a' * 32, result)
+        self.assertFalse((self.session.dir / 'interactive-results').exists())
+
+    def test_invalid_deep_native_result_is_uncertain_without_replay(self):
+        result = {1: 'not a JSON key'}
+        for _ in range(10):
+            result = {'child': result}
+        self.settings['nativeBindings'] = self.binding_policy()
+        def ready():
+            if self.session.state.get('interactiveSession'):
+                self.send('native', self.binding_request())
+                self.send('finish')
+        self.session.on_save = ready
+        with patch('skyrim_autotest.interactive_bindings.guarded_call', return_value=result) as call:
+            with self.assertRaisesRegex(interactive.InteractiveError, 'Only finite JSON values'):
+                self.run_loop()
+        call.assert_called_once()
+        self.assertEqual(self.bus.status('game-fresh-run')['commands'], {'received': 1, 'uncertain': 1})
+        self.assertFalse((self.session.dir / 'interactive-results').exists())
+
+    def test_small_deep_result_write_failure_preserves_uncertainty_without_replay(self):
+        result = 'leaf'
+        for _ in range(9):
+            result = {'child': result}
+        self.settings['nativeBindings'] = self.binding_policy()
+        def ready():
+            if self.session.state.get('interactiveSession'):
+                self.send('native', self.binding_request())
+                self.send('finish')
+        self.session.on_save = ready
+        with patch('skyrim_autotest.interactive_bindings.guarded_call', return_value=result) as call, \
+             patch.object(interactive.os, 'fsync', side_effect=OSError('deep evidence write failed')):
+            with self.assertRaisesRegex(interactive.InteractiveError, 'deep evidence write failed'):
+                self.run_loop()
+        call.assert_called_once()
+        self.assertEqual(self.bus.status('game-fresh-run')['commands'], {'received': 1, 'uncertain': 1})
+        self.assertEqual(self.session.state['interactiveArtifacts'], [])
+        self.assertEqual(list((self.session.dir / 'interactive-results').iterdir()), [])
 
     def test_large_result_write_loss_preserves_uncertainty_without_retry(self):
         def ready():

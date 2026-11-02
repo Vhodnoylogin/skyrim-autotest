@@ -103,9 +103,10 @@ def _text(value, name="text", limit=32768):
     return value
 
 
-def _json(value, limit=16384):
+def _validate_json(value, *, depth_limit=8):
+    """Check JSON types; external artifact values need not fit an inline event."""
     def check(item, depth=0):
-        if depth > 8:
+        if depth_limit is not None and depth > depth_limit:
             raise BusError("JSON nesting exceeds eight levels")
         if item is None or isinstance(item, (str, bool, int)):
             return
@@ -120,7 +121,14 @@ def _json(value, limit=16384):
                 check(child, depth + 1)
             return
         raise BusError("Only finite JSON values are supported")
-    check(value)
+    try:
+        check(value)
+    except RecursionError as exc:
+        raise BusError("Invalid JSON value") from exc
+
+
+def _json(value, limit=16384):
+    _validate_json(value)
     try:
         result = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
         if len(result.encode("utf-8")) > limit:

@@ -12,7 +12,7 @@ import time
 import uuid
 
 from . import native
-from .command_bus import BusError, CommandBus, load_config, strict_json
+from .command_bus import BusError, CommandBus, _json, _validate_json, load_config, strict_json
 
 TOOLS = {'inspect', 'menu', 'input', 'papyrus', 'platform', 'native14', 'driver'}
 KEYS = {'W', 'A', 'S', 'D', 'SPACE'}
@@ -201,9 +201,21 @@ def _reject(bus, session, session_id, binding, command, reason):
 
 
 def _completion_result(session, command_id, result):
-    """Preserve a large result before the bounded durable completion receipt."""
+    """Preserve results that cannot fit the bounded durable completion event."""
+    # Do not let the artifact encoder normalize non-JSON tuples or object keys.
+    # Validate past the inline depth cutoff before selecting either transport.
+    _validate_json(result, depth_limit=None)
     raw = json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')
-    if len(raw) <= INLINE_RESULT_BYTES: return result
+    if len(raw) <= INLINE_RESULT_BYTES:
+        try:
+            # The bus also nests the result in its completion event. A small
+            # native response can exceed that depth bound without being large.
+            # Keep the bus's ingress limits; use the existing evidence route.
+            _json({'commandId': command_id, 'result': result}, 65536)
+        except BusError:
+            pass
+        else:
+            return result
     if len(raw) > MAX_RESULT_BYTES:
         raise InteractiveError('Interactive result exceeds the 16MiB evidence bound; no truncation or replay')
     if not re.fullmatch('[0-9a-f]{32}', command_id):

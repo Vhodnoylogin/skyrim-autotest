@@ -84,7 +84,7 @@ def read_catalog(call, expected_pid):
                     page["returnedCount"] != len(values) or len(values) != min(256, total - offset)):
                 raise BindingError("Complete bounded catalog page unavailable")
             names.extend(_text(name, "catalog name") for name in values)
-            if len(set(names)) != len(names):
+            if category in ("female", "male") and len(set(names)) != len(names):
                 raise BindingError("Catalog count/unique-name mismatch within category")
             pages.append(copy.deepcopy(page))
             if len(names) == total:
@@ -180,7 +180,7 @@ def _catalog_identities(catalog, expected_pid):
         if type(names) is not list or len(names) != counts[COUNT_FIELDS[category]]:
             raise BindingError("Native catalog category count mismatch")
         names = [_text(name, "catalog name") for name in names]
-        if len(set(names)) != len(names):
+        if category in ("female", "male") and len(set(names)) != len(names):
             raise BindingError("Native catalog contains duplicate names within a category")
         observed.update((category, name) for name in names)
     return observed

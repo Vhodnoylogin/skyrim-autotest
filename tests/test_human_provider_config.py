@@ -145,6 +145,31 @@ class HumanProviderConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(BindingError, "unique across"):
             self.inspect()
 
+    def test_repeated_blacklisted_names_preserve_counts_and_exact_extra_identity(self):
+        # The retained BHUNP catalog returns three equal blacklist names, not
+        # three uniquely addressable active presets. Keep all native entries.
+        for category in ("female_blacklisted", "male_blacklisted"):
+            self.categories[category] *= 3
+        catalog = subject.read_catalog(NativeCatalog(self.categories), 123)
+        before = copy.deepcopy(catalog)
+        result = self.inspect(catalog=catalog)
+        self.assertEqual(catalog, before)
+        self.assertEqual(result["unexpectedLoadedPresetCount"], 0)
+        self.assertEqual(result["missingExpectedPresetCount"], 0)
+        self.assertEqual(result["missingAllowedAdditionalPresetCount"], 0)
+        for category in ("female_blacklisted", "male_blacklisted"):
+            self.assertEqual(len(catalog["categories"][category]), 3)
+            self.assertEqual(catalog["counts"][subject.COUNT_FIELDS[category]], 3)
+
+    def test_config_inspection_still_rejects_duplicate_active_names(self):
+        for category in ("female", "male"):
+            with self.subTest(category=category):
+                catalog = subject.read_catalog(NativeCatalog(self.categories), 123)
+                catalog["categories"][category].append(catalog["categories"][category][0])
+                catalog["counts"][subject.COUNT_FIELDS[category]] += 1
+                with self.assertRaisesRegex(BindingError, "duplicate names"):
+                    self.inspect(catalog=catalog)
+
     def test_real_empty_catalog_is_observed_as_missing_not_invented_availability(self):
         self.categories = {category: [] for category in subject.COUNT_FIELDS}
         result = self.inspect()
@@ -248,14 +273,61 @@ class NativeCatalogTests(unittest.TestCase):
         self.assertEqual(result["counts"], {field: 0 for field in subject.COUNT_FIELDS.values()})
 
     def test_duplicate_names_within_category_rejected_but_across_categories_retained(self):
-        self.native.categories["female"].append(self.native.categories["female"][0])
-        with self.assertRaisesRegex(BindingError, "unique-name"):
-            subject.read_catalog(self.native, 123)
-        self.native.categories["female"].pop()
+        for category in ("female", "male"):
+            with self.subTest(category=category):
+                self.native.categories[category].append(self.native.categories[category][0])
+                with self.assertRaisesRegex(BindingError, "unique-name"):
+                    subject.read_catalog(self.native, 123)
+                self.native.categories[category].pop()
         self.native.categories["male"].append("F1")
         result = subject.read_catalog(self.native, 123)
         self.assertIn("F1", result["categories"]["female"])
         self.assertIn("F1", result["categories"]["male"])
+
+    def test_bhunp_blacklist_duplicates_retain_raw_pages_and_counts(self):
+        # Actual failed-run count shape and blacklist payload. Other names and
+        # provider identity stamps are synthetic unit inputs, not live evidence.
+        self.native.categories = {
+            "female": [f"Female {i}" for i in range(79)],
+            "female_blacklisted": ["-Zeroed Sliders-"] * 3,
+            "male": [f"Male {i}" for i in range(18)],
+            "male_blacklisted": ["HIMBO Zero for OBody"],
+        }
+        result = subject.read_catalog(self.native, 123)
+        self.assertEqual(result["categories"], self.native.categories)
+        self.assertEqual(result["counts"], {
+            "female": 79, "femaleBlacklisted": 3, "male": 18, "maleBlacklisted": 1})
+        page = next(page for page in result["pages"] if page["category"] == "female_blacklisted")
+        self.assertEqual(page["names"], ["-Zeroed Sliders-"] * 3)
+        self.assertEqual(page["returnedCount"], 3)
+        for malformed in ({"returnedCount": 2}, {"names": ["-Zeroed Sliders-"]},
+                          {"names": ["-Zeroed Sliders-", None, "-Zeroed Sliders-"]}):
+            with self.subTest(malformed=malformed):
+                native = NativeCatalog(self.native.categories)
+                native.change = lambda page, index: page.update(malformed) if index == 2 else None
+                with self.assertRaises(BindingError):
+                    subject.read_catalog(native, 123)
+
+    def test_active_duplicate_across_page_boundary_is_rejected(self):
+        for category in ("female", "male"):
+            with self.subTest(category=category):
+                native = NativeCatalog(self.categories)
+                native.categories[category] = [f"Preset {i}" for i in range(256)] + ["Preset 0"]
+                with self.assertRaisesRegex(BindingError, "unique-name"):
+                    subject.read_catalog(native, 123)
+                self.assertEqual([call["offset"] for call in native.calls if call["category"] == category], [0, 256])
+
+    def test_blacklist_duplicates_across_page_boundary_preserve_every_raw_entry(self):
+        for category in ("female_blacklisted", "male_blacklisted"):
+            with self.subTest(category=category):
+                native = NativeCatalog(self.categories)
+                native.categories[category] = ["Repeated blacklisted name"] * 257
+                result = subject.read_catalog(native, 123)
+                self.assertEqual(result["categories"][category], native.categories[category])
+                self.assertEqual(result["counts"][subject.COUNT_FIELDS[category]], 257)
+                pages = [page for page in result["pages"] if page["category"] == category]
+                self.assertEqual([page["returnedCount"] for page in pages], [256, 1])
+                self.assertEqual(sum((page["names"] for page in pages), []), native.categories[category])
 
     def test_unavailable_errors_and_wrong_page_identities_never_become_zero(self):
         changes = ({"status": "unavailable"}, {"ok": False}, {"error": "provider not ready"},
