@@ -70,6 +70,11 @@ In headset-assisted mode the operator owns one listener, uses chat as the main
 channel and brief voice exceptionally. Do not replay buffered commands or use
 a developer chat as a speech relay. Before an explicitly requested screenshot,
 announce it, count down, finish the count, then capture once and verify the file.
+Use DevBench's /api/tool/capture through the tool's screenshot command (diagnostic)
+or assisted_capture companion (spoken countdown), never desktop control as the
+default. Read docs/screenshots.md. Require the actual PNG/BMP file and its SHA-256;
+ok:true alone cannot establish a successful capture. Open it before describing
+the image. Do not launch a game or replay an uncertain capture just to get pixels.
 
 Initialization is part of this tool: prefer init --spec EXTERNAL-SPEC.json and
 doctor --spec EXTERNAL-SPEC.json over a REPLACE path template. Verify the exact

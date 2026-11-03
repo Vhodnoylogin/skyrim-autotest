@@ -428,7 +428,8 @@ def execute(session, scenario):
         try:
             providers = session.tool('capture', {'kind': 'providers'})
             session.log('capture-providers', result=providers)
-            args = {'kind': 'auto', 'allowNative': False, 'checkpointId': session.state['id'] + '-hand', 'timeoutMs': 8000}
+            args = {'kind': 'auto', 'allowNative': True, 'excludeUi': False,
+                    'checkpointId': session.state['id'] + '-hand', 'timeoutMs': 8000}
             session.log('probe-capture', result=session.tool('capture', args, timeout=12))
         except Exception as error:
             session.log('probe-capture-unavailable', error=str(error))

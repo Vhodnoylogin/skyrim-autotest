@@ -134,10 +134,14 @@ def collect(session, segment=None):
         from .photography import collect as collect_photography
         try:collect_photography(session,copy)
         except (OSError,ValueError,KeyError,TypeError) as exception:error('photography',exception)
+        from .screenshots import collect as collect_screenshots
+        try:collect_screenshots(session,copy)
+        except (OSError,ValueError,KeyError,TypeError) as exception:error('screenshots',exception)
     capture = P.overwrite/'SKSE/Plugins/devbench/captures'
     if capture.exists():
-        for path in capture.rglob(session.state['id']+'-*.png'):
-            if path.resolve().is_relative_to(capture.resolve()): copy(path, path.name, 'capture')
+        for pattern in ('-*.png', '-*.bmp'):
+            for path in capture.rglob(session.state['id']+pattern):
+                if path.resolve().is_relative_to(capture.resolve()): copy(path, path.name, 'capture')
     # Only explicitly selected restore targets may be exposed as output evidence.
     # Backup files/settings are never published by enumerating all snapshots.
     for index, path in enumerate(P.value.get('collected_files', [])):

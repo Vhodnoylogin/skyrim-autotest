@@ -15,6 +15,9 @@ and final ASR while the AI is busy. Audio stays external: recognition adapters
 submit final transcripts, speech adapters consume requests. The core opens no
 microphone and plays no sound. CLI/HTTP/MCP access does not grant game ownership
 or guarantee waking an arbitrary idle AI host.
+For game screenshots use the [DevBench capture command](docs/screenshots.md).
+The common scenario path also verifies actual PNG/BMP bytes and collects their
+hash-pinned files; an API success receipt without a file cannot pass.
 An external backend can use the included [data-only ASR forwarder](docs/asr-bridge.md)
 to feed complete accepted utterances independently of the agent. It opens no audio.
 For bounded held-open owned sessions and typed disposable-NPC actions, read

@@ -11,9 +11,12 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="skyrim-autotest")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--config", type=Path, help="External configuration JSON; required for live operations")
-    parser.add_argument("command", choices=["init", "setup", "doctor", "channel", "asr-bridge", "config-check", "preflight", "run", "status", "recover", "queue", "build-driver", "guardian", "guide", "review-plan", "validate-native14"])
+    parser.add_argument("command", choices=["init", "setup", "doctor", "channel", "asr-bridge", "screenshot", "config-check", "preflight", "run", "status", "recover", "queue", "build-driver", "guardian", "guide", "review-plan", "validate-native14"])
     args, rest = parser.parse_known_args(argv)
     try:
+        if args.command == 'screenshot':
+            from .screenshots import main as screenshot_main
+            return screenshot_main(rest)
         if args.command == 'asr-bridge':
             from .asr_bridge import main as bridge_main
             return bridge_main(rest)

@@ -4,7 +4,6 @@ No keyboard/focus operations, game launch, restart or automatic retry. PNG/BMP
 file integrity does not prove visual content; the operator must view the image.
 """
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -111,29 +110,16 @@ def capture(folder, identifier, guard, call, say):
             guard()
             report['status'] = 'capture_requested'
             atomic(report_file, report)
-            receipt = call(dict(kind='auto', allowNative=True, excludeUi=False,
+            body = dict(kind='auto', allowNative=True, excludeUi=False,
                                 allowTimeScale=True, checkpointId=identifier,
                                 recording='assisted', variant='manual',
-                                outDir=str(bundle), resolveRealPath=True, timeoutMs=8000))
+                                outDir=str(bundle), resolveRealPath=True, timeoutMs=8000)
+            receipt = call(body)
             report['providerReceipt'] = receipt
-            if receipt.get('ok') is False or not receipt.get('file'):
-                raise ValueError('Capture provider did not return an image file')
-            name = receipt['file']
-            if Path(name).name != name or '/' in name or '\\' in name:
-                raise ValueError('Capture filename is not a single segment')
-            # An explicit external outDir avoids MO2 virtual-path guessing.
-            image = bundle / 'assisted' / 'manual' / name
-            if image.is_symlink() or not image.resolve().is_relative_to(bundle) or not image.is_file():
-                raise ValueError('Provider image missing from external output directory')
-            size = image.stat().st_size
-            if not 0 < size <= 32 * 1024 * 1024:
-                raise ValueError('Image file empty or exceeds 32 MiB bound')
-            data = image.read_bytes()
-            info = image_info(data)
+            from .screenshots import verify_file
+            verified = verify_file(bundle, body, receipt)
             guard()
-            report.update(status='file_verified', image=str(image), bytes=len(data),
-                          sha256=hashlib.sha256(data).hexdigest(), imageInfo=info,
-                          captureFileVerified=True, finishedAt=time.time())
+            report.update(verified, status='file_verified', finishedAt=time.time())
         except Exception as error:
             report.update(status='unavailable_or_uncertain', reason=str(error),
                           captureFileVerified=False, finishedAt=time.time())

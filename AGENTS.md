@@ -1,5 +1,13 @@
 # AI-agent instructions: Skyrim Autotest
 
+For game screenshots read docs/screenshots.md and use DevBench's capture API
+through `screenshot` or the ordinary `capture` scenario tool. Do not use desktop
+control when the in-game API can provide the image. Require captureFileVerified,
+the actual image and SHA-256; open it before describing its content. API success
+alone is insufficient. Assisted owner requests retain spoken announcement and
+countdown. A missing game or uncertain API outcome never starts/retries a game
+or capture automatically; preserve its receipt and report the limitation.
+
 For the additive two-actor SE matrix lifecycle read docs/se-matrix-lifecycle.md.
 Inspection fixtures use its explicit freezeActors:true and docs/visual-freeze.md:
 prepare each created/remapped actor, retain SetDontMove, and require actual AI,

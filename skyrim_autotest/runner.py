@@ -698,7 +698,18 @@ class Session:
             raise Blocked('DevBench identity no longer matches the owned game')
         started = time.monotonic()
         try:
-            result = request(self.state['port'], f'api/tool/{name}', args, timeout=bounded_timeout(timeout))
+            if (name == 'capture' and args.get('action', 'capture') == 'capture' and
+                    args.get('kind', 'auto') not in ('providers', 'extensions')):
+                from .screenshots import session_capture
+                def capture_guard():
+                    current = request(self.state['port'], 'api/health', timeout=bounded_timeout(3))
+                    if current.get('pid') != self.state['game']['pid'] or not native.alive(self.state['game']):
+                        raise Blocked('DevBench identity changed across screenshot capture')
+                result = session_capture(self, args,
+                    lambda body: request(self.state['port'], 'api/tool/capture', body,
+                                         timeout=bounded_timeout(timeout)), capture_guard)
+            else:
+                result = request(self.state['port'], f'api/tool/{name}', args, timeout=bounded_timeout(timeout))
         except Exception as e:
             self.log('tool-error', tool=name, args=args, error=str(e), elapsedMs=int((time.monotonic() - started) * 1000))
             raise
