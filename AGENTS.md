@@ -1,6 +1,12 @@
 # AI-agent instructions: Skyrim Autotest
 
 For the additive two-actor SE matrix lifecycle read docs/se-matrix-lifecycle.md.
+Inspection fixtures use its explicit freezeActors:true and docs/visual-freeze.md:
+prepare each created/remapped actor, retain SetDontMove, and require actual AI,
+reference collision and controller collision all off before measurement. Reads
+only verify; controller unavailable/enabled cannot pass from a false reference
+flag. No global AI/collision gate or blind TAI/TCL is required. The expanded native
+provider needs its own rebuild and exact live qualification.
 Use its separate explicit matrixLifecycle policy, exact owned roster and native
 evaluator pins. Available-empty sources differ from failed reads. Cached subject
 traits are not independent engine observations; absent selected-family readback

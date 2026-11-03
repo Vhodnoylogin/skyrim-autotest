@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from skyrim_autotest import fixture_actors, interactive, matrix_lifecycle as subject
-from skyrim_autotest import matrix_evaluator, morph_session, native_session, platform_mapping
+from skyrim_autotest import matrix_evaluator, morph_session, native_session, platform_mapping, visual_freeze, actor_inspection
 from tests.test_morph_session import Session, FakeBackend, policy, declaration, BASE, HUMAN, BEAST
 
 
@@ -220,6 +220,137 @@ class MatrixLifecycleTests(unittest.TestCase):
                 'actor':{'fixtureTag':'Fixture'},'stage':'human','captureSnapshot':'Fresh','familyId':'Example.UNP'}}}
         import json
         self.assertEqual(interactive._request(json.dumps(request), checked, self.session), request)
+
+    def enable_freeze(self):
+        self.config['freezeActors'] = True
+        self.policy['bindings'].append({'id': 'hold', 'script': 'Actor', 'function': 'SetDontMove',
+            'scope': 'member', 'params': ['bool'], 'returnType': 'none', 'effect': 'mutate',
+            'actorSelf': True, 'actorArgs': [], 'raceArgs': [], 'completion': 'native-return'})
+
+    def frozen(self, session, tag, deadline, policy):
+        return {'fixture': {'tag': tag, 'visualFrozen': True, 'dontMove': True},
+                'actor': {'aiEnabled': False, 'collisionsEnabled': False},
+                'native': dict.fromkeys(visual_freeze.GUARDS, 1) | {'referenceCollisionsEnabled': False}}
+
+    def test_frozen_policy_requires_bool_and_exact_hold_binding(self):
+        self.config['freezeActors'] = 1
+        with self.assertRaisesRegex(ValueError, 'Bool'):
+            subject.validate_config(self.config, self.policy)
+        self.config['freezeActors'] = True
+        with self.assertRaisesRegex(ValueError, 'SetDontMove'):
+            subject.validate_config(self.config, self.policy)
+        del self.config['freezeActors']
+        self.enable_freeze()
+        self.assertTrue(subject.validate_config(self.config, self.policy)['freezeActors'])
+
+    def test_unfrozen_fixture_stops_before_measurement_without_mutation_or_snapshot(self):
+        self.enable_freeze()
+        with patch.object(visual_freeze, 'require_frozen', side_effect=ValueError('controller still enabled')), \
+                patch.object(visual_freeze, 'execute') as mutations:
+            with self.assertRaisesRegex(ValueError, 'controller still enabled'): self.observe()
+        mutations.assert_not_called()
+        self.mock_prediction.assert_not_called()
+        self.assertEqual(self.session.state['matrixLifecycle']['snapshots'], {})
+
+    def test_snapshot_brackets_all_owned_actors_and_preserves_actual_flags(self):
+        self.enable_freeze()
+        with patch.object(visual_freeze, 'require_frozen', side_effect=self.frozen) as reads, \
+                patch.object(visual_freeze, 'execute') as mutations:
+            result = self.observe()
+        mutations.assert_not_called()
+        self.assertGreaterEqual(reads.call_count, 2)
+        self.assertFalse(result['actor']['referenceCollisionsEnabled'])
+        self.assertTrue(result['fixture']['dontMove'])
+        self.assertIn('Fixture', result['inspectionFreeze']['before'])
+
+    def test_model_change_across_matrix_measurement_cannot_retain_baseline(self):
+        self.enable_freeze()
+        values = [self.frozen(None, 'Fixture', None, None), self.frozen(None, 'Fixture', None, None)]
+        values[1]['native']['sampledRootToken'] = 2
+        with patch.object(visual_freeze, 'require_frozen', side_effect=values):
+            with self.assertRaisesRegex(ValueError, 'Race/model/world changed'): self.observe()
+        self.assertFalse(self.session.state['matrixLifecycle']['snapshots'])
+
+    def test_creation_freezes_new_actor_before_success_and_failed_freeze_prevents_new_write(self):
+        self.enable_freeze()
+        template = copy.deepcopy(self.session.state['interactiveActorFixtures']['Fixture'])
+        self.session.state['interactiveActorFixtures'] = {}
+        self.session.state['matrixLifecycle']['fixtures'] = {}
+        request = {'domain': 'actor-fixture', 'action': 'create', 'actor': {'fixtureTag': 'New'},
+            'base': {'plugin': 'Example.esm', 'formId': '0x0013475'}, 'maximumCreations': 2,
+            'placement': {'forwardGameUnits': 100, 'rightGameUnits': 0}, 'persistence': 'save-load-witness-required'}
+        def create(session, req, deadline, policy):
+            entry = copy.deepcopy(template); entry['tag'] = req['tag']; entry['actor']['race'] = HUMAN
+            session.state['interactiveActorFixtures'][req['tag']] = entry
+            return {'created': True}
+        with patch.object(fixture_actors, 'create', side_effect=create), \
+                patch.object(subject, '_freeze_actor', side_effect=TimeoutError('filter did not turn off')) as freeze:
+            with self.assertRaisesRegex(TimeoutError, 'filter did not'):
+                subject.execute(self.session, {'operation': 'object.perform', 'request': request}, time.monotonic()+25, self.policy)
+        self.assertEqual(freeze.call_args.args[2], 'New')
+        self.assertEqual(self.session.state['matrixLifecycle']['mutations'][0]['status'], 'intent')
+        self.session.state['activeSemanticCommandId'] = 'new-write'
+        with self.assertRaisesRegex(ValueError, 'Unsettled matrix'):
+            subject._begin(self.session, {})
+        self.assertFalse(self.session.state['matrixLifecycle']['snapshots'])
+
+    def test_load_reprepares_both_owned_actors_and_race_reprepares_target(self):
+        self.enable_freeze()
+        other = copy.deepcopy(self.session.state['interactiveActorFixtures']['Fixture'])
+        other.update(tag='Other', creationId='d'*32, reference='0xFF000456', createdReference='0xFF000456')
+        other['creationWitness'].update(creationId='d'*32, reference='0xFF000456')
+        self.session.state['interactiveActorFixtures']['Other'] = other
+        self.session.state['matrixLifecycle']['fixtures']['Other'] = dict(status='created', creationId='d'*32, humanRace=HUMAN)
+        with patch.object(subject.npc_persistence, 'perform', return_value={'load': {'completed': True}}), \
+                patch.object(subject, '_freeze_actor', return_value={'verified': True}) as freeze:
+            result = subject.execute(self.session, {'operation': 'object.perform', 'request': {
+                'domain': 'save-state', 'action': 'load-owned-disposable-once', 'saveLabel': 'save-one',
+                'maximumLoads': 1, 'processRestart': False}}, time.monotonic()+25, self.policy)
+        self.assertEqual({call.args[2] for call in freeze.call_args_list}, {'Fixture', 'Other'})
+        self.assertEqual(set(result['inspectionFreeze']), {'Fixture', 'Other'})
+        self.session.state['activeSemanticCommandId'] = 'race-next'
+        with patch.object(subject, '_binding', return_value={'domainCompletion': 'observed-race-readback'}) as mutation, \
+                patch.object(subject, '_freeze_actor', return_value={'verified': True}) as freeze:
+            result = subject.execute(self.session, {'operation': 'object.perform', 'request': {
+                'domain': 'actor-race', 'action': 'change-current-race', 'actor': {'fixtureTag': 'Fixture'},
+                'race': BEAST, 'preserveBaseRecord': True}}, time.monotonic()+25, self.policy)
+        self.assertEqual(mutation.call_args.args[3], 'race')
+        self.assertEqual(freeze.call_args.args[2], 'Fixture')
+        self.assertTrue(result['inspectionFreeze']['verified'])
+
+    def test_inspection_write_uses_same_uncertainty_barrier_and_preserves_collision_off(self):
+        from tests.test_actor_inspection import request as inspection_request
+        self.enable_freeze()
+        req = inspection_request('set-reference-display-name')
+        req['actor']['fixtureTag'] = 'Fixture'; req['collisionPolicy'] = 'preserve-current'
+        self.assertEqual(actor_inspection.validate('object.perform', req)['collisionPolicy'], 'preserve-current')
+        self.session.state['matrixLifecycle']['mutations'].append({'commandId': 'earlier', 'status': 'intent'})
+        with patch.object(visual_freeze, 'require_frozen', side_effect=self.frozen), \
+                patch.object(actor_inspection, 'execute') as mutate:
+            with self.assertRaisesRegex(ValueError, 'Unsettled matrix'):
+                subject.execute(self.session, {'operation': 'object.perform', 'request': req}, time.monotonic()+25, self.policy)
+        mutate.assert_not_called()
+
+    def test_transition_reapplies_explicit_locomotion_hold_before_freeze(self):
+        self.enable_freeze()
+        before = self.frozen(None, 'Fixture', None, None)
+        before['fixture']['dontMove'] = False
+        prepared = {'preparation': {'completed': True}}
+        with patch.object(visual_freeze, 'execute', side_effect=[before, prepared]), \
+                patch.object(visual_freeze, 'require_frozen', side_effect=self.frozen), \
+                patch.object(subject.bindings, 'guarded_call', return_value={'returned': None}) as hold:
+            result = subject._freeze_actor(FakeBackend(self.session, time.monotonic()+25), self.policy, 'Fixture')
+        self.assertEqual(hold.call_args.args[1]['args'], [True])
+        self.assertEqual(hold.call_args.args[1]['self']['reference'], self.session.state['interactiveActorFixtures']['Fixture']['reference'])
+        self.assertTrue(result['after']['fixture']['dontMove'])
+
+    def test_uncertain_freeze_blocks_even_the_hold_setter_under_a_new_command(self):
+        self.enable_freeze()
+        self.session.state['visualFreeze'] = {'commands': {'earlier': {'creationId': 'c'*32, 'status': 'uncertain'}}}
+        with patch.object(visual_freeze, 'execute') as prepare, patch.object(subject.bindings, 'guarded_call') as hold:
+            with self.assertRaisesRegex(ValueError, 'Uncertain visual-freeze'):
+                subject._freeze_actor(FakeBackend(self.session, time.monotonic()+25), self.policy, 'Fixture')
+        prepare.assert_not_called(); hold.assert_not_called()
 
 
 if __name__ == "__main__":

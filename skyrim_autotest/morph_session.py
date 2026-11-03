@@ -104,6 +104,9 @@ def validate_config(value, native_policy=None):
 
 
 def validate(operation, req):
+    if isinstance(req, dict) and req.get('domain') == 'actor-visual-freeze':
+        from . import visual_freeze
+        return visual_freeze.validate(operation, req)
     if isinstance(req, dict) and req.get('domain') == 'actor-matrix-state':
         from .matrix_lifecycle import validate as validate_matrix
         return validate_matrix(operation, req)
@@ -721,6 +724,9 @@ def execute(session, args, deadline, policy):
     from . import matrix_lifecycle
     if matrix_lifecycle.enabled(session.state.get('configuration', {})):
         return matrix_lifecycle.execute(session, args, deadline, policy)
+    if args.get('request', {}).get('domain') == 'actor-visual-freeze':
+        from . import visual_freeze
+        return visual_freeze.execute(session, args, deadline, policy)
     if args.get('request', {}).get('domain') == matrix_lifecycle.DOMAIN:
         raise BindingError('Matrix observations require the explicit matrixLifecycle opt-in')
     operation, request = args.get("operation"), args.get("request")

@@ -32,6 +32,8 @@ real OBody control/catalog, independent SKEE vectors, reference names/equipment,
 and a strictly guarded same-process save/load with native form/VM remapping.
 The separate [two-actor matrix lifecycle candidate](docs/se-matrix-lifecycle.md)
 supports OBody-free observations and a pinned external shared-native evaluator.
+Its optional per-actor inspection preparation uses measured AI/reference/controller
+collision-off and locomotion hold; see [visual freeze](docs/visual-freeze.md).
 Its offline checks do not qualify an installed platform or expand old runs.
 These additions require exact installed Polygon qualification before admission.
 An explicit `se_fixture_anchor: "qasmoke-west-navmesh-v1"` with the native SE

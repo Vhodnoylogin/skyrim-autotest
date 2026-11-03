@@ -9,8 +9,9 @@ a game. The legacy six-NPC/OBody morph session is unchanged.
 Use the ordinary executor's completed common startup/readiness stage. Freeze
 the source profile, winning body resources, subject build and installed native
 providers separately. The subject's two-actor fixture remains unchanged; do not
-pad it to six. This adapter does not disable global AI/collision, supply a new
-startup route, adopt actors or accept old FF references.
+pad it to six. Global AI/collision control is not required by the corrected UNP
+fixture. The adapter supplies no new startup route and does not adopt actors or
+accept old FF references.
 
 ## Configuration and binding
 
@@ -29,6 +30,7 @@ The edition must be explicitly `se`. Required matrix fields:
 | `ownKey` | Actual subject contribution key |
 | `evaluator` | Pinned external native executable/XML, described below |
 | `counterfactualSourceMorphs` | Optional frozen ordinary names for hypothetical offline controls; these are never claimed observed |
+| `freezeActors` | Optional explicit Bool; `true` prepares and measures per-actor AI/collision-off plus locomotion hold |
 
 Required binding roles are `status` (Int), `error` (String), `humanWeight` and
 `beastWeight` (Float), `hasHumanTrait` (Bool, extra String parameter),
@@ -52,6 +54,51 @@ the callback's arithmetic return is recorded separately and never becomes zero
 observation evidence.
 
 ## Actions and observation
+
+### Per-actor inspection preparation
+
+For an inspection fixture requiring AI/collision-off, freeze `freezeActors:true`
+in the matrix policy and include one exact native `Actor.SetDontMove(Bool)`
+member binding (mutate, None, actorSelf, native-return) in `nativeBindings`.
+Omitting the option preserves the prior matrix path. It never means global
+AI/collision state, and no console toggle is issued.
+
+After each ordinary persistent creation, the same once-only semantic action
+uses [the existing visual-freeze protocol](visual-freeze.md) before returning
+preparation success. It independently reads AI, the reference collision flag and
+the current character-controller CFilter. All three must be off; actual
+`dontMove` must also be true. A missing controller is unavailable. A false
+reference flag with an enabled controller is incomplete and cannot admit a
+baseline. This source candidate does not assert that the public reference setter
+will change the controller filter on every runtime; exact engine qualification
+must establish that before the platform is selected.
+
+Race/link operations and the owned remapped load reapply this preparation under
+their own durable transition identity. One load can prepare both actual creations;
+it cannot replay a command on either actor. A lost ACK, partial state or timeout
+keeps an unsettled intent and blocks further matrix writes. Read-only diagnosis
+remains possible. A queue-admitted refresh/configure is still not completed work:
+subsequent observations must witness the actual settled subject state and freeze.
+
+Matrix measurements and actor inspections bracket the entire current owned
+roster with fresh freeze/hold reads and compare process/world/race/root identity.
+They never issue repair setters. A model change or reset freeze blocks the
+measurement without retaining a baseline; prepare explicitly with a fresh
+`object.perform` request using domain `actor-visual-freeze`, action
+`freeze-owned-reference-once` and the owned `actor.fixtureTag`, after any earlier
+transition has completed unambiguously. This does not replay an uncertain action.
+The corresponding `world.read` uses only domain and actor and reports actual
+state. For naming/unequipping/holding through `actor-fixture-inspection`, use
+`collisionPolicy:"preserve-current"`; those actions preserve the verified off
+state. The earlier retain-enabled inspection path remains available separately.
+
+Results retain `inspectionFreeze`, `fixture.visualFrozen`, `fixture.dontMove`,
+`actor.aiEnabled`, `actor.collisionsEnabled` (controller) and
+`actor.referenceCollisionsEnabled`. Raw inspection and visual-state envelopes
+remain separate. These sampled facts are not proof of continuous immobility,
+absent contacts, stopped animation or disabled third-party physics.
+
+### Owned lifecycle
 
 Existing `actor-fixture`, `actor-fixture-identity`, `actor-race`, `morph-link`,
 `actor-fixture-inspection` and `save-state` semantics use the new opt-in route.

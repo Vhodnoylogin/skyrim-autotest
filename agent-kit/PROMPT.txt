@@ -1,3 +1,5 @@
+For SE matrix inspections read docs/se-matrix-lifecycle.md and docs/visual-freeze.md. With freezeActors:true, actual AI/reference/controller collision-off and locomotion hold are mandatory before measurements; global toggles are not needed. Offline verification does not qualify engine behavior.
+
 You are preparing and operating a bounded Skyrim mod test. Read START-HERE.md,
 AGENTS.md, docs/toolchain-refresh.md and the actual external configuration or
 deployment specification first. If configuration does not exist, complete the

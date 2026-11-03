@@ -46,8 +46,10 @@ def validate_config(value, policy=None):
     if value is None:
         return None
     required = {"maximumFixtures", "bindings", "sourceMorphs", "traitSources", "publicTargets", "ownKey", "evaluator", "beastRace"}
-    if type(value) is not dict or not required <= set(value) or set(value) - required - {'counterfactualSourceMorphs'} or type(value["maximumFixtures"]) is not int or value["maximumFixtures"] != 2:
+    if type(value) is not dict or not required <= set(value) or set(value) - required - {'counterfactualSourceMorphs', 'freezeActors'} or type(value["maximumFixtures"]) is not int or value["maximumFixtures"] != 2:
         raise BindingError("matrixLifecycle requires its exact fields and explicit maximumFixtures:2")
+    if 'freezeActors' in value and type(value['freezeActors']) is not bool:
+        raise BindingError('freezeActors requires an explicit Bool')
     source = _names(value["sourceMorphs"], "sourceMorphs")
     counterfactual = _names(value.get('counterfactualSourceMorphs', []), 'counterfactualSourceMorphs')
     targets = _names(value["publicTargets"], "publicTargets", 1, 64)
@@ -71,6 +73,9 @@ def validate_config(value, policy=None):
         if beast_race not in frozen['allowedRaceForms']:
             raise BindingError('Matrix beast race must be in the frozen race allowlist')
         by_id = {entry["id"]: entry for entry in frozen["bindings"]}
+        if value.get('freezeActors') is True:
+            from . import actor_inspection
+            actor_inspection._role(frozen, 'hold')
         for role, identifier in mapping.items():
             entry = by_id.get(identifier)
             extras, returned, effect = SIGNATURES.get(role, ([], "string", "read"))
@@ -133,6 +138,8 @@ def _begin(session, request):
     state = _state(session)
     if any(row["commandId"] == command for row in state["mutations"]):
         raise BindingError("Matrix command already attempted; never replay")
+    if any(row.get('status') != 'returned' for row in state['mutations']):
+        raise BindingError('Unsettled matrix mutation blocks further writes; inspect without replay')
     intent = {"commandId": command, "request": copy.deepcopy(request), "status": "intent"}
     state["mutations"].append(intent)
     session.save()
@@ -158,6 +165,49 @@ def _value(session, config, policy, role, spec, deadline, extras=()):
     return _binding(session, config, policy, role, spec, deadline, extras)["returned"]
 
 
+def _require_frozen(backend, policy, tag):
+    from . import visual_freeze
+    return visual_freeze.require_frozen(backend.s, tag, backend.end, policy)
+
+
+def _frozen_roster(backend, policy):
+    return {tag: _require_frozen(backend, policy, tag) for tag in _state(backend.s)['fixtures']}
+
+
+def _same_frozen_roster(before, after):
+    from . import visual_freeze
+    if set(before) != set(after) or any(
+            before[tag]['native'][key] != after[tag]['native'][key]
+            for tag in before for key in visual_freeze.GUARDS) or any(
+            before[tag]['native'].get(key) != after[tag]['native'].get(key)
+            for tag in before for key in ('pid', 'currentReference', 'base')) or any(
+            before[tag]['fixture'].get('creationId') != after[tag]['fixture'].get('creationId') or
+            before[tag].get('incarnation') != after[tag].get('incarnation') for tag in before):
+        raise BindingError('Race/model/world changed across frozen matrix observation')
+
+
+def _freeze_actor(backend, policy, tag):
+    """One explicit transition preparation; reads never invoke these mutations."""
+    from . import actor_inspection, visual_freeze
+    session = backend.s
+    entry, spec = _fixture(session, tag)
+    if any(row.get('creationId') == entry['creationId'] and row.get('status') != 'completed'
+           for row in session.state.get('visualFreeze', {}).get('commands', {}).values()):
+        raise BindingError('Uncertain visual-freeze intent blocks further actor preparation')
+    before = visual_freeze.execute(session, {'operation': 'world.read', 'request': {
+        'domain': visual_freeze.DOMAIN, 'actor': {'fixtureTag': tag}}}, backend.end, policy)
+    hold_receipt = None
+    if before['fixture']['dontMove'] is not True:
+        role = actor_inspection._role(policy, 'hold')
+        hold_receipt = bindings.guarded_call(session, {'bindingId': role['id'], 'self': spec, 'args': [True]},
+                                             backend.end, policy)
+    prepared = visual_freeze.execute(session, {'operation': 'object.perform', 'request': {
+        'domain': visual_freeze.DOMAIN, 'actor': {'fixtureTag': tag}, 'action': visual_freeze.ACTION}},
+        backend.end, policy)
+    after = _require_frozen(backend, policy, tag)
+    return {'before': before, 'holdReceipt': hold_receipt, 'preparation': prepared, 'after': after}
+
+
 def _same_bits(a, b):
     try:
         return struct.pack("<f", a) == struct.pack("<f", b)
@@ -173,6 +223,7 @@ def observe(backend, config, policy, request):
     label = request["captureSnapshot"]
     if label in state["snapshots"]:
         raise BindingError("Snapshot already retained; select a new observation label")
+    freeze_before = _frozen_roster(backend, policy) if config.get('freezeActors') is True else None
     names = list(dict.fromkeys(config["sourceMorphs"] + config["publicTargets"]))
     measured, identity, raw = morph_session._read_morphs(backend, spec, names)
     human_race = state['fixtures'][tag].get('humanRace')
@@ -271,6 +322,13 @@ def observe(backend, config, policy, request):
     if latest_identity != identity or latest != measured:
         raise BindingError("Game observation changed while the external evaluator ran")
     result["providerObservations"].extend(latest_raw)
+    if freeze_before is not None:
+        freeze_after = _frozen_roster(backend, policy)
+        _same_frozen_roster(freeze_before, freeze_after)
+        result['inspectionFreeze'] = {'before': freeze_before, 'after': freeze_after}
+        result['fixture'] = copy.deepcopy(freeze_after[tag]['fixture'])
+        result['actor'].update({key: freeze_after[tag]['actor'][key] for key in ('aiEnabled', 'collisionsEnabled')})
+        result['actor']['referenceCollisionsEnabled'] = freeze_after[tag]['native']['referenceCollisionsEnabled']
     missing = any(not row['available'] for row in list(traits.values()) + list(input_traits.values()))
     result["matrix"]["availability"] = "partial" if not family["available"] or missing else "complete"
     result['matrix']['nativeParityAvailable'] = family['matchesRequested'] and not missing
@@ -302,11 +360,32 @@ def execute(session, args, deadline, policy):
         raise BindingError('Matrix roster must contain all and only its own creation attempts')
     for tag in state['fixtures']:
         _fixture(session, tag)
+    if domain == 'actor-visual-freeze':
+        from . import visual_freeze
+        if args['operation'] == 'world.read':
+            return visual_freeze.execute(session, args, deadline, frozen)
+        intent = _begin(session, request)
+        result = _freeze_actor(backend, frozen, morph_session._actor(request['actor']))
+        intent.update(status='returned')
+        session.save()
+        return result['after'] | {'preparation': result['preparation']['preparation'], 'freezeEvidence': result}
     if domain == DOMAIN:
         return observe(backend, config, frozen, request)
     if domain == 'actor-fixture-inspection':
         from . import actor_inspection
-        return actor_inspection.execute(session, args, deadline, frozen)
+        freeze_before = _frozen_roster(backend, frozen) if config.get('freezeActors') is True else None
+        if freeze_before is not None and args['operation'] == 'object.perform' and request['collisionPolicy'] != 'preserve-current':
+            raise BindingError('Frozen matrix inspection must preserve-current collision policy')
+        intent = _begin(session, request) if args['operation'] == 'object.perform' else None
+        result = actor_inspection.execute(session, args, deadline, frozen)
+        if freeze_before is not None:
+            freeze_after = _frozen_roster(backend, frozen)
+            _same_frozen_roster(freeze_before, freeze_after)
+            result['inspectionFreeze'] = {'before': freeze_before, 'after': freeze_after}
+        if intent is not None:
+            intent.update(status='returned')
+            session.save()
+        return result
     if domain not in REUSED:
         raise BindingError("Domain is outside the OBody-free matrix lifecycle")
     if domain == "save-state":
@@ -317,6 +396,8 @@ def execute(session, args, deadline, policy):
             translated["fixtureTags"] = request["actors"]
         intent = _begin(session, request)
         result = npc_persistence.perform(session, translated, deadline, frozen)
+        if config.get('freezeActors') is True and translated['action'] == 'load':
+            result['inspectionFreeze'] = {tag: _freeze_actor(backend, frozen, tag) for tag in state['fixtures']}
     elif domain == "actor-fixture":
         tag = morph_session._actor(request["actor"])
         if request["maximumCreations"] != 2 or tag in state["fixtures"] or len(state["fixtures"]) >= 2:
@@ -333,6 +414,8 @@ def execute(session, args, deadline, policy):
         if human_race == config['beastRace']:
             raise BindingError('Matrix fixture was not created in a human race')
         state["fixtures"][tag].update(status="created", creationId=entry["creationId"], humanRace=human_race)
+        if config.get('freezeActors') is True:
+            result['inspectionFreeze'] = _freeze_actor(backend, frozen, tag)
     else:
         tag = morph_session._actor(request["actor"])
         entry, spec = _fixture(session, tag)
@@ -346,8 +429,11 @@ def execute(session, args, deadline, policy):
         extras = [request["race"]] if role == "race" else [request["familyId"]] if role == "configure" else []
         intent = _begin(session, request)
         result = _binding(session, config, frozen, role, spec, deadline, extras)
+        freeze_result = _freeze_actor(backend, frozen, tag) if config.get('freezeActors') is True else None
         if role != "race":
             result = {"request": {"admitted": result["returned"], "completed": False}, "bindingReceipt": result}
+        if freeze_result is not None:
+            result['inspectionFreeze'] = freeze_result
     intent.update(status="returned")
     session.save()
     return result

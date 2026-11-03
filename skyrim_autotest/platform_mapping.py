@@ -76,9 +76,12 @@ def matrix_operations():
               'matrix.counterfactual', 'actor.weightRaw', 'actor.weightNormalized')
     result['world.read']['fields'].update({field: field for field in fields})
     result['world.read']['fields'].update({field: field for field in (
+        'fixture.visualFrozen', 'fixture.dontMove', 'actor.referenceCollisionsEnabled', 'inspectionFreeze',
         'save.actorWitnessCount', 'save.actorRemapWitnessCount', 'save.worldReady', 'load.actorWitnessCount',
         'load.completed', 'load.sameProcess', 'actor.sameRunCreationWitnessCount')})
     result['object.perform']['fields'].update({field: field for field in (
+        'fixture.visualFrozen', 'fixture.dontMove', 'actor.aiEnabled', 'actor.collisionsEnabled',
+        'actor.referenceCollisionsEnabled', 'inspectionFreeze', 'freezeEvidence', 'preparation.completed',
         'save.completed', 'save.actorWitnessCount', 'load.completed', 'load.actorWitnessCount',
         'request.admitted', 'request.completed')})
     return result

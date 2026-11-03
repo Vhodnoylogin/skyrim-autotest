@@ -51,7 +51,7 @@ def validate(operation, req):
     if operation == "object.perform":
         if (not isinstance(req["action"], str) or req["action"] not in ACTIONS or req["preserveInventory"] is not True or
                 req["editBaseNPC"] is not False or req["editBaseOutfit"] is not False or
-                req["collisionPolicy"] != "retain-enabled" or req["noRetryOnUnknownOutcome"] is not True):
+                req["collisionPolicy"] not in ("retain-enabled", "preserve-current") or req["noRetryOnUnknownOutcome"] is not True):
             raise BindingError("Inspection preparation forbids base/outfit/inventory deletion and collision-disable commands")
     else:
         if (req["wornArmorSlots"] != [30, 61] or any(type(v) is not int for v in req["wornArmorSlots"]) or

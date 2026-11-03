@@ -7,6 +7,7 @@
 #include <set>
 #include <filesystem>
 #include <unordered_map>
+#include <utility>
 
 namespace dvb::NPCPersistence {
 namespace {
@@ -20,6 +21,10 @@ bool initialized=false;
 std::uint64_t visibilityWorldGeneration=1;
 bool visibilityWorldLoading=true;
 std::unordered_map<std::string,json> visibilityCommands;
+std::unordered_map<std::string,json> visualCommands;
+struct VisualRoot { std::uintptr_t address{};std::uint32_t handle{};std::uint64_t world{},token{}; };
+std::unordered_map<std::uint32_t,VisualRoot> visualRoots;
+std::uint64_t nextVisualRootToken{};
 auto* Policy() { auto* vm=RE::BSScript::Internal::VirtualMachine::GetSingleton();return vm?vm->GetObjectHandlePolicy():nullptr; }
 bool Token(const std::string& s) { return s.size()==32&&s.find_first_not_of("0123456789abcdef")==std::string::npos; }
 bool Label(const std::string& s) { return !s.empty()&&s.size()<=96&&s.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")==std::string::npos; }
@@ -66,6 +71,48 @@ void VisibilityGuard(const json& observed,const json& args,bool mutation) {
     if(observed.at("currentReference")!=args.at("reference")||observed.at("base")!=args.at("base"))
         throw ToolError(409,"Fixture visibility reference/base mismatch");
 }
+json VisualFacts(RE::Actor* actor) {
+    json out={{"aiEnabled",actor->IsAIEnabled()},{"referenceCollisionsEnabled",actor->HasCollision()},
+        {"collisionStateObserved",false},{"collisionStatus","unavailable"},{"collisionsEnabled",nullptr},
+        {"collisionFilter",nullptr},{"visualFrozen",false},
+        {"collisionBasis","Current character-controller CFilter no-collision flag; reference flag retained separately; not contact proof"}};
+    if(const auto* controller=actor->GetCharController()) {
+        RE::CFilter filter{};controller->GetCollisionFilterInfo(filter);
+        out["collisionStateObserved"]=true;out["collisionStatus"]="available";
+        out["collisionsEnabled"]=!filter.QNoCollision();out["collisionFilter"]=filter.filter;
+        out["visualFrozen"]=!out["aiEnabled"].get<bool>()&&!out["referenceCollisionsEnabled"].get<bool>()&&filter.QNoCollision();
+    }
+    return out;
+}
+json VisualState(RE::Actor* actor) {
+    auto out=Visibility(actor);
+    if(out["disabled"].get<bool>()||!out["loaded3D"].get<bool>()||!actor->GetRace())
+        throw ToolError(422,"Visual freeze requires an enabled loaded fixture and actual race");
+    auto* root=actor->Get3D(false);
+    if(!visualRoots.contains(actor->GetFormID())&&visualRoots.size()>=256)throw ToolError(422,"Visual root observation bound reached");
+    auto& sample=visualRoots[actor->GetFormID()];
+    const auto address=reinterpret_cast<std::uintptr_t>(root);const auto handle=actor->GetHandle().native_handle();
+    if(sample.address!=address||sample.handle!=handle||sample.world!=visibilityWorldGeneration) {
+        sample={address,handle,visibilityWorldGeneration,++nextVisualRootToken};
+    }
+    out["protocol"]="npc-visual-freeze/1";out["raceForm"]=Hex(actor->GetRace()->GetFormID());
+    out["sampledRootToken"]=sample.token;out["rootIdentityBasis"]="Sampled process-local actor-handle/world/root token; hidden pointer reuse between samples is not detectable";
+    out.update(VisualFacts(actor));
+    return out;
+}
+void VisualGuard(const json& observed,const json& args,bool mutation) {
+    VisibilityGuard(observed,args,mutation);
+    if(!args.contains("raceForm")||args.at("raceForm")!=observed.at("raceForm"))
+        throw ToolError(409,"Visual fixture race changed");
+    if((mutation||args.contains("sampledRootToken"))&&
+       (!args.contains("sampledRootToken")||args.at("sampledRootToken")!=observed.at("sampledRootToken")))
+        throw ToolError(409,"Visual fixture root changed");
+}
+bool SameVisualActor(const json& before,const json& now) {
+    for(const auto* field:{"providerSession","currentReference","base","currentVmHandle"})
+        if(before.at(field)!=now.at(field))return false;
+    return true;
+}
 json Inspection(RE::Actor* actor) {
     json slots=json::array();
     for(unsigned slot=30;slot<=61;++slot) {
@@ -82,10 +129,11 @@ json Inspection(RE::Actor* actor) {
     const auto h=policy->GetHandleForObject(static_cast<RE::VMTypeID>(actor->GetFormType()),actor);
     if(h==policy->EmptyHandle()||!policy->IsHandleObjectAvailable(h)||policy->GetObjectForHandle(static_cast<RE::VMTypeID>(actor->GetFormType()),h)!=actor)
         throw ToolError(422,"Inspection native VM identity unavailable");
-    return {{"protocol","npc-persistence/1"},{"pid",GetCurrentProcessId()},{"providerSession",session},
+    json out={{"protocol","npc-persistence/1"},{"pid",GetCurrentProcessId()},{"providerSession",session},
+        {"worldGeneration",visibilityWorldGeneration},
         {"currentReference",Hex(actor->GetFormID())},{"base",Hex(actor->GetActorBase()->GetFormID())},
         {"runtimeHandle",actor->GetHandle().native_handle()},{"currentVmHandle",std::to_string(h)},
-        {"persistent",actor->IsPersistent()},
+        {"persistent",actor->IsPersistent()},{"parentCell",actor->GetParentCell()?json(Hex(actor->GetParentCell()->GetFormID())):json(nullptr)},
         {"displayName",label?std::string(label,length):std::string{}},{"position",{pos.x,pos.y,pos.z}},
         {"wornArmorSlots",slots},{"equippedLeft",left?json(Hex(left->GetFormID())):json(nullptr)},
         {"equippedRight",right?json(Hex(right->GetFormID())):json(nullptr)},
@@ -94,7 +142,8 @@ json Inspection(RE::Actor* actor) {
         {"dontMove",lifeState==9},{"actorLifeState",lifeState},
         {"movementBlocked",actor->GetActorRuntimeData().boolFlags.all(RE::Actor::BOOL_FLAGS::kMovementBlocked)},
         {"movementObservationBasis","typed ActorState life state 9; exact SE 1.7.104 SetDontMove contract"},
-        {"collisionStateObserved",false},{"collisionDisableCommandsIssued",0}};
+        {"collisionDisableCommandsIssued",0},{"collisionCommandCountBasis","This inspection itself issues no collision mutation"}};
+    out.update(VisualFacts(actor));return out;
 }
 void Release() noexcept {
     try { if(auto* p=Policy())for(auto h:retained)if(p->IsHandleObjectAvailable(h))p->ReleaseHandle(h); }
@@ -171,11 +220,51 @@ json Handle(const json& args,const ToolContext&) {
         (action=="identity"||action=="inspection")?std::set<std::string>{"action","reference","base","timeoutMs"}:
         action=="prepare"?std::set<std::string>{"action","reference","base","kind","displayName","requestId","timeoutMs"}:
         action=="visibility_state"?std::set<std::string>{"action","reference","base","providerSession","worldGeneration","currentVmHandle","runtimeHandle","parentCell","timeoutMs"}:
-        action=="set_visibility"?std::set<std::string>{"action","reference","base","providerSession","worldGeneration","currentVmHandle","runtimeHandle","parentCell","requestId","visible","expectedDisabled","timeoutMs"}:std::set<std::string>{};
+        action=="set_visibility"?std::set<std::string>{"action","reference","base","providerSession","worldGeneration","currentVmHandle","runtimeHandle","parentCell","requestId","visible","expectedDisabled","timeoutMs"}:
+        action=="visual_state"?std::set<std::string>{"action","reference","base","providerSession","worldGeneration","currentVmHandle","runtimeHandle","parentCell","raceForm","sampledRootToken","timeoutMs"}:
+        action=="freeze_visual"?std::set<std::string>{"action","reference","base","providerSession","worldGeneration","currentVmHandle","runtimeHandle","parentCell","raceForm","sampledRootToken","requestId","expectedAIEnabled","expectedCollisionsEnabled","expectedReferenceCollisionsEnabled","timeoutMs"}:std::set<std::string>{};
     if(allowed.empty())throw ToolError(400,"Unknown NPC persistence action");
     for(const auto& [key,unused]:args.items())if(!allowed.contains(key))throw ToolError(400,"Unknown NPC persistence field");
     const auto ms=args.value("timeoutMs",3000);if(ms<1||ms>5000)throw ToolError(400,"Timeout outside1..5000");
     return MainThread::RunAndWait([args,action]()->json {
+        if(action=="visual_state"||action=="freeze_visual") {
+            auto* actor=Actor(FormID(args.at("reference").get<std::string>()));
+            RE::NiPointer<RE::Actor> retainedActor(actor);RE::NiPointer<RE::NiAVObject> retainedRoot(actor->Get3D(false));
+            auto before=VisualState(actor);VisualGuard(before,args,action=="freeze_visual");
+            if(action=="visual_state") {
+                if(before["visualFrozen"].get<bool>())for(auto& [id,command]:visualCommands)
+                    if(command["status"]=="call-returned"&&SameVisualActor(command["before"],before))command["status"]="completed";
+                return before;
+            }
+            if(before["collisionStateObserved"]!=true)throw ToolError(422,"Actual character-controller collision state unavailable; no freeze mutation");
+            const auto token=args.at("requestId").get<std::string>();
+            if(!Token(token))throw ToolError(400,"Exact visual-freeze command UUID required");
+            for(const auto& [expected,actual]:{std::pair{"expectedAIEnabled","aiEnabled"},
+                std::pair{"expectedCollisionsEnabled","collisionsEnabled"},std::pair{"expectedReferenceCollisionsEnabled","referenceCollisionsEnabled"}}) {
+                if(!args.at(expected).is_boolean()||args.at(expected)!=before.at(actual))
+                    throw ToolError(409,"Visual fixture AI/collision state changed before mutation");
+            }
+            if(visualCommands.size()>=256||visualCommands.contains(token))throw ToolError(409,"Visual-freeze command consumed or bound reached; never replay");
+            for(const auto& [id,command]:visualCommands)
+                if(command["status"]!="completed"&&SameVisualActor(command["before"],before))
+                    throw ToolError(409,"Unsettled visual-freeze intent blocks further actor mutation");
+            visualCommands.emplace(token,json{{"status","intent"},{"before",before}});
+            try {
+                // Public, explicit setters. SetCollision changes the reference
+                // flag only; a separate controller filter read must confirm it.
+                const bool aiCall=before["aiEnabled"].get<bool>(),collisionCall=before["referenceCollisionsEnabled"].get<bool>();
+                if(aiCall)actor->EnableAI(false);
+                if(collisionCall)actor->SetCollision(false);
+                if(RE::TESForm::LookupByID(actor->GetFormID())!=actor||actor->Get3D(false)!=retainedRoot.get())
+                    throw ToolError(409,"Visual fixture identity/root changed during freeze");
+                auto after=VisualState(actor);VisualGuard(after,args,true);
+                after["requestId"]=token;after["mutationIssued"]=true;after["aiSetterIssued"]=aiCall;
+                after["referenceCollisionSetterIssued"]=collisionCall;after["toggleUsed"]=false;
+                after["completionBasis"]="Explicit setters returned; fresh independent state observation required; no contact acceptance";
+                visualCommands[token]={{"status",after["visualFrozen"].get<bool>()?"completed":"call-returned"},{"before",before},{"after",after}};
+                return after;
+            }catch(...) {visualCommands[token]["status"]="uncertain";throw;}
+        }
         if(action=="visibility_state"||action=="set_visibility") {
             auto* actor=Actor(FormID(args.at("reference").get<std::string>()));
             RE::NiPointer<RE::Actor> retainedActor(actor);
@@ -280,6 +369,9 @@ void Register(ToolRegistry& registry) {
         {"providerSession",{{"type","string"}}},{"worldGeneration",{{"type","integer"}}},
         {"currentVmHandle",{{"type","string"}}},{"runtimeHandle",{{"type","integer"}}},
         {"parentCell",{{"type","string"}}},{"visible",{{"type","boolean"}}},{"expectedDisabled",{{"type","boolean"}}},
+        {"raceForm",{{"type","string"}}},{"sampledRootToken",{{"type","integer"}}},
+        {"expectedAIEnabled",{{"type","boolean"}}},{"expectedCollisionsEnabled",{{"type","boolean"}}},
+        {"expectedReferenceCollisionsEnabled",{{"type","boolean"}}},
         {"marker",{{"type","string"}}},{"nonce",{{"type","string"}}},{"timeoutMs",{{"type","integer"}}}}}};
     registry.Register(std::move(d),Handle);
 }
