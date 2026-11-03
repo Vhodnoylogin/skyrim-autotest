@@ -9,6 +9,10 @@ For an explicitly frozen SE morph/NPC platform also read docs/morph-sessions.md.
 One guarded six-NPC save/load requires npcPersistence/morphSession opt-ins and
 native form/VM remap proof. Raw save bindings, old FF IDs, direct GenActor and a
 successful tool-component qualification cannot substitute for subject acceptance.
+For a two-actor, OBody-free matrix fixture use the separate explicit candidate in
+docs/se-matrix-lifecycle.md. Require its current installed qualification before
+launch; empty observed sources, unavailable traits, actual family selection and
+shared-native prediction have different meanings. Do not pad the fixture to six.
 
 Task supplied by the owner: <MOD, BUILD/LOCATION, BEHAVIOR TO CHECK, SE OR VR,
 ALLOWED EXECUTION SCOPE, TIME/ATTEMPT BUDGET, EXTERNAL CONFIGURATION OR DEPLOYMENT SPEC>.

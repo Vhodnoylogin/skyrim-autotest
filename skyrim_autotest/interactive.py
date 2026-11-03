@@ -30,7 +30,7 @@ class InteractiveError(ValueError):
 
 def validate(settings):
     required = {'channelConfig', 'maximumSeconds', 'allowedTools', 'sourceId'}
-    if (type(settings) is not dict or not required <= set(settings) or set(settings) - required - {'nativeBindings','npcPersistence','morphSession','manageCommandEndpoint','timeoutPolicy'} or
+    if (type(settings) is not dict or not required <= set(settings) or set(settings) - required - {'nativeBindings','npcPersistence','morphSession','matrixLifecycle','manageCommandEndpoint','timeoutPolicy'} or
             not isinstance(settings['channelConfig'], str) or not Path(settings['channelConfig']).is_absolute()):
         raise InteractiveError('interactive_session requires explicit channelConfig, maximumSeconds, allowedTools and sourceId')
     maximum, allowed = settings['maximumSeconds'], settings['allowedTools']
@@ -55,6 +55,11 @@ def validate(settings):
     if 'morphSession' in settings:
         from .morph_session import validate_config
         result['morphSession'] = validate_config(settings['morphSession'],result.get('nativeBindings'))
+    if 'matrixLifecycle' in settings:
+        if 'morphSession' in settings or settings.get('npcPersistence') is not True:
+            raise InteractiveError('matrixLifecycle requires NPC persistence and a separate policy from morphSession')
+        from .matrix_lifecycle import validate_config
+        result['matrixLifecycle'] = validate_config(settings['matrixLifecycle'], result.get('nativeBindings'))
     return result
 
 
@@ -145,7 +150,7 @@ def _request(text, settings, session):
         operation, request = args.get('operation'), args.get('request', {})
         from . import morph_session
         if morph_session.validate(operation,request):
-            if edition!='se' or not settings.get('morphSession') or not settings.get('nativeBindings'):
+            if edition!='se' or not (settings.get('morphSession') or settings.get('matrixLifecycle')) or not settings.get('nativeBindings'):
                 raise InteractiveError('Morph domains require the explicit frozen SE morph session and actor bindings')
             if request.get('domain')=='save-state' and not settings.get('npcPersistence'):
                 raise InteractiveError('Owned save/load requires explicit NPC persistence opt-in')

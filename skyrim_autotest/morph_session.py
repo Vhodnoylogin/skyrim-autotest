@@ -104,6 +104,9 @@ def validate_config(value, native_policy=None):
 
 
 def validate(operation, req):
+    if isinstance(req, dict) and req.get('domain') == 'actor-matrix-state':
+        from .matrix_lifecycle import validate as validate_matrix
+        return validate_matrix(operation, req)
     if isinstance(req, dict) and req.get("domain") == "actor-fixture-visibility":
         from . import fixture_visibility
         return fixture_visibility.validate(operation, req)
@@ -118,7 +121,7 @@ def validate(operation, req):
     if domain == "actor-fixture":
         required |= {"action", "actor", "base", "placement", "persistence", "maximumCreations"}
         if (action != "create" or req.get("persistence") != "save-load-witness-required" or
-                type(req.get("maximumCreations")) is not int or req["maximumCreations"] not in (6, 12)):
+                type(req.get("maximumCreations")) is not int or req["maximumCreations"] not in (2, 6, 12)):
             raise BindingError("Only explicitly bounded persistent six/twelve-actor fixtures are supported")
         base = req.get("base")
         if type(base) is not dict or set(base) != {"plugin", "formId"}: raise BindingError("Exact plugin/local base record required")
@@ -249,7 +252,7 @@ def validate(operation, req):
         required.add("saveLabel"); _tag(req.get("saveLabel"))
         if action == "save-disposable-once":
             required |= {"action", "actors", "scope", "maximumSaves"}
-            if req.get("scope") != "current-temporary-profile" or req.get("maximumSaves") != 1 or type(req.get("actors")) is not list or len(req["actors"]) != 6 or len(set(req["actors"])) != 6: raise BindingError("Exactly one owned disposable six-actor save is supported")
+            if req.get("scope") != "current-temporary-profile" or req.get("maximumSaves") != 1 or type(req.get("actors")) is not list or len(req["actors"]) not in (2, 6) or len(set(req["actors"])) != len(req["actors"]): raise BindingError("Exactly one owned disposable two/six-actor save is supported")
             for tag in req["actors"]: _tag(tag)
         elif action == "load-owned-disposable-once":
             required |= {"action", "maximumLoads", "processRestart"}
@@ -715,9 +718,16 @@ def _snapshot_result(backend, config, policy, request):
 
 
 def execute(session, args, deadline, policy):
+    from . import matrix_lifecycle
+    if matrix_lifecycle.enabled(session.state.get('configuration', {})):
+        return matrix_lifecycle.execute(session, args, deadline, policy)
+    if args.get('request', {}).get('domain') == matrix_lifecycle.DOMAIN:
+        raise BindingError('Matrix observations require the explicit matrixLifecycle opt-in')
     operation, request = args.get("operation"), args.get("request")
     if not validate(operation, request): raise BindingError("Unrelated request passed to morph session executor")
     config, policy = _config(session, policy)
+    if request.get('domain') == 'actor-fixture' and request.get('maximumCreations') == 2:
+        raise BindingError('Two-actor creation requires the explicit matrixLifecycle opt-in')
     if request["domain"] == "actor-fixture-visibility":
         from . import fixture_visibility
         return fixture_visibility.perform(session, request, deadline, policy)

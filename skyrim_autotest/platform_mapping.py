@@ -57,3 +57,28 @@ def operations():
             args['request'] = {'$parameter': 'request'}
         result[op] = {'tool': 'platform', 'args': args, 'fields': {name: name for name in names}}
     return result
+
+
+def matrix_operations():
+    """Explicit candidate fields; never selects/replaces a qualified platform.
+
+    Complete vector objects remain available as raw measurements; native parity
+    and source/trait availability must be asserted separately by the subject.
+    """
+    result = operations()
+    fields = ('matrix.sources', 'matrix.targets', 'matrix.traits', 'matrix.nativePrediction',
+              'matrix.selectedFamily', 'matrix.selectedFamily.available', 'matrix.selectedFamily.value',
+              'matrix.requestedFamily', 'matrix.availability', 'matrix.publicTargetCount',
+              'matrix.nativeParityAvailable', 'matrix.selectedFamily.matchesRequested',
+              'matrix.ownKeyPresentCount', 'matrix.zeroExpectedOwnKeyPresentCount', 'matrix.inputTraits',
+              'matrix.mismatchCount', 'matrix.sourcePreserved', 'matrix.traitsPreserved',
+              'matrix.weightPreserved', 'matrix.ordinarySourceMapAvailable', 'matrix.ordinarySourceMapEmpty',
+              'matrix.counterfactual', 'actor.weightRaw', 'actor.weightNormalized')
+    result['world.read']['fields'].update({field: field for field in fields})
+    result['world.read']['fields'].update({field: field for field in (
+        'save.actorWitnessCount', 'save.actorRemapWitnessCount', 'save.worldReady', 'load.actorWitnessCount',
+        'load.completed', 'load.sameProcess', 'actor.sameRunCreationWitnessCount')})
+    result['object.perform']['fields'].update({field: field for field in (
+        'save.completed', 'save.actorWitnessCount', 'load.completed', 'load.actorWitnessCount',
+        'request.admitted', 'request.completed')})
+    return result

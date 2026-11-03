@@ -30,6 +30,9 @@ Its transport preserves raw command evidence; the origin owns business assertion
 The SE source candidate adds [morph sessions and owned NPC persistence](docs/morph-sessions.md):
 real OBody control/catalog, independent SKEE vectors, reference names/equipment,
 and a strictly guarded same-process save/load with native form/VM remapping.
+The separate [two-actor matrix lifecycle candidate](docs/se-matrix-lifecycle.md)
+supports OBody-free observations and a pinned external shared-native evaluator.
+Its offline checks do not qualify an installed platform or expand old runs.
 These additions require exact installed Polygon qualification before admission.
 An explicit `se_fixture_anchor: "qasmoke-west-navmesh-v1"` with the native SE
 New Game route prepares a measured west-room QASmoke anchor before test actions.

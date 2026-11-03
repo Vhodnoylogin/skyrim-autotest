@@ -103,7 +103,16 @@ class Session:
                                    resolvedVmHandle=vm, formResolved=True, handleResolved=True)
             if self.fail == args["action"]: raise TimeoutError("lost native " + args["action"] + " ACK")
             return {"queued": True}
-        if tool == "papyrus": return {"returned": self.state["ownedSaveDirectory"]}
+        if tool == "papyrus":
+            if args.get("action") == "describe" and args.get("script") == "Game":
+                return {"name": "Game", "globalFunctions": [{"name": "GetGameSettingString", "native": True,
+                        "params": [{"type": "String"}], "returnType": "String"}]}
+            if args.get("function") == "GetGameSettingString":
+                settings = {"sConfirmLoad": "Load?", "sLoadWhilePlaying": "Discard and load?",
+                            "sLoadFromMainMenu": "Begin load?", "sYes": "Yes", "sNo": "No",
+                            "sOk": "OK", "sCancel": "Cancel"}
+                return {"called": True, "returnedType": "String", "returned": settings[args["args"][0]]}
+            return {"returned": self.state["ownedSaveDirectory"]}
         if tool == "inspect": return {"playerLoaded": True, "cell": {"editorId": "QASmoke"}}
         if tool == "menu": return {"messageBoxOpen": False, "openMenus": [], "menuStates": []}
         raise AssertionError("Unexpected tool " + tool)
@@ -135,11 +144,105 @@ class PersistenceTests(unittest.TestCase):
         for item in patches: item.start(); self.addCleanup(item.stop)
 
     def save_npcs(self, seconds=10):
-        return npc_persistence.perform(self.s, {"action": "save", "saveTag": "unit-save", "fixtureTags": TAGS},
+        return npc_persistence.perform(self.s, {"action": "save", "saveTag": "unit-save", "fixtureTags": getattr(self, "tags", TAGS)},
                                        time.monotonic()+seconds, POLICY)
 
     def load_npcs(self):
         return npc_persistence.perform(self.s, {"action": "load", "saveTag": "unit-save"}, time.monotonic()+10, POLICY)
+
+    def two_actors(self):
+        """Retain real fixture witnesses; change only the explicitly frozen roster."""
+        self.tags = ["UNPThinHuman", "UNPHeavyHuman"]
+        fixtures = list(self.s.state["interactiveActorFixtures"].values())[:2]
+        self.s.state["interactiveActorFixtures"] = {}
+        for tag, entry in zip(self.tags, fixtures):
+            entry["tag"] = tag
+            entry["actor"]["sex"] = "female"
+            self.s.state["interactiveActorFixtures"][tag] = entry
+        config = self.s.state["configuration"]
+        config["game_edition"] = "se"
+        # The outer session validator owns the rest of this frozen capability;
+        # persistence consumes only its exact actor bound.
+        config["interactive_session"]["matrixLifecycle"] = {"maximumFixtures": 2}
+
+    def test_two_actor_save_load_has_exact_measured_witness_counts_and_atomic_rebind(self):
+        self.two_actors()
+        saved = self.save_npcs()
+        self.assertEqual(saved["save"]["actorWitnessCount"], 2)
+        loaded = self.load_npcs()
+        self.assertEqual(loaded["save"]["actorRemapWitnessCount"], 2)
+        self.assertEqual(loaded["load"]["actorWitnessCount"], 2)
+        self.assertEqual({entry["tag"] for entry in loaded["actors"]}, set(self.tags))
+        self.assertEqual([args["action"] for tool, args in self.s.calls if tool == "game"], ["save", "load"])
+        for tag in self.tags:
+            entry = self.s.state["interactiveActorFixtures"][tag]
+            fixture_actors.require_fixture(self.s, {"reference": entry["reference"], "base": BASE})
+            self.assertEqual(entry["worldGeneration"], 2)
+        transitions = [{entry["status"] for entry in state["interactiveActorFixtures"].values()}
+                       for state in self.s.durable if state.get("npcPersistence", {}).get("unit-save", {}).get("loadAttempted")]
+        self.assertTrue(transitions)
+        self.assertTrue(all(value in ({"load-pending"}, {"created"}) for value in transitions))
+        observed = npc_persistence.observe(self.s, {"saveTag": "unit-save"}, time.monotonic()+10, POLICY)
+        self.assertEqual(observed["load"]["actorWitnessCount"], 2)
+        with self.assertRaises(ValueError): self.load_npcs()
+        self.assertEqual(sum(tool == "game" and args["action"] == "load" for tool, args in self.s.calls), 1)
+
+    def test_two_actor_save_requires_explicit_se_optin_before_any_provider_access(self):
+        self.two_actors()
+        config = self.s.state["configuration"]
+        for change in (lambda: config["interactive_session"].pop("matrixLifecycle"),
+                       lambda: config.update(game_edition="vr"),
+                       lambda: config["interactive_session"].update(matrixLifecycle={"maximumFixtures": True}),
+                       lambda: config["interactive_session"].update(matrixLifecycle={"maximumFixtures": 6})):
+            original = copy.deepcopy(config)
+            with self.subTest(change=change):
+                change()
+                with self.assertRaises(ValueError): self.save_npcs()
+                self.assertEqual(self.s.calls, [])
+                self.assertNotIn("npcPersistence", self.s.state)
+            config.clear(); config.update(original)
+
+    def test_two_actor_bound_refuses_a_six_actor_save(self):
+        config = self.s.state["configuration"]
+        config.update(game_edition="se")
+        config["interactive_session"]["matrixLifecycle"] = {"maximumFixtures": 2}
+        with self.assertRaises(ValueError): self.save_npcs()
+        self.assertEqual(self.s.calls, [])
+
+    def test_two_actor_save_rejects_unlisted_owned_actor_without_native_mutation(self):
+        self.two_actors()
+        self.s.state["interactiveActorFixtures"]["Foreign"] = {}
+        with self.assertRaises(ValueError): self.save_npcs()
+        self.assertFalse(any(tool in ("game", "npc_persistence") for tool, args in self.s.calls))
+
+    def test_two_actor_load_rejects_policy_loss_without_a_load_request(self):
+        self.two_actors(); self.save_npcs()
+        self.s.state["configuration"]["interactive_session"].pop("matrixLifecycle")
+        with self.assertRaises(ValueError): self.load_npcs()
+        self.assertFalse(any(tool == "game" and args["action"] == "load" for tool, args in self.s.calls))
+
+    def test_two_actor_partial_remap_never_publishes_a_partial_roster(self):
+        self.two_actors(); self.save_npcs()
+        self.s.bad_receipt = lambda receipt: receipt["actors"].pop() if receipt["phase"] == "loaded" else None
+        with self.assertRaises(ValueError): self.load_npcs()
+        self.assertEqual(set(self.s.state["interactiveActorFixtures"]), set(self.tags))
+        self.assertTrue(all(entry["status"] == "load-uncertain" and entry["reference"].startswith("0xFF000")
+                            for entry in self.s.state["interactiveActorFixtures"].values()))
+        self.assertNotIn("rebindings", self.s.state["npcPersistence"]["unit-save"])
+
+    def test_two_actor_duplicate_and_foreign_receipts_do_not_reach_game_save(self):
+        self.two_actors()
+        before = copy.deepcopy(self.s.state)
+        for corrupt in (lambda raw: raw["actors"][-1].update(tag=raw["actors"][0]["tag"]),
+                        lambda raw: raw["actors"][-1].update(tag="Foreign"),
+                        lambda raw: raw["actors"][-1].update(currentReference=raw["actors"][0]["currentReference"]),
+                        lambda raw: raw["actors"][-1].update(currentVmHandle=raw["actors"][0]["currentVmHandle"])):
+            with self.subTest(corrupt=corrupt):
+                self.s.state = copy.deepcopy(before)
+                self.s.calls.clear()
+                self.s.bad_receipt = corrupt
+                with self.assertRaises(ValueError): self.save_npcs()
+                self.assertFalse(any(tool == "game" for tool, args in self.s.calls))
 
     def test_full_real_owned_save_load_requires_pair_events_native_remap_and_atomic_six_rebind(self):
         saved = self.save_npcs()

@@ -1,5 +1,12 @@
 # AI-agent instructions: Skyrim Autotest
 
+For the additive two-actor SE matrix lifecycle read docs/se-matrix-lifecycle.md.
+Use its separate explicit matrixLifecycle policy, exact owned roster and native
+evaluator pins. Available-empty sources differ from failed reads. Cached subject
+traits are not independent engine observations; absent selected-family readback
+stays unavailable. Preserve original startup/readiness and separate offline
+candidate verification from actual installed platform qualification.
+
 For all mods and SE/VR, automatic testing primarily establishes fundamental
 operability; manual testing primarily evaluates result quality. These priorities
 overlap. Do not claim visual/player-experience quality from state/callback checks,

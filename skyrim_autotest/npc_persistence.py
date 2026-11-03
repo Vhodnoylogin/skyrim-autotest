@@ -1,4 +1,4 @@
-"""One owned same-process save/load of six witnessed persistent NPCs.
+"""One owned same-process save/load of an explicitly bounded witnessed roster.
 
 The native SKSE co-save bundle supplies real form/VM remapping. A former FF ID,
 base match, callback ACK or cached observer handle cannot authorize rebinding.
@@ -25,6 +25,23 @@ def _enabled(session):
         raise BindingError("Owned NPC persistence requires the frozen npcPersistence opt-in")
 
 
+def _require_roster(session, tags):
+    """Keep legacy six-actor admission; two actors need the additive SE policy."""
+    settings = native_settings(session.state.get("configuration", {}))
+    lifecycle = settings.get("matrixLifecycle")
+    count = 6
+    if lifecycle is not None:
+        if (session.state.get("configuration", {}).get("game_edition") != "se" or
+                type(lifecycle) is not dict or type(lifecycle.get("maximumFixtures")) is not int or
+                lifecycle["maximumFixtures"] != 2):
+            raise BindingError("Two-actor persistence requires the explicit SE matrixLifecycle policy")
+        count = 2
+    if (not isinstance(tags, (list, dict)) or len(tags) != count or
+            any(not isinstance(tag, str) for tag in tags) or len(set(tags)) != count):
+        raise BindingError("NPC persistence roster differs from its frozen actor-count policy")
+    return count
+
+
 def _deadline(deadline, maximum=30):
     try:
         remaining = deadline - time.monotonic() if type(deadline) in (int, float) else float("nan")
@@ -45,10 +62,10 @@ def validate_request(request):
         raise BindingError("Owned NPC saveTag must be a bounded flat identifier")
     if request["action"] == "save":
         tags = request["fixtureTags"]
-        if (not isinstance(tags, list) or len(tags) != 6 or
+        if (not isinstance(tags, list) or len(tags) not in (2, 6) or
                 any(not isinstance(value, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", value) for value in tags) or
-                len(set(tags)) != 6):
-            raise BindingError("NPC save requires exactly six distinct creation fixture tags")
+                len(set(tags)) != len(tags)):
+            raise BindingError("NPC save requires exactly two or six distinct creation fixture tags")
     return copy.deepcopy(request)
 
 
@@ -93,10 +110,11 @@ def _receipt(receipt, record, phase, *, baseline=None):
             raise BindingError("NPC persistence requires exactly one native save/load serialization transition")
     rows = receipt.get("actors")
     expected = record["fixtures"]
-    if (not isinstance(rows, list) or len(rows) != 6 or
-            any(not isinstance(row, dict) for row in rows) or
+    if (not isinstance(expected, dict) or len(expected) not in (2, 6) or
+            not isinstance(rows, list) or len(rows) != len(expected) or
+            any(not isinstance(row, dict) or not isinstance(row.get("tag"), str) for row in rows) or
             {row.get("tag") for row in rows} != set(expected)):
-        raise BindingError("Native NPC persistence receipt does not cover the exact six creation witnesses")
+        raise BindingError("Native NPC persistence receipt does not cover the exact creation witness roster")
     references, handles = set(), set()
     for row in rows:
         fixture = expected[row["tag"]]
@@ -147,11 +165,12 @@ def _wait_receipt(backend, record, phase, baseline):
 
 
 def _capture(backend, tags):
+    _require_roster(backend.s, tags)
     result = {}
     state = backend.s.state
     fixtures = state.get("interactiveActorFixtures", {})
     if set(fixtures) != set(tags):
-        raise BindingError("The NPC save bundle must contain all and only six attempted owned fixtures")
+        raise BindingError("The NPC save bundle must contain all and only the attempted owned fixtures")
     for tag in tags:
         entry = fixtures.get(tag, {})
         spec = {"reference": entry.get("reference"), "base": entry.get("base")}
@@ -173,15 +192,16 @@ def _capture(backend, tags):
 
 def _result(record):
     saved = record.get("status") in ("saved", "loaded")
+    count = len(record["fixtures"])
     result = {"save": {"completed": saved, "ownedPairCount": 1 if saved else 0,
-                       "actorWitnessCount": 6 if saved else 0, "saveTag": record["saveTag"],
+                       "actorWitnessCount": count if saved else 0, "saveTag": record["saveTag"],
                        "scope": "current-temporary-profile", "bindingId": record["bindingId"]},
               "nativePersistenceReceipt": copy.deepcopy(record.get("loadedReceipt", record.get("savedReceipt")))}
     if saved:
         result["save"].update(copy.deepcopy(record["saveResult"]["save"]))
     if record.get("status") == "loaded":
-        result["save"].update(loadedOwnedPairCount=1, actorRemapWitnessCount=6, worldReady=True)
-        result["load"] = {"completed": True, "sameProcess": True, "actorWitnessCount": 6,
+        result["save"].update(loadedOwnedPairCount=1, actorRemapWitnessCount=count, worldReady=True)
+        result["load"] = {"completed": True, "sameProcess": True, "actorWitnessCount": count,
                           "worldGeneration": record["afterWorldGeneration"], "saveTag": record["saveTag"]}
         result["lifecycle"] = copy.deepcopy(record["loadResult"]["lifecycle"])
         result["actors"] = [{"tag": tag, **copy.deepcopy(value)} for tag, value in record["rebindings"].items()]
@@ -193,6 +213,8 @@ def perform(session, request, deadline, policy):
     frozen_policy(session, policy)
     _enabled(session)
     request = validate_request(request)
+    if request["action"] == "save":
+        _require_roster(session, request["fixtureTags"])
     _deadline(deadline, 90 if request["action"] == "load" else 30)
     backend = Backend(session, deadline)
     state, tag = session.state, request["saveTag"]
@@ -228,6 +250,7 @@ def perform(session, request, deadline, policy):
     record = records.get(tag)
     if not isinstance(record, dict) or record.get("status") != "saved" or record.get("loadAttempted") is not False:
         raise BindingError("NPC load requires one completed unconsumed owned save; never replay")
+    _require_roster(session, record.get("fixtures"))
     _world(backend, record)
     if state["ownedWorldGeneration"] != record["worldGeneration"]:
         raise BindingError("A foreign world transition invalidated the saved NPC bundle")
@@ -282,7 +305,7 @@ def perform(session, request, deadline, policy):
         _world(backend, record)
         record.update(status="loaded", loadedReceipt=raw, rebindings=rebindings,
                       afterWorldGeneration=state["ownedWorldGeneration"])
-        # Publish all six together, after every independent native+observer check.
+        # Publish the complete roster together after every native+observer check.
         state["interactiveActorFixtures"] = replacements
         if window is not None:
             if time.time() >= window["deadline"]:
@@ -327,6 +350,7 @@ def observe(session, request, deadline, policy):
     record = session.state.get("npcPersistence", {}).get(request["saveTag"], {})
     if record.get("status") not in ("saved", "loaded"):
         raise BindingError("No completed owned NPC persistence evidence for this tag")
+    _require_roster(session, record.get("fixtures"))
     _world(backend, record)
     owned_saves.saved(backend, request["saveTag"])
     if record["status"] == "loaded":
