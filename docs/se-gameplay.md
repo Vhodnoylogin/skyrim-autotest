@@ -80,6 +80,9 @@ the exact final desktop-quit intent counts as an owned quit request; returning
 to Main Menu alone does not. The entire route retains its original45second
 bound on recovery, without replay. It requires the additive QUIT operations in
 [DevBench 52f0c4c](https://github.com/Vhodnoylogin/devbench/commit/52f0c4ca92231226a99032b0e305f9cf6c3030a9).
+Readiness requires the unique advertised menu descriptor to include startup and
+snapshot/select-quit/confirm-quit; teardown checks it again before mutations.
+The shared `devbench-startup-ui/1` contract alone does not advertise QUIT support.
 A native callback or closed menu is not actual process-exit proof. Unavailable
 menu/API state is retained before the caller's existing guarded fallback.
 It is not the default exit route: the live pitch adjustment did not clear the

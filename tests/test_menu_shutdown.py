@@ -5,6 +5,7 @@ from contextlib import ExitStack
 from unittest.mock import Mock, patch
 
 from skyrim_autotest import config, game_shutdown, menu_shutdown
+from tests.test_api_contract import menu_descriptor
 
 GAME = {'pid': 42, 'birth': 1234, 'path': 'D:/Game/SkyrimSE.exe'}
 
@@ -77,6 +78,7 @@ class Session:
         if stage:
             assert self.saved[-1]['gracefulGameExit'][stage]['requestAttempted'] is True
     def request(self, port, route, **kwargs):
+        if route == 'api/tools': return menu_descriptor()
         if route == 'api/events': return {'events': [], 'headSeq': 20}
         return {'events': [{'seq': 21, 'topic': 'menu', 'data': {'name': 'Main Menu', 'opening': True}}], 'headSeq': 21}
 
@@ -103,6 +105,8 @@ class MenuExitTests(unittest.TestCase):
         self.assertTrue(r['mainMenuOpenedObserved']); self.assertTrue(r['desktopQuit']['requestAttempted'])
         self.assertEqual(r['desktopQuit']['game'], GAME)
         self.assertEqual(r['deadlineMonotonic'], 45.)
+        self.assertEqual(r['startupApi'], {'startupOperations': [
+            'snapshot', 'select-new', 'confirm-new', 'select-quit', 'confirm-quit']})
         self.assertEqual(game_shutdown.classify_exit(self.s)['kind'], 'normal_close')
         actions = [a.get('startupOperation') or a.get('function') for _, a in self.s.calls]
         self.assertEqual([a for a in actions if a in ('QuitToMainMenu', 'select-quit', 'confirm-quit')],
@@ -117,9 +121,36 @@ class MenuExitTests(unittest.TestCase):
         self.assertFalse(menu_shutdown.request_and_wait(self.s))
         self.assertFalse(any(a.get('startupOperation') in ('select-quit', 'confirm-quit') for _, a in self.s.calls))
     def test_event_gap_preserves_uncertainty_and_no_desktop_quit(self):
-        with patch('skyrim_autotest.runner.request', side_effect=[{'headSeq': 20}, {'events': [{'seq': 22}], 'headSeq': 22}]):
+        with patch('skyrim_autotest.runner.request', side_effect=[menu_descriptor(), {'headSeq': 20}, {'events': [{'seq': 22}], 'headSeq': 22}]):
             self.assertFalse(menu_shutdown.request_and_wait(self.s))
         self.assertNotIn('desktopQuit', self.s.state['gracefulGameExit'])
+        self.assertIn('gap', self.s.state['gracefulGameExit']['error']['message'])
+    def test_teardown_rechecks_old_or_malformed_descriptor_before_any_tool_or_mutation(self):
+        valid = menu_descriptor()
+        old = copy.deepcopy(valid)
+        old['tools'][0]['inputSchema']['properties']['startupOperation']['enum'] = ['snapshot', 'select-new', 'confirm-new']
+        for descriptor in (old, {'tools': valid['tools'] * 2}, {'tools': [{'name': 'menu', 'inputSchema': None}]}):
+            with self.subTest(descriptor=descriptor):
+                self.s.state.pop('gracefulGameExit', None)
+                self.s.state['readinessApi'] = {'mainMenuExit': {'startupOperations': ['snapshot', 'select-quit', 'confirm-quit']}}
+                with patch('skyrim_autotest.runner.request', return_value=descriptor) as request:
+                    self.assertFalse(menu_shutdown.request_and_wait(self.s))
+                self.s.tool.assert_not_called()
+                request.assert_called_once_with(123, 'api/tools', timeout=3)
+                record = self.s.state['gracefulGameExit']
+                self.assertEqual(record['status'], 'menu-flow-unavailable')
+                self.assertFalse(record['requestAttempted'])
+                self.assertNotIn('mainMenuReturn', record)
+                self.assertNotIn('quitSelection', record)
+                self.assertNotIn('desktopQuit', record)
+                self.assertEqual(self.clock.now, 0.)
+    def test_unavailable_descriptor_recovery_does_not_retry_or_select_another_route(self):
+        with patch('skyrim_autotest.runner.request', side_effect=TimeoutError('descriptor unavailable')) as request:
+            self.assertFalse(menu_shutdown.request_and_wait(self.s, seconds=1))
+            self.assertFalse(menu_shutdown.request_and_wait(self.s, seconds=1))
+        request.assert_called_once()
+        self.s.tool.assert_not_called()
+        self.assertEqual(self.s.state['gracefulGameExit']['deadlineMonotonic'], 1.)
     def test_uncertain_selection_is_not_repeated_by_recovery(self):
         normal = self.s.call
         def call(n, a, **kw):

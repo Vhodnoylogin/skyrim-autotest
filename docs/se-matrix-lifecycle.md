@@ -1,5 +1,15 @@
 # SE matrix lifecycle candidate
 
+Compound semantic steps retain their original absolute monotonic deadline, even
+when the scenario allows 60, 90, 120 or 180 seconds. A strict fixture/binding,
+inspection or freeze primitive receives at most 30 seconds from the remaining
+parent budget; an owned load retains its existing 90-second primitive bound.
+Creating another child budget never extends the parent or retries a command.
+Public direct bindings still reject deadlines over 30 seconds. An uncertain
+creation/load intent remains terminal and is never treated as a completed actor
+or as proof that no side effects occurred. These bounds require exact live
+qualification before replacing an installed platform.
+
 This additive source capability supports exactly two owned persistent NPCs,
 without calling OBody or requiring its assignment/generation service. It is an
 offline-verified candidate. It is **not a qualified installed platform** and

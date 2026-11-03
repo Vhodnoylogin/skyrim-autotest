@@ -375,7 +375,7 @@ def required_target_presets(request, requested_presets):
 
 def _guard(backend, tag):
     entry, spec, semantic = _fixture(backend.s, tag)
-    observation = fixture_actors.guard(backend.s, spec, backend.end, native_settings(backend.s.state["configuration"])["nativeBindings"])
+    observation = fixture_actors.guard(backend.s, spec, bindings.child_deadline(backend.end), native_settings(backend.s.state["configuration"])["nativeBindings"])
     value = _call(backend, "morph_provider", {"action": "actor_status", "actorFormId": spec["reference"]})
     identity = value.get("identity", {})
     if (value.get("pid") != backend.s.state["game"]["pid"] or identity.get("pid") != value["pid"] or
@@ -721,12 +721,13 @@ def _snapshot_result(backend, config, policy, request):
 
 
 def execute(session, args, deadline, policy):
+    bindings.child_deadline(deadline)  # Validate parent without shortening the compound operation.
     from . import matrix_lifecycle
     if matrix_lifecycle.enabled(session.state.get('configuration', {})):
         return matrix_lifecycle.execute(session, args, deadline, policy)
     if args.get('request', {}).get('domain') == 'actor-visual-freeze':
         from . import visual_freeze
-        return visual_freeze.execute(session, args, deadline, policy)
+        return visual_freeze.execute(session, args, bindings.child_deadline(deadline), policy)
     if args.get('request', {}).get('domain') == matrix_lifecycle.DOMAIN:
         raise BindingError('Matrix observations require the explicit matrixLifecycle opt-in')
     operation, request = args.get("operation"), args.get("request")
@@ -736,10 +737,10 @@ def execute(session, args, deadline, policy):
         raise BindingError('Two-actor creation requires the explicit matrixLifecycle opt-in')
     if request["domain"] == "actor-fixture-visibility":
         from . import fixture_visibility
-        return fixture_visibility.perform(session, request, deadline, policy)
+        return fixture_visibility.perform(session, request, bindings.child_deadline(deadline), policy)
     if request["domain"] == "actor-fixture-inspection":
         from . import actor_inspection
-        return actor_inspection.execute(session, args, deadline, policy)
+        return actor_inspection.execute(session, args, bindings.child_deadline(deadline), policy)
     backend = Backend(session, deadline); _world(backend)
     state = _state(session); domain = request["domain"]; action = request.get("action")
     if domain == "human-preset-catalog":
@@ -779,22 +780,23 @@ def execute(session, args, deadline, policy):
                         "producerMonotonicNs": observed["producerMonotonicNs"]}}
         intent = _begin(session, request, fixtureTag=tag)
         state["fixtures"][tag] = semantic; session.save()
-        result = fixture_actors.create(session, {"tag": tag, "base": base, **request["placement"], "persistentForOwnedSave": True}, deadline, policy)
+        result = fixture_actors.create(session, {"tag": tag, "base": base, **request["placement"], "persistentForOwnedSave": True}, bindings.child_deadline(deadline), policy)
         entry = session.state["interactiveActorFixtures"][tag]
         semantic.update(status="created", creationId=entry["creationId"])
         intent.update(status="created", creationId=entry["creationId"]); session.save()
         return result
     if domain == "save-state":
-        if action is None: return npc_persistence.observe(session, {"saveTag": request["saveLabel"]}, deadline, policy)
+        if action is None: return npc_persistence.observe(session, {"saveTag": request["saveLabel"]}, bindings.child_deadline(deadline), policy)
         translated = {"action": "save" if action == "save-disposable-once" else "load", "saveTag": request["saveLabel"]}
         if translated["action"] == "save": translated["fixtureTags"] = request["actors"]
         intent = _begin(session, request)
-        result = npc_persistence.perform(session, translated, deadline, policy)
+        result = npc_persistence.perform(session, translated, bindings.child_deadline(
+            deadline, maximum=90 if translated['action'] == 'load' else 30), policy)
         intent.update(status="returned", result=copy.deepcopy(result)); session.save()
         return result
     tag = _actor(request["actor"]); entry, spec, semantic = _fixture(session, tag)
     if domain == "actor-fixture-identity":
-        observation = fixture_actors.guard(session, spec, deadline, policy)
+        observation = fixture_actors.guard(session, spec, bindings.child_deadline(deadline), policy)
         expected_identity = copy.deepcopy(entry.get("nativePersistentIdentity"))
         if "restorationWitness" in entry:
             restored = npc_persistence.require_restoration(session, entry)["native"]
@@ -812,7 +814,7 @@ def execute(session, args, deadline, policy):
         intent = _begin(session, request, fixtureTag=tag, bindingRequest=bound)
         if role != "race": semantic["manualFamilyCalls"] += 1
         session.save()
-        receipt = bindings.guarded_call(session, bound, deadline, policy)
+        receipt = bindings.guarded_call(session, bound, bindings.child_deadline(deadline), policy)
         intent.update(status="returned", receipt=copy.deepcopy(receipt)); session.save()
         if role == "race": return receipt.get("result", receipt)
         if type(receipt.get("returned")) is not bool: raise BindingError("Actual subject queue-admission Bool unavailable")

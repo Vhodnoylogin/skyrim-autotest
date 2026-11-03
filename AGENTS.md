@@ -1,5 +1,12 @@
 # AI-agent instructions: Skyrim Autotest
 
+Compound SE semantic deadlines may exceed primitive budgets; read
+docs/se-matrix-lifecycle.md. Keep the original parent deadline, allocate bounded
+child budgets and never replay uncertain intents. When normal menu exit is
+required, read docs/devbench-menu-quit.md and retain main-menu-v1 with the actual
+QUIT-capable producer. Check advertised operations; never substitute another
+shutdown route for the owner's required menu exit.
+
 For the additive two-actor SE matrix lifecycle read docs/se-matrix-lifecycle.md.
 Inspection fixtures use its explicit freezeActors:true and docs/visual-freeze.md:
 prepare each created/remapped actor, retain SetDontMove, and require actual AI,

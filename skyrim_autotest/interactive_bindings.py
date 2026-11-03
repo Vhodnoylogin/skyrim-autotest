@@ -195,6 +195,25 @@ def frozen_policy(session, policy):
     return policy
 
 
+def child_deadline(deadline, maximum=30):
+    """Bound one strict primitive by its unchanged semantic parent's deadline.
+
+    A compound semantic step may have a longer budget. This never extends that
+    budget or changes the public binding limit; only owned load permits 90s.
+    """
+    if type(maximum) is not int or maximum not in (30, 90):
+        raise BindingError('Unsupported primitive deadline bound')
+    now = time.monotonic()
+    try:
+        remaining = deadline - now if type(deadline) in (int, float) else float('nan')
+        valid = math.isfinite(remaining) and remaining > 0
+    except (OverflowError, ValueError):
+        valid = False
+    if not valid:
+        raise BindingError('Semantic operation requires a finite unexpired absolute deadline')
+    return min(deadline, now + maximum)
+
+
 def bounded_deadline(deadline):
     try:
         remaining = deadline - time.monotonic() if type(deadline) in (int, float) else float("nan")

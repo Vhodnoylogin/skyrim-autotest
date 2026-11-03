@@ -1,8 +1,68 @@
+import copy
 import unittest
 from skyrim_autotest import api_contract
 
 
+def menu_descriptor():
+    # GET /api/tools shape from DevBench's REST descriptor serializer and Tools.cpp.
+    return {'tools': [{'name': 'menu', 'inputSchema': {'properties': {
+        'includeFlags': {'type': 'boolean'},
+        'action': {'type': 'string', 'enum': ['list', 'startup']},
+        'startupOperation': {'type': 'string', 'enum': [
+            'snapshot', 'select-new', 'confirm-new', 'select-quit', 'confirm-quit']}}}}]}
+
+
 class ApiContractTests(unittest.TestCase):
+    def test_main_menu_exit_requires_advertised_quit_before_readiness_tools(self):
+        from unittest.mock import Mock, patch
+        from skyrim_autotest.runner import Blocked
+        descriptor = menu_descriptor()
+        operations = descriptor['tools'][0]['inputSchema']['properties']['startupOperation']['enum']
+        operations[:] = ['snapshot', 'select-new', 'confirm-new']
+        session = Mock(); session.state = {'port': 1, 'configuration': {'se_shutdown': 'main-menu-v1'}}
+        with patch('skyrim_autotest.runner.request', return_value=descriptor):
+            with self.assertRaisesRegex(Blocked, 'QUIT operations unavailable'):
+                api_contract.qualify_readiness(session)
+        session.tool.assert_not_called()
+        self.assertNotIn('readinessApi', session.state)
+
+    def test_main_menu_exit_readiness_records_actual_supported_operations(self):
+        from unittest.mock import Mock, patch
+        session = Mock(); session.state = {'port': 1, 'configuration': {'se_shutdown': 'main-menu-v1'}}
+        session.tool.return_value = {'openMenus': [], 'menuStates': [], 'messageBoxOpen': False}
+        descriptor = menu_descriptor()
+        with patch('skyrim_autotest.runner.request', return_value=descriptor):
+            api_contract.qualify_readiness(session)
+        self.assertEqual(session.state['readinessApi']['mainMenuExit']['startupOperations'],
+                         descriptor['tools'][0]['inputSchema']['properties']['startupOperation']['enum'])
+        self.assertNotIn('gameplayBootstrap', session.state)
+
+    def test_main_menu_exit_descriptor_rejects_missing_duplicate_and_malformed_metadata(self):
+        valid = menu_descriptor()
+        invalid = [None, {}, {'tools': {}}, {'tools': []},
+                   {'tools': valid['tools'] * 2}, {'tools': [{'name': 'menu', 'inputSchema': []}]}]
+        for field, value in (('action', {'type': 'string', 'enum': ['list']}),
+                             ('startupOperation', {'type': 'array', 'enum': ['snapshot', 'select-quit', 'confirm-quit']}),
+                             ('startupOperation', {'type': 'string', 'enum': 'snapshot/select-quit/confirm-quit'}),
+                             ('startupOperation', {'type': 'string', 'enum': ['snapshot', 'select-quit', 'confirm-quit', None]}),
+                             ('startupOperation', {'type': 'string', 'enum': ['snapshot', 'select-quit', 'confirm-quit', 'confirm-quit']})):
+            descriptor = copy.deepcopy(valid)
+            descriptor['tools'][0]['inputSchema']['properties'][field] = value
+            invalid.append(descriptor)
+        for descriptor in invalid:
+            with self.subTest(descriptor=descriptor), self.assertRaisesRegex(ValueError, 'QUIT operations unavailable'):
+                api_contract.validate_menu_shutdown_descriptor(descriptor)
+
+    def test_explicit_window_close_does_not_require_native_quit_operations(self):
+        from unittest.mock import Mock, patch
+        session = Mock(); session.state = {'port': 1, 'configuration': {'se_shutdown': 'window-close-v1'}}
+        session.tool.return_value = {'openMenus': [], 'menuStates': [], 'messageBoxOpen': False}
+        descriptor = menu_descriptor()
+        descriptor['tools'][0]['inputSchema']['properties'].pop('startupOperation')
+        with patch('skyrim_autotest.runner.request', return_value=descriptor):
+            api_contract.qualify_readiness(session)
+        self.assertEqual(session.state['readinessApi'], {'nativeMenuFlags': True})
+
     def test_stock_menu_descriptor_is_rejected_before_world_or_metadata_mutations(self):
         from unittest.mock import patch, Mock
         from skyrim_autotest.runner import Blocked

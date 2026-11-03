@@ -158,6 +158,13 @@ def request_and_wait(session, seconds=45):
             return answer
 
         try:
+            # Recheck the actual provider before any teardown mutation. The
+            # startup contract name is shared by providers without QUIT support.
+            from .api_contract import validate_menu_shutdown_descriptor
+            from .runner import request
+            descriptor = request(session.state['port'], 'api/tools', timeout=min(3, remaining()))
+            record['startupApi'] = validate_menu_shutdown_descriptor(descriptor)
+            session.save()
             current = menus()
             if current.get('messageBoxOpen'):
                 raise ValueError('Unknown message box prevents owned menu exit')

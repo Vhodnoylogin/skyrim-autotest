@@ -158,7 +158,7 @@ def _fixture(session, tag):
 
 def _binding(session, config, policy, role, spec, deadline, extras=()):
     unused, request = morph_session._binding_request(policy, config, role, spec, extras)
-    return bindings.guarded_call(session, request, deadline, policy)
+    return bindings.guarded_call(session, request, bindings.child_deadline(deadline), policy)
 
 
 def _value(session, config, policy, role, spec, deadline, extras=()):
@@ -167,7 +167,7 @@ def _value(session, config, policy, role, spec, deadline, extras=()):
 
 def _require_frozen(backend, policy, tag):
     from . import visual_freeze
-    return visual_freeze.require_frozen(backend.s, tag, backend.end, policy)
+    return visual_freeze.require_frozen(backend.s, tag, bindings.child_deadline(backend.end), policy)
 
 
 def _frozen_roster(backend, policy):
@@ -195,15 +195,15 @@ def _freeze_actor(backend, policy, tag):
            for row in session.state.get('visualFreeze', {}).get('commands', {}).values()):
         raise BindingError('Uncertain visual-freeze intent blocks further actor preparation')
     before = visual_freeze.execute(session, {'operation': 'world.read', 'request': {
-        'domain': visual_freeze.DOMAIN, 'actor': {'fixtureTag': tag}}}, backend.end, policy)
+        'domain': visual_freeze.DOMAIN, 'actor': {'fixtureTag': tag}}}, bindings.child_deadline(backend.end), policy)
     hold_receipt = None
     if before['fixture']['dontMove'] is not True:
         role = actor_inspection._role(policy, 'hold')
         hold_receipt = bindings.guarded_call(session, {'bindingId': role['id'], 'self': spec, 'args': [True]},
-                                             backend.end, policy)
+                                             bindings.child_deadline(backend.end), policy)
     prepared = visual_freeze.execute(session, {'operation': 'object.perform', 'request': {
         'domain': visual_freeze.DOMAIN, 'actor': {'fixtureTag': tag}, 'action': visual_freeze.ACTION}},
-        backend.end, policy)
+        bindings.child_deadline(backend.end), policy)
     after = _require_frozen(backend, policy, tag)
     return {'before': before, 'holdReceipt': hold_receipt, 'preparation': prepared, 'after': after}
 
@@ -343,6 +343,7 @@ def observe(backend, config, policy, request):
 
 
 def execute(session, args, deadline, policy):
+    bindings.child_deadline(deadline)  # Validate the unchanged compound budget before durable intents.
     if type(args) is not dict or not morph_session.validate(args.get('operation'), args.get('request')):
         raise BindingError('Invalid matrix lifecycle semantic request')
     frozen = bindings.frozen_policy(session, policy)
@@ -363,7 +364,7 @@ def execute(session, args, deadline, policy):
     if domain == 'actor-visual-freeze':
         from . import visual_freeze
         if args['operation'] == 'world.read':
-            return visual_freeze.execute(session, args, deadline, frozen)
+            return visual_freeze.execute(session, args, bindings.child_deadline(deadline), frozen)
         intent = _begin(session, request)
         result = _freeze_actor(backend, frozen, morph_session._actor(request['actor']))
         intent.update(status='returned')
@@ -377,7 +378,7 @@ def execute(session, args, deadline, policy):
         if freeze_before is not None and args['operation'] == 'object.perform' and request['collisionPolicy'] != 'preserve-current':
             raise BindingError('Frozen matrix inspection must preserve-current collision policy')
         intent = _begin(session, request) if args['operation'] == 'object.perform' else None
-        result = actor_inspection.execute(session, args, deadline, frozen)
+        result = actor_inspection.execute(session, args, bindings.child_deadline(deadline), frozen)
         if freeze_before is not None:
             freeze_after = _frozen_roster(backend, frozen)
             _same_frozen_roster(freeze_before, freeze_after)
@@ -390,12 +391,13 @@ def execute(session, args, deadline, policy):
         raise BindingError("Domain is outside the OBody-free matrix lifecycle")
     if domain == "save-state":
         if action is None:
-            return npc_persistence.observe(session, {"saveTag": request["saveLabel"]}, deadline, frozen)
+            return npc_persistence.observe(session, {"saveTag": request["saveLabel"]}, bindings.child_deadline(deadline), frozen)
         translated = {"action": "save" if action == "save-disposable-once" else "load", "saveTag": request["saveLabel"]}
         if translated["action"] == "save":
             translated["fixtureTags"] = request["actors"]
         intent = _begin(session, request)
-        result = npc_persistence.perform(session, translated, deadline, frozen)
+        result = npc_persistence.perform(session, translated, bindings.child_deadline(
+            deadline, maximum=90 if translated['action'] == 'load' else 30), frozen)
         if config.get('freezeActors') is True and translated['action'] == 'load':
             result['inspectionFreeze'] = {tag: _freeze_actor(backend, frozen, tag) for tag in state['fixtures']}
     elif domain == "actor-fixture":
@@ -408,7 +410,7 @@ def execute(session, args, deadline, policy):
         intent = _begin(session, request)
         state["fixtures"][tag] = {"status": "creation-intent"}
         session.save()
-        result = fixture_actors.create(session, {"tag": tag, "base": base, **request["placement"], "persistentForOwnedSave": True}, deadline, frozen)
+        result = fixture_actors.create(session, {"tag": tag, "base": base, **request["placement"], "persistentForOwnedSave": True}, bindings.child_deadline(deadline), frozen)
         entry = session.state["interactiveActorFixtures"][tag]
         human_race = actor_domain.form(entry.get('actor', {}).get('race'))
         if human_race == config['beastRace']:
@@ -420,7 +422,7 @@ def execute(session, args, deadline, policy):
         tag = morph_session._actor(request["actor"])
         entry, spec = _fixture(session, tag)
         if domain == "actor-fixture-identity":
-            observed = fixture_actors.guard(session, spec, deadline, frozen)
+            observed = fixture_actors.guard(session, spec, bindings.child_deadline(deadline), frozen)
             return {"actor": observed["actor"], "creationWitness": copy.deepcopy(entry["creationWitness"]),
                     "restorationWitness": copy.deepcopy(entry.get("restorationWitness"))}
         role = "race" if domain == "actor-race" else {"clear-own": "clear", "refresh": "refresh", "bind-resource-family": "configure"}[action]

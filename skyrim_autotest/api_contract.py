@@ -1,10 +1,36 @@
 """Read live provider contracts before test fixture/input mutations."""
 
 
+def validate_menu_shutdown_descriptor(descriptor):
+    """Require the advertised QUIT operations, not the shared startup contract name."""
+    tools = descriptor.get('tools') if isinstance(descriptor, dict) else None
+    menus = [row for row in tools if isinstance(row, dict) and row.get('name') == 'menu'] if isinstance(tools, list) else []
+    schema = menus[0].get('inputSchema') if len(menus) == 1 else None
+    properties = schema.get('properties') if isinstance(schema, dict) else None
+
+    def advertised(name, required):
+        value = properties.get(name) if isinstance(properties, dict) else None
+        choices = value.get('enum') if isinstance(value, dict) else None
+        if (not isinstance(value, dict) or value.get('type') != 'string'
+                or not isinstance(choices, list) or any(not isinstance(item, str) for item in choices)
+                or len(set(choices)) != len(choices) or not set(required).issubset(choices)):
+            raise ValueError('DevBench native main-menu QUIT operations unavailable; main-menu-v1 requires advertised startup snapshot/select-quit/confirm-quit')
+        return list(choices)
+
+    advertised('action', ('startup',))
+    return {'startupOperations': advertised('startupOperation', ('snapshot', 'select-quit', 'confirm-quit'))}
+
+
 def qualify_readiness(session):
     """Require explicit native menu metadata before any world-changing bootstrap."""
     from .runner import request, Blocked
     descriptor = request(session.state['port'], 'api/tools', timeout=3)
+    shutdown_api = None
+    if session.state.get('configuration', {}).get('se_shutdown') == 'main-menu-v1':
+        try:
+            shutdown_api = validate_menu_shutdown_descriptor(descriptor)
+        except ValueError as error:
+            raise Blocked(str(error)) from error
     tools = descriptor.get('tools') if isinstance(descriptor, dict) else None
     menus = [row for row in tools or [] if isinstance(row, dict) and row.get('name') == 'menu']
     schema = menus[0].get('inputSchema', {}) if len(menus) == 1 else {}
@@ -25,6 +51,8 @@ def qualify_readiness(session):
     session.log('readiness-api-contract', nativeMenuFlags=True, gameplayReady=False,
                 basis='Observed native metadata availability, not a playable-world assertion')
     session.state['readinessApi'] = {'nativeMenuFlags': True}
+    if shutdown_api is not None:
+        session.state['readinessApi']['mainMenuExit'] = shutdown_api
     session.save()
 
 def validate_observer_descriptor(result):
