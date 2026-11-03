@@ -1059,6 +1059,12 @@ class OwnedLoadCompanionTests(unittest.TestCase):
 
     def test_unchanged_shared_deadline_and_timed_out_load_are_terminal(self):
         companion=self.fixture.companion();self.fixture.client.complete_load=False
+        # Exercise the completion deadline deterministically. Real disk/SQLite
+        # scheduling may consume this short window inside a state read instead.
+        now=[companion.clock()]
+        companion.clock=lambda:now[0]
+        def pause(seconds):now[0]+=seconds
+        companion.pause=pause
         original_end=companion.end
         envelope=self.intent(companion,self.envelope(timeout=.1))
         with self.assertRaisesRegex(tool.CompanionError,'completion deadline'):companion.exchange(envelope)
