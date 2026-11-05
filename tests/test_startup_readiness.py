@@ -11,6 +11,9 @@ from tests import test_startup_ui as base
 
 
 SNAPSHOT = {'action': 'startup', 'startupOperation': 'snapshot'}
+FROZEN_ABANDONED = ('main-thread task did not start within 5000ms; queued task abandoned and the game frame '
+    'counter has not advanced -- main thread hung or the game is fully paused; if no pause menu is open, '
+    'only a process restart recovers')
 
 
 def abandoned(frames=90, *, route='api/tool/menu', text=None, code=504):
@@ -79,6 +82,88 @@ class StartupReadinessTests(TestCase):
             ['snapshot', 'select-new', 'snapshot', 'snapshot', 'confirm-new'])
         self.assertEqual([options['deadline'] for args, options in session.options if args == SNAPSHOT], [20, 10, 10])
 
+    def test_retained_frozen_startup_error_recovers_after_start_animation_without_replaying_new(self):
+        session = StartupSession(Clock(), [None, abandoned(text=FROZEN_ABANDONED)])
+        session.data['state'] = 'MainStartAnim'
+        original = session.tool
+        def settle(name, args, **options):
+            if len(session.calls) == 2: session.data['state'] = 'Main'
+            return original(name, args, **options)
+        session.tool = settle
+        wait = self.run_start(session)
+        self.assertEqual(self.operations(session),
+            ['snapshot', 'snapshot', 'snapshot', 'select-new', 'snapshot', 'confirm-new'])
+        self.assertEqual([options['deadline'] for _, options in session.options[:4]], [20] * 4)
+        self.assertEqual(session.options[-1][1]['deadline'], 15.5)
+        self.assertEqual(len([row for row in session.logs if row[0] == 'common-readiness-abandoned-read']), 1)
+        self.assertEqual(wait.call_count, 1)
+        self.assertNotIn('newGameStarted', session.state)
+
+    def test_frozen_confirmation_read_recovers_without_reselecting_new(self):
+        session = StartupSession(Clock(), [None, None, abandoned(text=FROZEN_ABANDONED)])
+        self.run_start(session)
+        self.assertEqual(self.operations(session), ['snapshot', 'select-new', 'snapshot', 'snapshot', 'confirm-new'])
+        self.assertEqual([options['deadline'] for _, options in session.options], [20, 20, 10, 10, 10])
+        self.assertEqual(session.options[-1][1]['timeout'], 4.75)
+
+    def test_persistent_frozen_startup_reads_exhaust_original_twenty_seconds_without_new(self):
+        session = StartupSession(Clock(), [abandoned(text=FROZEN_ABANDONED)] * 10)
+        with self.assertRaisesRegex(TimeoutError, 'read deadline exhausted'): self.run_start(session)
+        self.assertEqual(session.clock.now, 20)
+        self.assertEqual(self.operations(session), ['snapshot'] * 4)
+        self.assertEqual([options['deadline'] for _, options in session.options], [20] * 4)
+        self.assertEqual([options['timeout'] for _, options in session.options], [12, 12, 9.5, 4.25])
+
+    def test_persistent_frozen_confirmation_reads_exhaust_ten_seconds_without_confirm_or_reselection(self):
+        session = StartupSession(Clock(), [None, None] + [abandoned(text=FROZEN_ABANDONED)] * 5)
+        with self.assertRaisesRegex(TimeoutError, 'read deadline exhausted'): self.run_start(session)
+        self.assertEqual(session.clock.now, 10)
+        self.assertEqual(self.operations(session), ['snapshot', 'select-new', 'snapshot', 'snapshot'])
+        self.assertEqual([options['deadline'] for _, options in session.options], [20, 20, 10, 10])
+
+    def test_late_snapshot_after_frozen_recovery_cannot_select_or_confirm(self):
+        for confirmation in (False, True):
+            with self.subTest(confirmation=confirmation):
+                prior = [None, None] if confirmation else []
+                session = StartupSession(Clock(), prior + [abandoned(text=FROZEN_ABANDONED)])
+                original = session.tool
+                def late(name, args, **options):
+                    value = original(name, args, **options)
+                    if len(session.calls) == len(prior) + 2: session.clock.now = options['deadline']
+                    return value
+                session.tool = late
+                with self.assertRaisesRegex(TimeoutError, 'response arrived after deadline'): self.run_start(session)
+                self.assertEqual(self.operations(session),
+                    (['snapshot', 'select-new'] if confirmation else []) + ['snapshot', 'snapshot'])
+
+    def test_frozen_abandonment_is_refused_for_other_reads_extra_fields_and_mutations(self):
+        requests = [('inspect', {'kind': 'state'}), ('inspect', {'kind': 'scene'}),
+                    ('menu', {'action': 'list'}), ('menu', {'action': 'describe'}),
+                    ('papyrus', {'action': 'describe'}), ('menu', {**SNAPSHOT, 'name': 'other'}),
+                    ('menu', {'action': 'startup', 'startupOperation': 'select-new'}),
+                    ('menu', {'action': 'startup', 'startupOperation': 'confirm-new'})]
+        for name, args in requests:
+            with self.subTest(name=name, args=args):
+                session = StartupSession(Clock(), [abandoned(text=FROZEN_ABANDONED, route='api/tool/' + name)])
+                with patch.object(startup_ui.time, 'monotonic', session.clock.monotonic), self.assertRaises(runner.HTTPResponseError):
+                    ReadinessSession(session, 20).tool(name, args)
+                self.assertEqual(len(session.calls), 1)
+                self.assertFalse(session.logs)
+
+    def test_frozen_variant_requires_exact_native_error_route_and_status(self):
+        errors = [abandoned(text=FROZEN_ABANDONED + ' '),
+                  abandoned(text=FROZEN_ABANDONED.replace('5000ms', '5001ms')),
+                  abandoned(text=FROZEN_ABANDONED.replace('did not start', 'did not finish')),
+                  abandoned(text=FROZEN_ABANDONED, route='api/tool/inspect'),
+                  abandoned(text=FROZEN_ABANDONED, code=503),
+                  runner.HTTPResponseError(504, 'api/tool/menu', json.dumps({'code': '504', 'error': FROZEN_ABANDONED}))]
+        for error in errors:
+            with self.subTest(error=error):
+                session = StartupSession(Clock(), [error])
+                with self.assertRaises(runner.HTTPResponseError): self.run_start(session)
+                self.assertEqual(self.operations(session), ['snapshot'])
+                self.assertFalse(any(row[0] == 'common-readiness-abandoned-read' for row in session.logs))
+
     def test_structured_exact_unstarted_snapshot_uses_same_bounded_policy(self):
         error = runner.ToolError('menu', dict(SNAPSHOT), {'ok': False, 'outcome': 'abandoned_before_start'})
         session = StartupSession(Clock(), [error])
@@ -116,7 +201,6 @@ class StartupReadinessTests(TestCase):
                  runner.HTTPResponseError(504, 'api/tool/menu', 'not JSON'),
                  runner.HTTPResponseError(504, 'api/tool/menu', '[]'),
                  runner.HTTPResponseError(504, 'api/tool/menu', '{"code":"504","error":"abandoned_before_start"}'),
-                 abandoned(text='main-thread task did not start within 5000ms; queued task abandoned and the game frame counter has not advanced -- main thread hung or the game is fully paused; if no pause menu is open, only a process restart recovers'),
                  ConnectionResetError('receipt lost'), TimeoutError('HTTP read uncertain')]
         for error in cases:
             with self.subTest(error=error):

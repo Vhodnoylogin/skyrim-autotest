@@ -41,7 +41,11 @@ Startup snapshots use the common read-only abandonment policy within the origina
 the pinned producer proves it was abandoned before starting. Every failure and
 retry is retained. A started/uncertain request, transport loss, other HTTP504 or
 unknown menu remains terminal; NEW selection and confirmation are each invoked
-once. Advancing render frames alone do not prove the UI queue or gameplay ready.
+once. The exact pinned five-second queued-abandoned response with no frame
+advancement is also retryable for this startup snapshot only, within the same
+stage deadline. A frozen frame sample does not establish permanent failure;
+persistent stalls still exhaust the original deadline. Other frozen-frame game
+reads remain refused. Advancing render frames alone do not prove the UI queue or gameplay ready.
 The same original stage deadline guards the raw mutation dispatch after logging
 and fresh listener checks; those checks cannot refresh an exhausted stage. A late
 mutation receipt is retained but never followed by another startup invocation.
