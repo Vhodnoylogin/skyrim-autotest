@@ -31,16 +31,23 @@ request additionally guards its own provider session/world generation and a
 sampled root token. Tokens are process-local identities; unobserved pointer
 reuse between samples is not detectable.
 
-The native provider uses the public CommonLib `Actor::EnableAI(false)` and
-`TESObjectREFR::SetCollision(false)` APIs. The latter **only changes the
-reference collision flag** in the reviewed CommonLib implementation. Therefore
-`HasCollision()==false` is retained separately and cannot establish controller
-collision state. The provider independently asks the current character controller
-for its `CFilter` and reads `QNoCollision()`. With no loaded controller the
-collision domain is unavailable and preparation refuses before issuing setters.
-No undocumented Havok fields, virtual offsets or fallback collision writes are
-used. If the controller filter never follows the reference flag, preparation
-times out honestly; this candidate does not solve that missing engine behavior.
+The provider uses CommonLib `Actor::EnableAI(false)` and
+`TESObjectREFR::SetCollision(false)` for AI and the reference flag. The latter
+**only changes the reference flag** and cannot disable a live controller. The
+expanded provider also calls the independently verified SE1.7.104 controller
+filter setter; see [its exact runtime contract and build recipe](controller-collision.md).
+The runtime, actual controller vtable and Havok world must be supported before
+any freeze setter. Other runtimes, including VR, currently refuse this expanded
+freeze action. Existing read-only observations remain available.
+
+The typed engine call sets only `CFilter::kNoCollision`, preserving every other
+filter bit, under the controller world's write lock. It uses no raw Havok field
+writes, global toggles or guessed filter-update calls. Its receipt records the
+before/requested/after filter values and whether a controller setter was issued.
+The provider independently reads `GetCollisionFilterInfo`/`QNoCollision()` again;
+an ignored or mismatched setter cannot pass. A missing controller/world remains
+unavailable. Neither reference state nor a returned setter substitutes for that
+fresh controller observation.
 
 `actor.aiEnabled` and `actor.collisionsEnabled` are actual returned facts.
 `fixture.visualFrozen` requires AI off, reference collision flag off **and** the
@@ -83,10 +90,10 @@ SKSE form/VM remap evidence. Old FF IDs or cached handles cannot substitute.
 7. Retain an intentional lost-ACK test: one attempted mutation, uncertain state,
    no second call even under a new command ID, with read-only diagnosis available.
 
-The first real SE probe must establish whether the public reference setter also
-produces the required controller filter state on the supported runtime. Until
-that succeeds, this remains an offline candidate rather than a ready visual
-fixture or a claim of physical collision disablement.
+The first real SE probe must establish that the new explicit controller setter
+produces the independently observed filter state and survives ordinary engine
+updates. Until then this remains an offline candidate. Readback alone does not
+establish physical contact suppression, stable rendering or visual quality.
 
 ## Integration and acquisition
 

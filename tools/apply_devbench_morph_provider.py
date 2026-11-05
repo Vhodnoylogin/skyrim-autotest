@@ -40,7 +40,7 @@ def stage(source, api_dir):
         predecessor=result.replace('\n#include "FixtureConfig.h"','').replace('\n\t\tFixtureConfig::Register(a_registry);','')
         if actual not in (original,result,predecessor):raise ValueError('Foreign host edit: '+relative)
         wanted[source/relative]=result.encode('utf-8')
-    for name in ('MorphProvider.h','MorphProvider.cpp','NPCPersistence.h','NPCPersistence.cpp','FixtureConfig.h','FixtureConfig.cpp'):
+    for name in ('MorphProvider.h','MorphProvider.cpp','NPCPersistence.h','NPCPersistence.cpp','CharacterCollision.h','FixtureConfig.h','FixtureConfig.cpp'):
         wanted[source/'src'/name]=(ROOT/'native/devbench'/name).read_bytes()
     for target,raw in wanted.items():
         target.write_bytes(raw);changed.append({'path':str(target),'sha256':hashlib.sha256(raw).hexdigest()})

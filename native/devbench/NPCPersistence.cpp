@@ -2,6 +2,7 @@
 #include "NPCPersistence.h"
 #include "ToolRegistry.h"
 #include "MainThread.h"
+#include "CharacterCollision.h"
 #include <charconv>
 #include <fstream>
 #include <set>
@@ -76,7 +77,8 @@ json VisualFacts(RE::Actor* actor) {
         {"collisionStateObserved",false},{"collisionStatus","unavailable"},{"collisionsEnabled",nullptr},
         {"collisionFilter",nullptr},{"visualFrozen",false},
         {"collisionBasis","Current character-controller CFilter no-collision flag; reference flag retained separately; not contact proof"}};
-    if(const auto* controller=actor->GetCharController()) {
+    if(const auto* controller=actor->GetCharController();controller&&controller->GetHavokWorld()) {
+        RE::BSReadLockGuard lock(controller->GetHavokWorld()->worldLock);
         RE::CFilter filter{};controller->GetCollisionFilterInfo(filter);
         out["collisionStateObserved"]=true;out["collisionStatus"]="available";
         out["collisionsEnabled"]=!filter.QNoCollision();out["collisionFilter"]=filter.filter;
@@ -248,18 +250,23 @@ json Handle(const json& args,const ToolContext&) {
             for(const auto& [id,command]:visualCommands)
                 if(command["status"]!="completed"&&SameVisualActor(command["before"],before))
                     throw ToolError(409,"Unsettled visual-freeze intent blocks further actor mutation");
+            CharacterCollision controllerCollision(actor->GetCharController());
             visualCommands.emplace(token,json{{"status","intent"},{"before",before}});
             try {
-                // Public, explicit setters. SetCollision changes the reference
-                // flag only; a separate controller filter read must confirm it.
                 const bool aiCall=before["aiEnabled"].get<bool>(),collisionCall=before["referenceCollisionsEnabled"].get<bool>();
                 if(aiCall)actor->EnableAI(false);
                 if(collisionCall)actor->SetCollision(false);
                 if(RE::TESForm::LookupByID(actor->GetFormID())!=actor||actor->Get3D(false)!=retainedRoot.get())
                     throw ToolError(409,"Visual fixture identity/root changed during freeze");
+                const auto controllerReceipt=controllerCollision.Disable(actor->GetCharController());
                 auto after=VisualState(actor);VisualGuard(after,args,true);
                 after["requestId"]=token;after["mutationIssued"]=true;after["aiSetterIssued"]=aiCall;
                 after["referenceCollisionSetterIssued"]=collisionCall;after["toggleUsed"]=false;
+                after["controllerCollisionSetterIssued"]=controllerReceipt.setterIssued;
+                after["controllerCollisionFilterBefore"]=controllerReceipt.before;
+                after["controllerCollisionFilterRequested"]=controllerReceipt.requested;
+                after["controllerCollisionFilterAfter"]=controllerReceipt.after;
+                after["controllerCollisionSetterBasis"]="Verified SE1.7.104 typed controller virtual09 under world write lock; no raw filter writes";
                 after["completionBasis"]="Explicit setters returned; fresh independent state observation required; no contact acceptance";
                 visualCommands[token]={{"status",after["visualFrozen"].get<bool>()?"completed":"call-returned"},{"before",before},{"after",after}};
                 return after;

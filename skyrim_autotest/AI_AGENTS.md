@@ -1,5 +1,11 @@
 # AI-agent instructions: Skyrim Autotest
 
+The expanded owned-actor freeze uses the exact SE1.7.104 controller setter;
+read docs/controller-collision.md. Reference flags alone cannot pass. Other
+runtimes/foreign vtables refuse before setters. Keep fresh strict observations,
+uncertainty/no replay and separate live qualification. Rebuild/pin the provider;
+the candidate04 executor can be retained but its old DLL does not contain this fix.
+
 Compound SE semantic deadlines may exceed primitive budgets; read
 docs/se-matrix-lifecycle.md. Keep the original parent deadline, allocate bounded
 child budgets and never replay uncertain intents. When normal menu exit is

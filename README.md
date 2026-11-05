@@ -1,5 +1,11 @@
 # Skyrim Autotest
 
+The owned-actor visual fixture now includes an explicit, exact-runtime
+[SE1.7.104 controller collision setter](docs/controller-collision.md).
+This addresses a reference-only setter defect; the rebuilt provider requires
+its own live qualification. Existing independent filter reads and no-replay
+rules remain mandatory.
+
 **Release0.4.0:** one external Windows/Python executor with separate SE and VR
 backends. DevBench is the in-game provider; our compatibility fork includes the
 complete upstream1.32.0 base. Optional World Observer supplies measurements and
