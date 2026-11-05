@@ -14,6 +14,7 @@ class ReadinessSession:
         from .runner import HTTPResponseError, ToolError
         end = min(self.deadline, deadline) if deadline is not None else self.deadline
         readonly = ((name == 'inspect' and args in ({'kind':'state'}, {'kind':'scene'})) or
+                    (name == 'menu' and args == {'action':'startup', 'startupOperation':'snapshot'}) or
                     (name == 'menu' and args.get('action') in ('list','describe')) or
                     (name == 'papyrus' and args.get('action') == 'describe'))
         attempt = 0

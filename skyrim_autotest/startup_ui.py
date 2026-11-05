@@ -65,37 +65,46 @@ def selection(data, state, selected=False):
     return matches[0]
 
 
-def mutate(session, operation):
+def mutate(session, operation, deadline):
     # One invocation only; timeout may have executed and is never replayed.
-    receipt = session.tool('menu', {'action': 'startup', 'startupOperation': operation})
+    remaining = deadline-time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError('Original startup stage deadline exhausted; no invocation or replay')
+    receipt = session.tool('menu', {'action': 'startup', 'startupOperation': operation},
+                           timeout=min(12, remaining), deadline=deadline)
     if (receipt.get('contract') != CONTRACT or receipt.get('operation') != operation or
             receipt.get('completed') is not True):
         raise ValueError('Native startup invocation completion unavailable; do not replay')
     session.log('startup-ui-invocation', operation=operation, receipt=receipt, acceptedAsWorldReadiness=False)
+    if time.monotonic() >= deadline:
+        raise TimeoutError('Native startup invocation returned after original stage deadline; no replay')
 
 
 def start_new_game(session, cell):
     from .bootstrap import wait_new_game_transition
+    from .readiness_reads import ReadinessSession
     session.phase('gameplay-new-game-menu', 45)
     _, cursor = listener_baseline(session, session.state.get('seStartupAdmission', {}).get('cursor'))
     end = time.monotonic() + 20
-    data = snapshot(session)
+    reads = ReadinessSession(session, end)
+    data = snapshot(reads)
     while data['state'] != 'Main':
         if time.monotonic() >= end:
             raise ValueError('Native Main menu did not settle; no startup mutation')
-        time.sleep(.25); data = snapshot(session)
+        time.sleep(min(.25, max(0, end-time.monotonic()))); data = snapshot(reads)
     entry = selection(data, 'Main')
     session.log('new-game-native-menu', snapshot=data, papyrusUsed=False)
-    mutate(session, 'select-new')
+    mutate(session, 'select-new', end)
     end = time.monotonic() + 10
-    data = snapshot(session)
+    reads = ReadinessSession(session, end)
+    data = snapshot(reads)
     while data['state'] != 'MainConfirm':
         if time.monotonic() >= end:
             raise ValueError('Native NEW confirmation did not settle; selection not replayed')
-        time.sleep(.25); data = snapshot(session)
+        time.sleep(min(.25, max(0, end-time.monotonic()))); data = snapshot(reads)
     selection(data, 'MainConfirm', selected=True)
     before, cursor = listener_baseline(session, cursor)
     session.log('new-game-request', selection=entry, before=before, afterSeq=cursor, transport=CONTRACT)
     session.phase('gameplay-new-game-load', 120)
-    mutate(session, 'confirm-new')
+    mutate(session, 'confirm-new', end)
     return wait_new_game_transition(session, cell, entry, before, cursor)

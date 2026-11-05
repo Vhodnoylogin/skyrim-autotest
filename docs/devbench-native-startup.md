@@ -34,3 +34,16 @@ no Papyrus fallback and does not replay uncertain invocation timeouts. Unknown
 dialogs and incompatible/replaced movies retain their refusal. Full startup,
 character completion, subject API admission and normal teardown remain separate
 live qualification requirements; see [session lifecycle](se-session-lifecycle.md).
+
+Startup snapshots use the common read-only abandonment policy within the original
+20-second main-state / 10-second confirmation-state deadlines. Only the exact
+`menu {action: startup, startupOperation: snapshot}` request can be repeated when
+the pinned producer proves it was abandoned before starting. Every failure and
+retry is retained. A started/uncertain request, transport loss, other HTTP504 or
+unknown menu remains terminal; NEW selection and confirmation are each invoked
+once. Advancing render frames alone do not prove the UI queue or gameplay ready.
+The same original stage deadline guards the raw mutation dispatch after logging
+and fresh listener checks; those checks cannot refresh an exhausted stage. A late
+mutation receipt is retained but never followed by another startup invocation.
+This executor correction is offline-tested; it requires a new exact-runtime game
+qualification and does not change the provider's five-second task timeout.

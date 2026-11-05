@@ -16,7 +16,7 @@ class Session:
         self.timeout=False
     def phase(self,*args):pass
     def log(self,name,**kwargs):self.logs.append((name,kwargs))
-    def tool(self,name,args):
+    def tool(self,name,args,**kwargs):
         self.calls.append((name,args))
         if name!='menu' or args.get('action')!='startup':raise AssertionError('VM/unsupported path used')
         op=args['startupOperation']
