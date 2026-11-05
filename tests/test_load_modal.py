@@ -6,6 +6,7 @@ from skyrim_autotest import load_modal
 
 
 SETTINGS = {'sConfirmLoad': 'Загрузить сохранение?', 'sLoadWhilePlaying': 'Изменения будут потеряны. Продолжить?',
+            'sLoadVanillaSaveWithMods': 'В данный момент активированы творения. Внимание: достижения будут недоступны. Вы все же хотите загрузить это сохранение?',
             'sLoadFromMainMenu': 'Начать загрузку?', 'sYes': 'Да', 'sNo': 'Нет',
             'sOK': 'Принять', 'sCancel': 'Отмена'}
 
@@ -59,12 +60,54 @@ class Backend:
 
 
 class LoadModalTests(unittest.TestCase):
-    def test_prepare_reads_actual_all_seven_localized_native_settings(self):
+    def test_prepare_reads_actual_all_eight_localized_native_settings(self):
         b = Backend()
         self.assertEqual(load_modal.prepare(b), SETTINGS)
         calls = [args['args'][0] for tool, args in b.calls if tool == 'papyrus' and args['action'] == 'call']
         self.assertEqual(calls, ['sOk' if key == 'sOK' else key for key in load_modal.KEYS])
         self.assertFalse(b.answers())
+
+    def test_creations_warning_requires_its_exact_native_body_and_own_cancel_semantics(self):
+        descriptor = modal(SETTINGS['sLoadVanillaSaveWithMods'], cancel=-1)
+        b = Backend([descriptor, descriptor])
+        self.assertTrue(load_modal.handle(b, b.s.transition, SETTINGS))
+        self.assertEqual(len(b.answers()), 1)
+        self.assertEqual(b.s.transition['blockingModal']['answerIntent']['recognition'],
+                         {'kind': 'creations-achievements', 'bodySetting': 'sLoadVanillaSaveWithMods'})
+        self.assertFalse(b.s.transition['completed'])
+        # The strings are a live native response, not a built-in RU/EN catalog.
+        b = Backend([modal('runtime-localized-warning', ['runtime-yes', 'runtime-no'], -1)] * 2)
+        localized = dict(SETTINGS, sLoadVanillaSaveWithMods='runtime-localized-warning',
+                         sYes='runtime-yes', sNo='runtime-no')
+        self.assertTrue(load_modal.handle(b, b.s.transition, localized))
+
+    def test_creations_warning_does_not_admit_unknown_body_or_other_button_layout(self):
+        body = SETTINGS['sLoadVanillaSaveWithMods']
+        for descriptor in (modal(body, cancel=1), modal(body + ' extra', cancel=-1),
+                           modal('Missing creations; load anyway?', cancel=-1),
+                           modal(body, [SETTINGS['sNo'], SETTINGS['sYes']], -1),
+                           modal(body, [SETTINGS['sOK'], SETTINGS['sCancel']], -1)):
+            with self.subTest(descriptor=descriptor):
+                b = Backend([descriptor])
+                with self.assertRaises(ValueError): load_modal.handle(b, b.s.transition, SETTINGS)
+                self.assertFalse(b.answers())
+                self.assertEqual(b.s.transition['blockingModal']['descriptor'], descriptor)
+
+    def test_creations_recheck_and_uncertain_answer_preserve_no_replay(self):
+        descriptor = modal(SETTINGS['sLoadVanillaSaveWithMods'], cancel=-1)
+        for changed in (modal('Other warning', cancel=-1), dict(descriptor, cancelIndex=1),
+                        dict(descriptor, buttons=['Yes', 'No'])):
+            b = Backend([descriptor, changed])
+            with self.assertRaisesRegex(ValueError, 'changed before answer'):
+                load_modal.handle(b, b.s.transition, SETTINGS)
+            self.assertFalse(b.answers())
+        b = Backend([descriptor, descriptor, descriptor])
+        b.error = TimeoutError('answer callback lost')
+        with self.assertRaises(TimeoutError): load_modal.handle(b, b.s.transition, SETTINGS)
+        with self.assertRaisesRegex(ValueError, 'never repeat'):
+            load_modal.handle(b, b.s.transition, SETTINGS)
+        self.assertEqual(len(b.answers()), 1)
+        self.assertEqual(b.s.transition['blockingModal']['status'], 'answer-uncertain')
 
     def test_exact_localized_confirmation_has_one_durable_answer_intent(self):
         for descriptor in (modal(), modal(SETTINGS['sConfirmLoad']),
@@ -119,7 +162,7 @@ class LoadModalTests(unittest.TestCase):
         self.assertEqual(len(b.calls), 1)
 
     def test_missing_empty_or_nonstring_native_setting_never_admits_answer(self):
-        for key, bad in (('sYes', ''), ('sConfirmLoad', None), ('sCancel', 12)):
+        for key, bad in (('sYes', ''), ('sConfirmLoad', None), ('sCancel', 12), ('sLoadVanillaSaveWithMods', '')):
             b = Backend()
             b.settings[key] = bad
             with self.assertRaises(ValueError): load_modal.prepare(b)

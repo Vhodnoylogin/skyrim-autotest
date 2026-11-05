@@ -109,7 +109,8 @@ class Session:
                         "params": [{"type": "String"}], "returnType": "String"}]}
             if args.get("function") == "GetGameSettingString":
                 settings = {"sConfirmLoad": "Load?", "sLoadWhilePlaying": "Discard and load?",
-                            "sLoadFromMainMenu": "Begin load?", "sYes": "Yes", "sNo": "No",
+                            "sLoadFromMainMenu": "Begin load?", "sLoadVanillaSaveWithMods": "Creations active; load?",
+                            "sYes": "Yes", "sNo": "No",
                             "sOk": "OK", "sCancel": "Cancel"}
                 return {"called": True, "returnedType": "String", "returned": settings[args["args"][0]]}
             return {"returned": self.state["ownedSaveDirectory"]}

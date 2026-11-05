@@ -1,4 +1,4 @@
-"""Exact localized discard-changes confirmation during an already requested load.
+"""Exact localized confirmations during an already requested owned SE load.
 
 The caller owns the SE load and its original deadline/lifecycle cursor. Answering
 a recognized modal submits one UI action; it never establishes load completion.
@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import copy
 
-KEYS = ('sConfirmLoad', 'sLoadWhilePlaying', 'sLoadFromMainMenu',
+CREATIONS_LOAD_KEY = 'sLoadVanillaSaveWithMods'
+KEYS = ('sConfirmLoad', 'sLoadWhilePlaying', 'sLoadFromMainMenu', CREATIONS_LOAD_KEY,
         'sYes', 'sNo', 'sOK', 'sCancel')
 LOAD_KEYS = KEYS[:3]
 
@@ -22,7 +23,7 @@ def _settings(settings):
 
 
 def prepare(backend):
-    """Read all seven actual native GMST strings without changing game state."""
+    """Read all eight actual native GMST strings without changing game state."""
     from .interactive_bindings import _metadata, _native_call
     entry = {'script': 'Game', 'function': 'GetGameSettingString', 'scope': 'global',
              'params': ['string'], 'returnType': 'string'}
@@ -60,11 +61,17 @@ def _recognized(descriptor, settings):
             or any(not isinstance(button, str) for button in descriptor['buttons'])
             or type(descriptor.get('cancelIndex')) is not int):
         raise ValueError('Actual native load confirmation descriptor is unavailable; rawDescriptor=' + repr(descriptor))
-    if descriptor['bodyText'] not in [settings[key] for key in LOAD_KEYS]:
+    if descriptor['bodyText'] == settings[CREATIONS_LOAD_KEY]:
+        if (descriptor['buttons'] == [settings['sYes'], settings['sNo']]
+                and descriptor['cancelIndex'] == -1):
+            return {'kind': 'creations-achievements', 'bodySetting': CREATIONS_LOAD_KEY}
+        raise ValueError('Creations load confirmation buttons/cancel semantics differ; rawDescriptor=' + repr(descriptor))
+    matching_keys = [key for key in LOAD_KEYS if descriptor['bodyText'] == settings[key]]
+    if not matching_keys:
         raise ValueError('Unknown blocking modal during owned load; rawDescriptor=' + repr(descriptor))
     if ((descriptor['buttons'] == [settings['sYes'], settings['sNo']] and descriptor['cancelIndex'] == 1)
             or (descriptor['buttons'] == [settings['sOK'], settings['sCancel']] and descriptor['cancelIndex'] == -1)):
-        return
+        return {'kind': 'discard-progress', 'bodySetting': matching_keys[0]}
     raise ValueError('Load confirmation buttons/cancel semantics differ; rawDescriptor=' + repr(descriptor))
 
 
@@ -86,7 +93,7 @@ def handle(backend, transition, settings):
     record = _retain(backend, transition, menus, descriptor, 'initial')
     if 'answerIntent' in record:
         raise ValueError('Owned-load modal already has an answer intent; never repeat an uncertain action')
-    _recognized(descriptor, settings)
+    recognition = _recognized(descriptor, settings)
     current = backend.call('menu', {'action': 'describe'})
     _retain(backend, transition, menus, current, 'pre-answer-recheck')
     if current != descriptor:
@@ -96,6 +103,7 @@ def handle(backend, transition, settings):
     _recognized(current, settings)
     backend.remaining()
     record['answerIntent'] = {'index': 0, 'descriptor': copy.deepcopy(current),
+                              'recognition': recognition,
                               'basis': 'exact current localized load body, button pair and cancel index',
                               'loadCompletionProven': False}
     record['status'] = 'answer-intent'

@@ -114,9 +114,28 @@ two-second bound; parentage never permits adoption or termination.
 
 SE owned loads also read the game's actual localized confirmation strings and
 observe message-box opening events during the original load deadline. A matching
-discard-progress confirmation gets one recorded answer; unknown/corrupt/content
-warnings retain their exact native body/buttons and fail immediately. An answer
+discard-progress confirmation gets one recorded answer. The separate creations/
+achievements warning must match the actual native `sLoadVanillaSaveWithMods`
+string, exact localized `[sYes,sNo]` buttons and `cancelIndex:-1`; other layouts
+remain refused. This exact SE1.7.104 warning uses button offset1, so the existing
+native `accept index0` invokes its affirmative callback. The executor does not
+guess translated phrases or accept arbitrary Yes/No dialogs. Both descriptor
+reads must agree; one durable answer intent forbids repeated or uncertain input.
+Unknown/corrupt/missing-content warnings retain their body/buttons and fail. An answer
 does not replace ordered pre/postLoadGame or the restored-equipment assertion.
+
+The offline source identification used the licensed SE1.7.104 executable
+SHA256 `846efccf0c1374d71f892907f46549560f2fcb0a75cb87a3eed438baa0f1402f`:
+load code RVA `0x627f6d` reads that GMST, its message constructor sets cancel
+index `-1` and button offset `1`, and callback RVA `0x62cd70` accepts result `1`.
+The localized `Update.esm` GMST editor ID resolves to string ID46 in
+`strings/update_russian.strings` inside `Skyrim - Interface.bsa`; its UTF-8 bytes
+match the observed warning. Obtain these files through the licensed game;
+they are not bundled. Runtime admission reads the actual current GMST and
+descriptor instead of using these resource bytes as a translation table.
+Identical descriptor samples do not provide an atomic callback identity: a
+concurrent modal replacement after the final read remains a provider limitation.
+The executor deliberately does not automate a second modal after an answer intent.
 
 The corrected provider load path is published in the owner DevBench fork at
 commit `b734f6de888e73db2148eae411f276355ed6f883`:

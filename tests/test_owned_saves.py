@@ -1,4 +1,5 @@
 import json
+import copy
 import os
 from pathlib import Path
 import tempfile
@@ -197,6 +198,70 @@ class OwnedSaveTests(unittest.TestCase):
         modal.assert_called_once()
         self.assertFalse(self.b.s.state['ownedLoadTransition']['completed'])
         self.assertEqual(sum(t=='game' and a['action']=='load' for t,a in self.b.calls),1)
+
+    def test_real_creations_modal_requires_load_events_and_common_readiness(self):
+        from tests.test_load_modal import SETTINGS, modal
+        for outcome in ('complete', 'no-load-events', 'unordered', 'not-ready'):
+            with self.subTest(outcome=outcome):
+                self.b = Backend(Path(self.tmp.name)/outcome)
+                self.complete()
+                self.b.s.state['configuration']['game_edition'] = 'se'
+                descriptor = modal(SETTINGS['sLoadVanillaSaveWithMods'], cancel=-1)
+                original = self.b.call
+                answered, descriptions = [], []
+                def call(tool, args):
+                    if tool == 'papyrus':
+                        if args['action'] == 'describe':
+                            return {'name': 'Game', 'globalFunctions': [{'name': 'GetGameSettingString', 'native': True,
+                                'params': [{'type': 'String'}], 'returnType': 'String'}]}
+                        key = 'sOK' if args['args'][0] == 'sOk' else args['args'][0]
+                        return {'called': True, 'returned': SETTINGS[key], 'returnedType': 'String'}
+                    if tool == 'menu' and not answered:
+                        if args['action'] == 'list': return {'messageBoxOpen': True}
+                        if args['action'] == 'describe':
+                            descriptions.append(copy.deepcopy(descriptor))
+                            return copy.deepcopy(descriptor)
+                        self.assertEqual(args, {'action': 'accept', 'index': 0})
+                        transition = self.b.s.state['ownedLoadTransition']
+                        self.assertFalse(transition['completed'])
+                        self.assertEqual(transition['blockingModal']['status'], 'answer-intent')
+                        answered.append(args)
+                        return {'queued': True, 'action': 'accept', 'index': 0}
+                    return original(tool, args)
+                self.b.call = call
+                opened = {'seq': 1, 'topic': 'menu', 'data': {'name': 'MessageBoxMenu', 'opening': True}}
+                events = [event(2, 'preLoadGame'), event(3, 'postLoadGame')]
+                if outcome == 'unordered': events = [event(2, 'postLoadGame')]
+                if outcome == 'no-load-events': events = []
+                replies = [{'headSeq': 1, 'events': [opened]},
+                           {'headSeq': 1 + len(events), 'events': events},
+                           {'headSeq': 1 + len(events), 'events': []}]
+                if outcome == 'no-load-events':
+                    self.b.pause = lambda seconds: (_ for _ in ()).throw(TimeoutError('No load events'))
+                readiness = TimeoutError('Not gameplay ready') if outcome == 'not-ready' else None
+                with patch('skyrim_autotest.runner.request', side_effect=replies), \
+                     patch('skyrim_autotest.bootstrap.wait_gameplay_ready',
+                           return_value=({'playerLoaded': True, 'cell': {'editorId': 'QASmoke'}}, {}),
+                           side_effect=readiness) as common, \
+                     patch('skyrim_autotest.platform.initialize_controllers'):
+                    if outcome == 'complete':
+                        result = owned_saves.perform(self.b, self.request('load_game'))
+                        self.assertTrue(result['lifecycle']['worldReady'])
+                    else:
+                        with self.assertRaises((ValueError, TimeoutError)):
+                            owned_saves.perform(self.b, self.request('load_game'))
+                transition = self.b.s.state['ownedLoadTransition']
+                self.assertEqual(transition['completed'], outcome == 'complete')
+                self.assertEqual(len(answered), 1)
+                self.assertEqual(len(descriptions), 2)
+                self.assertFalse(transition['blockingModal']['answerIntent']['loadCompletionProven'])
+                self.assertEqual(sum(t == 'game' and a['action'] == 'load' for t, a in self.b.calls), 1)
+                self.assertEqual(common.call_count, int(outcome in ('complete', 'not-ready')))
+                if common.called: self.assertEqual(common.call_args.kwargs['deadline'], self.b.end)
+                if outcome != 'complete':
+                    with self.assertRaisesRegex(ValueError, 'no replay'):
+                        owned_saves.perform(self.b, self.request('load_game'))
+                    self.assertEqual(len(answered), 1)
 
     def test_restart_load_requires_new_process_common_startup_then_ordered_native_load(self):
         self.complete()
