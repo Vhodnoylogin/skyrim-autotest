@@ -891,6 +891,9 @@ def execute(session, args, deadline):
     from . import morph_session
     if morph_session.validate(op,req):
         policy=native_settings(session.state.get('configuration',{})).get('nativeBindings')
+        from . import npc_persistence
+        if req.get('domain') == 'save-state' and npc_persistence.generic_roster(session.state.get('configuration', {})) is not None:
+            return npc_persistence.execute_generic(session,args,deadline,policy)
         return morph_session.execute(session,args,deadline,policy)
     if op == 'state.read':
         scene = backend.call('inspect', {'kind': 'scene'})

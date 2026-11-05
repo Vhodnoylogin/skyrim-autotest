@@ -1,5 +1,9 @@
 # Skyrim Autotest
 
+An explicit [generic two-actor SE roster](docs/generic-persistence.md) admits
+owned save/load and per-member strict visual-freeze preparation without a morph,
+matrix or OBody policy. It is an offline candidate requiring separate game qualification.
+
 The owned-actor visual fixture now includes an explicit, exact-runtime
 [SE1.7.104 controller collision setter](docs/controller-collision.md).
 This addresses a reference-only setter defect; the rebuilt provider requires

@@ -77,6 +77,8 @@ def configure(value, base=None):
             result['interactive_session'] = validate_interactive(result['interactive_session'])
         except (ValueError, TypeError, KeyError) as error:
             raise ConfigurationError('Invalid interactive-session policy: ' + str(error)) from error
+    if any('npcPersistenceRoster' in result.get(key, {}) for key in ('native_session', 'interactive_session')) and selected['edition'] != 'se':
+        raise ConfigurationError('Generic NPC persistence requires the explicit SE target')
     if 'se_shutdown' in result:
         if selected['edition'] != 'se' or result['se_shutdown'] not in ('window-close-v1', 'main-menu-v1', 'console-qqq'):
             raise ConfigurationError('se_shutdown requires explicit SE window-close-v1, main-menu-v1 or console-qqq')

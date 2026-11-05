@@ -18,6 +18,69 @@ from .platform import Backend
 
 
 PROTOCOL = "npc-persistence/1"
+_CREATION_FIELDS = ("tag", "base", "creationId", "creationWitness", "game", "runId",
+                    "nativePersistentIdentity", "createdReference")
+
+
+def validate_roster_config(settings, policy):
+    """An exact generic pair, never an implicit relaxation of a morph roster."""
+    value = settings.get("npcPersistenceRoster")
+    if (settings.get("npcPersistence") is not True or
+            any(key in settings for key in ("morphSession", "matrixLifecycle")) or
+            type(policy) is not dict or type(value) is not dict or
+            set(value) != {"mode", "fixtures"} or value.get("mode") != "generic-two-actor-v1" or
+            type(value.get("fixtures")) is not dict or len(value["fixtures"]) != 2):
+        raise BindingError("Generic persistence requires its exact two-actor roster, bindings and exclusive persistence opt-in")
+    fixtures = {}
+    for tag, base in value["fixtures"].items():
+        if not isinstance(tag, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", tag):
+            raise BindingError("Generic persistence requires distinct bounded creation tags")
+        base = actor_domain.form(base)
+        if base not in policy.get("fixtureActorBases", []):
+            raise BindingError("Generic persistence base is outside the frozen fixture allowlist")
+        fixtures[tag] = base
+    return {"mode": value["mode"], "fixtures": fixtures}
+
+
+def generic_roster(configuration):
+    settings = native_settings(configuration)
+    if "npcPersistenceRoster" not in settings:
+        return None
+    if configuration.get("game_edition") != "se":
+        raise BindingError("Generic NPC persistence requires the explicit SE target")
+    return validate_roster_config(settings, settings.get("nativeBindings"))
+
+
+def validate_generic_creation(configuration, request):
+    roster = generic_roster(configuration)
+    if roster is not None and (request.get("tag") not in roster["fixtures"] or
+            request.get("base") != roster["fixtures"][request["tag"]] or
+            request.get("persistentForOwnedSave") is not True):
+        raise BindingError("Generic creation requires its declared tag/base and persistentForOwnedSave:true")
+    return roster
+
+
+def _generic_fixtures(session, fixtures, *, complete=True):
+    roster = generic_roster(session.state.get("configuration", {}))
+    if roster is not None:
+        if (type(fixtures) is not dict or not set(fixtures) <= set(roster["fixtures"]) or
+                complete and set(fixtures) != set(roster["fixtures"])):
+            raise BindingError("Generic persistence requires all and only its frozen owned fixtures")
+        for tag, base in roster["fixtures"].items():
+            if tag not in fixtures:
+                continue
+            entry = fixtures[tag]
+            if type(entry) is not dict or entry.get("tag") != tag or entry.get("base") != base:
+                raise BindingError("Generic fixture tag/base differs from its frozen roster")
+    return roster
+
+
+def _saved_roster(session, record):
+    _require_roster(session, record.get("fixtures"))
+    roster = _generic_fixtures(session, record.get("fixtures"))
+    if record.get("rosterPolicy") != roster:
+        raise BindingError("Saved NPC roster policy changed after its owned save")
+    return roster
 
 
 def _enabled(session):
@@ -26,8 +89,14 @@ def _enabled(session):
 
 
 def _require_roster(session, tags):
-    """Keep legacy six-actor admission; two actors need the additive SE policy."""
+    """Keep legacy six/matrix two; generic two requires its exact named roster."""
     settings = native_settings(session.state.get("configuration", {}))
+    roster = generic_roster(session.state.get("configuration", {}))
+    if roster is not None:
+        if (not isinstance(tags, (list, dict)) or len(tags) != 2 or
+                any(not isinstance(tag, str) for tag in tags) or set(tags) != set(roster["fixtures"])):
+            raise BindingError("Generic persistence request differs from its exact frozen roster")
+        return 2
     lifecycle = settings.get("matrixLifecycle")
     count = 6
     if lifecycle is not None:
@@ -171,6 +240,7 @@ def _capture(backend, tags):
     fixtures = state.get("interactiveActorFixtures", {})
     if set(fixtures) != set(tags):
         raise BindingError("The NPC save bundle must contain all and only the attempted owned fixtures")
+    _generic_fixtures(backend.s, fixtures)
     for tag in tags:
         entry = fixtures.get(tag, {})
         spec = {"reference": entry.get("reference"), "base": entry.get("base")}
@@ -208,6 +278,15 @@ def _result(record):
     return result
 
 
+def _capture_saved(backend, record, roster):
+    current = _capture(backend, list(record["fixtures"]))
+    keys = _CREATION_FIELDS + ("reference", "worldGeneration", "incarnation")
+    if roster is not None and any(current[tag].get(key) != record["fixtures"][tag].get(key)
+                                  for tag in current for key in keys):
+        raise BindingError("Current generic fixtures differ from the exact saved creation identities")
+    return current
+
+
 def perform(session, request, deadline, policy):
     """Execute one narrow save/load in the existing held, owned game process."""
     frozen_policy(session, policy)
@@ -229,6 +308,9 @@ def perform(session, request, deadline, policy):
         record = {"status": "save-intent", "saveTag": tag, "bindingId": uuid.uuid4().hex,
                   "runId": state["id"], "game": game, "worldGeneration": state["ownedWorldGeneration"],
                   "fixtures": fixtures, "createdAt": time.time(), "loadAttempted": False}
+        roster = generic_roster(state.get("configuration", {}))
+        if roster is not None:
+            record["rosterPolicy"] = roster
         records[tag] = record
         session.save()  # Durable intent covers a lost native bind or save ACK.
         try:
@@ -250,12 +332,12 @@ def perform(session, request, deadline, policy):
     record = records.get(tag)
     if not isinstance(record, dict) or record.get("status") != "saved" or record.get("loadAttempted") is not False:
         raise BindingError("NPC load requires one completed unconsumed owned save; never replay")
-    _require_roster(session, record.get("fixtures"))
+    roster = _saved_roster(session, record)
     _world(backend, record)
     if state["ownedWorldGeneration"] != record["worldGeneration"]:
         raise BindingError("A foreign world transition invalidated the saved NPC bundle")
     owned_saves.saved(backend, tag)
-    _capture(backend, list(record["fixtures"]))
+    _capture_saved(backend, record, roster)
     # Invalidate every old actor binding before requesting a world transition.
     window = None
     if state.get("interactiveSession", {}).get("ready") is True:
@@ -325,6 +407,31 @@ def require_restoration(session, entry):
     """Used by ordinary fixture guards after an atomic complete bundle rebind."""
     witness = entry.get("restorationWitness", {})
     record = session.state.get("npcPersistence", {}).get(witness.get("saveTag"), {})
+    if "rosterPolicy" in record or generic_roster(session.state.get("configuration", {})) is not None:
+        _saved_roster(session, record)
+        _generic_fixtures(session, session.state.get("interactiveActorFixtures"))
+        rebindings = record.get("rebindings", {})
+        if set(rebindings) != set(record["fixtures"]):
+            raise BindingError("Generic restoration lacks its complete owned rebind roster")
+        receipt = _receipt(record.get("loadedReceipt"), record, "loaded", baseline=record.get("savedReceipt"))
+        rows = {row["tag"]: row for row in receipt["actors"]}
+        for tag, current in session.state["interactiveActorFixtures"].items():
+            rebound = rebindings[tag]
+            original, row = record["fixtures"][tag], rows[tag]
+            restored, incarnation = rebound.get("restorationWitness", {}), current.get("incarnation", {})
+            before = original["savedObservation"]["incarnation"]
+            if (current.get("status") != "created" or any(current.get(key) != rebound.get(key)
+                    for key in ("actor", "incarnation", "restorationWitness")) or
+                    any(current.get(key) != original.get(key) for key in _CREATION_FIELDS) or
+                    current.get("reference") != row["currentReference"] or
+                    current.get("worldGeneration") != record.get("afterWorldGeneration") or
+                    restored.get("native") != row or restored.get("bindingId") != record.get("bindingId") or
+                    restored.get("saveTag") != record.get("saveTag") or
+                    restored.get("worldGeneration") != record.get("afterWorldGeneration") or
+                    incarnation.get("sessionId") != before["sessionId"] or
+                    type(incarnation.get("loadGeneration")) is not int or incarnation["loadGeneration"] <= before["loadGeneration"] or
+                    incarnation.get("runtimeHandle") != row["runtimeHandle"]):
+                raise BindingError("Generic restored registry differs from its complete remap witnesses")
     rebound = record.get("rebindings", {}).get(entry.get("tag"), {})
     native = witness.get("native", {})
     if (record.get("status") != "loaded" or witness.get("bindingId") != record.get("bindingId") or
@@ -350,12 +457,32 @@ def observe(session, request, deadline, policy):
     record = session.state.get("npcPersistence", {}).get(request["saveTag"], {})
     if record.get("status") not in ("saved", "loaded"):
         raise BindingError("No completed owned NPC persistence evidence for this tag")
-    _require_roster(session, record.get("fixtures"))
+    roster = _saved_roster(session, record)
+    _generic_fixtures(session, session.state.get("interactiveActorFixtures"))
     _world(backend, record)
     owned_saves.saved(backend, request["saveTag"])
+    if roster is not None and record["status"] == "saved":
+        _capture_saved(backend, record, roster)
     if record["status"] == "loaded":
         owned_saves.observe(backend, {"observation": "lifecycle.state", "afterSaveTag": request["saveTag"]})
         for tag, entry in session.state["interactiveActorFixtures"].items():
             observation = actor_domain.observe_actor(backend, {"reference": entry["reference"], "base": entry["base"]})
             fixture_actors.require_fixture(session, {"reference": entry["reference"], "base": entry["base"]}, observation)
     return _result(record)
+
+
+def execute_generic(session, args, deadline, policy):
+    """Existing semantic save/read/load, independent of OBody and morph ledgers."""
+    from .interactive_bindings import child_deadline
+    if generic_roster(session.state.get("configuration", {})) is None:
+        raise BindingError("Generic save-state requires its explicit frozen roster")
+    request = args["request"]
+    if request.get("domain") != "save-state":
+        raise BindingError("Generic persistence admits only save-state semantics")
+    action = request.get("action")
+    if action is None:
+        return observe(session, {"saveTag": request["saveLabel"]}, child_deadline(deadline), policy)
+    translated = {"action": "save" if action == "save-disposable-once" else "load", "saveTag": request["saveLabel"]}
+    if translated["action"] == "save":
+        translated["fixtureTags"] = request["actors"]
+    return perform(session, translated, child_deadline(deadline, maximum=90 if translated["action"] == "load" else 30), policy)

@@ -231,6 +231,13 @@ def _persistent_identity(backend, spec, observation, expected=None):
 def create(session, request, deadline, policy):
     policy = frozen_policy(session, policy)
     request = validate_request(request, policy)
+    from .npc_persistence import validate_generic_creation, _generic_fixtures
+    generic = validate_generic_creation(session.state.get("configuration", {}), request)
+    if generic is not None:
+        fixtures = session.state.get("interactiveActorFixtures", {})
+        _generic_fixtures(session, fixtures, complete=False)
+        for entry in fixtures.values():
+            require_fixture(session, {"reference": entry.get("reference"), "base": entry.get("base")})
     bounded_deadline(deadline)
     if (request.get("persistentForOwnedSave") is True and
             native_settings(session.state.get("configuration", {})).get("npcPersistence") is not True):

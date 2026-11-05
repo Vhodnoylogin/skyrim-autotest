@@ -30,7 +30,7 @@ class InteractiveError(ValueError):
 
 def validate(settings):
     required = {'channelConfig', 'maximumSeconds', 'allowedTools', 'sourceId'}
-    if (type(settings) is not dict or not required <= set(settings) or set(settings) - required - {'nativeBindings','npcPersistence','morphSession','matrixLifecycle','manageCommandEndpoint','timeoutPolicy'} or
+    if (type(settings) is not dict or not required <= set(settings) or set(settings) - required - {'nativeBindings','npcPersistence','morphSession','matrixLifecycle','npcPersistenceRoster','manageCommandEndpoint','timeoutPolicy'} or
             not isinstance(settings['channelConfig'], str) or not Path(settings['channelConfig']).is_absolute()):
         raise InteractiveError('interactive_session requires explicit channelConfig, maximumSeconds, allowedTools and sourceId')
     maximum, allowed = settings['maximumSeconds'], settings['allowedTools']
@@ -60,6 +60,9 @@ def validate(settings):
             raise InteractiveError('matrixLifecycle requires NPC persistence and a separate policy from morphSession')
         from .matrix_lifecycle import validate_config
         result['matrixLifecycle'] = validate_config(settings['matrixLifecycle'], result.get('nativeBindings'))
+    if 'npcPersistenceRoster' in settings:
+        from .npc_persistence import validate_roster_config
+        result['npcPersistenceRoster'] = validate_roster_config(settings, result.get('nativeBindings'))
     return result
 
 
@@ -79,7 +82,9 @@ def _request(text, settings, session):
         if 'papyrus' not in settings['allowedTools'] or not settings.get('nativeBindings'):
             raise InteractiveError('Fixture creation requires the frozen nativeBindings policy and papyrus allowlist')
         from .fixture_actors import validate_request
-        validate_request(value['request'], settings['nativeBindings'])
+        checked = validate_request(value['request'], settings['nativeBindings'])
+        from .npc_persistence import validate_generic_creation
+        validate_generic_creation(session.state.get('configuration', {}), checked)
         return value
     if value.get('operation') == 'binding':
         required = {'schemaVersion', 'operation', 'bindingId', 'args', 'timeoutSeconds'}
@@ -150,7 +155,9 @@ def _request(text, settings, session):
         operation, request = args.get('operation'), args.get('request', {})
         from . import morph_session
         if morph_session.validate(operation,request):
-            if edition!='se' or not (settings.get('morphSession') or settings.get('matrixLifecycle')) or not settings.get('nativeBindings'):
+            from .npc_persistence import generic_roster
+            generic_domain = request.get('domain') in ('save-state', 'actor-visual-freeze') and generic_roster(session.state.get('configuration', {})) is not None
+            if edition!='se' or not (settings.get('morphSession') or settings.get('matrixLifecycle') or generic_domain) or not settings.get('nativeBindings'):
                 raise InteractiveError('Morph domains require the explicit frozen SE morph session and actor bindings')
             if request.get('domain')=='save-state' and not settings.get('npcPersistence'):
                 raise InteractiveError('Owned save/load requires explicit NPC persistence opt-in')

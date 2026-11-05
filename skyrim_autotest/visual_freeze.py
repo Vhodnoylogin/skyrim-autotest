@@ -106,9 +106,16 @@ def execute(session, args, deadline, policy):
     matrix = settings.get("matrixLifecycle")
     matrix_enabled = (configuration.get("game_edition") == "se" and type(matrix) is dict and
                       matrix.get("freezeActors") is True)
-    if settings.get("npcPersistence") is not True or not (settings.get("morphSession") or matrix_enabled):
-        raise BindingError("Visual freeze requires explicit frozen NPC-persistence and morph-session or SE matrix freeze opt-ins")
+    from .npc_persistence import generic_roster, _generic_fixtures
+    generic = generic_roster(configuration)
+    if settings.get("npcPersistence") is not True or not (settings.get("morphSession") or matrix_enabled or generic):
+        raise BindingError("Visual freeze requires explicit frozen NPC-persistence and morph, SE matrix-freeze or generic-roster opt-ins")
     bounded_deadline(deadline)
+    if generic is not None:
+        fixtures = session.state.get("interactiveActorFixtures")
+        _generic_fixtures(session, fixtures, complete=False)
+        for current in fixtures.values():
+            fixture_actors.require_fixture(session, {"reference": current.get("reference"), "base": current.get("base")})
     entry = session.state.get("interactiveActorFixtures", {}).get(req["actor"]["fixtureTag"])
     if not isinstance(entry, dict):
         raise BindingError("Visual freeze has no actual owned creation witness")

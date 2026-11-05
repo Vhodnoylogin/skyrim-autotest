@@ -4,8 +4,8 @@ import copy
 
 def validate(settings):
     if (type(settings) is not dict or 'nativeBindings' not in settings or
-            set(settings) - {'nativeBindings', 'npcPersistence', 'morphSession', 'matrixLifecycle'}):
-        raise ValueError('native_session requires nativeBindings and only optional npcPersistence/morphSession')
+            set(settings) - {'nativeBindings', 'npcPersistence', 'morphSession', 'matrixLifecycle', 'npcPersistenceRoster'}):
+        raise ValueError('native_session requires nativeBindings and only documented persistence/morph/matrix policies')
     from .interactive_bindings import validate as validate_bindings
     result = copy.deepcopy(settings)
     result['nativeBindings'] = validate_bindings(settings['nativeBindings'])
@@ -21,6 +21,9 @@ def validate(settings):
             raise ValueError('matrixLifecycle requires NPC persistence and a separate policy from morphSession')
         from .matrix_lifecycle import validate_config
         result['matrixLifecycle'] = validate_config(settings['matrixLifecycle'], result['nativeBindings'])
+    if 'npcPersistenceRoster' in settings:
+        from .npc_persistence import validate_roster_config
+        result['npcPersistenceRoster'] = validate_roster_config(settings, result['nativeBindings'])
     return result
 
 

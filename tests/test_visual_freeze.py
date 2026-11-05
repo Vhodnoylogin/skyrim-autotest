@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from skyrim_autotest import actor_inspection, fixture_actors, visual_freeze as domain
-from test_actor_inspection import Clock, POLICY, REF, BASE, Session as InspectionSession
+from tests.test_actor_inspection import Clock, POLICY, REF, BASE, Session as InspectionSession
 
 
 def request(mutate=False):
