@@ -211,7 +211,15 @@ def child_deadline(deadline, maximum=30):
         valid = False
     if not valid:
         raise BindingError('Semantic operation requires a finite unexpired absolute deadline')
-    return min(deadline, now + maximum)
+    cap = now + maximum
+    # Crossing a float exponent boundary can round the sum upward, so even a
+    # same-tick consumer would see slightly more than the strict 30/90s limit.
+    if cap - now > maximum:
+        cap = math.nextafter(cap, -math.inf)
+    child = min(deadline, cap)
+    if not 0 < child - now <= maximum:
+        raise BindingError('Primitive budget has no representable unexpired absolute deadline')
+    return child
 
 
 def bounded_deadline(deadline):

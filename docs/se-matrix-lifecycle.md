@@ -8,6 +8,10 @@ Each external native evaluator (baseline or hypothetical counterfactual) receive
 at most 30 seconds from the freshly checked remaining parent budget. Its input
 pin checks and both CLI commands share that one child budget.
 Creating another child budget never extends the parent or retries a command.
+Child caps correct upward floating-point addition by rounding down one
+representable value when needed. This also works when Windows returns the same
+coarse monotonic clock tick to both producer and strict validator. A shorter
+parent is preserved exactly; an unrepresentable positive child budget refuses.
 Public direct bindings still reject deadlines over 30 seconds. An uncertain
 creation/load intent remains terminal and is never treated as a completed actor
 or as proof that no side effects occurred. These bounds require exact live
