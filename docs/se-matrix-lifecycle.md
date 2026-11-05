@@ -4,6 +4,9 @@ Compound semantic steps retain their original absolute monotonic deadline, even
 when the scenario allows 60, 90, 120 or 180 seconds. A strict fixture/binding,
 inspection or freeze primitive receives at most 30 seconds from the remaining
 parent budget; an owned load retains its existing 90-second primitive bound.
+Each external native evaluator (baseline or hypothetical counterfactual) receives
+at most 30 seconds from the freshly checked remaining parent budget. Its input
+pin checks and both CLI commands share that one child budget.
 Creating another child budget never extends the parent or retries a command.
 Public direct bindings still reject deadlines over 30 seconds. An uncertain
 creation/load intent remains terminal and is never treated as a completed actor

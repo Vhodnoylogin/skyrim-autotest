@@ -272,7 +272,7 @@ def observe(backend, config, policy, request):
     values = {name: record["value"] for name, record in input_sources.items()}
     values.update({name: row["value"] for name, row in input_traits.items() if row["available"]})
     from . import matrix_evaluator
-    prediction = matrix_evaluator.evaluate(config["evaluator"], request["familyId"], values, input_weight, backend.remaining())
+    prediction = matrix_evaluator.evaluate(config["evaluator"], request["familyId"], values, input_weight, min(30, backend.remaining()))
     if set(prediction["outputs"]) != set(config["publicTargets"]):
         raise BindingError("Native output does not cover the complete configured public target catalog")
     graph_sources = prediction["graph"].get("sources", [])
@@ -315,7 +315,7 @@ def observe(backend, config, policy, request):
             raise BindingError("Counterfactual cannot override typed/unobserved ordinary sources")
         altered = dict(values, **overrides)
         result["matrix"]["counterfactual"] = matrix_evaluator.evaluate(config["evaluator"], request["familyId"], altered,
-            cf.get("weightRaw", input_weight), backend.remaining())
+            cf.get("weightRaw", input_weight), min(30, backend.remaining()))
         result['matrix']['counterfactual']['basis'] = 'explicit hypothetical native evaluator inputs, not observed SKEE or game mutations'
     # A CLI call cannot replace the game/fixture check after offline work.
     latest, latest_identity, latest_raw = morph_session._read_morphs(backend, spec, names)

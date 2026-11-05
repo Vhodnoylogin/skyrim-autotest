@@ -5,7 +5,12 @@ Creation uses the existing fake engine and the real creation/witness code. Other
 primitive boundaries are captured so this file needs no game, runtime or CLI.
 """
 import copy
+import hashlib
+import json
 import math
+from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -341,8 +346,7 @@ class SemanticPrimitiveDeadlineTests(DeadlineTestCase):
         request = {'domain': 'actor-matrix-state', 'actor': {'fixtureTag': 'Fixture'},
                    'stage': 'human', 'captureSnapshot': 'HumanBaseline', 'familyId': 'Example.UNP'}
         def evaluate(config, family, sources, weight, timeout):
-            self.assertEqual(timeout, self.parent - self.clock.now)
-            self.assertGreater(timeout, 30)
+            self.assertEqual(timeout, min(30, self.parent - self.clock.now))
             self.clock.advance(3)
             return {'outputs': {'TargetA': .2, 'Unmapped': 0}, 'graph': {'sources': []}}
         with patch.object(visual_freeze, 'require_frozen', side_effect=self.require), \
@@ -357,6 +361,71 @@ class SemanticPrimitiveDeadlineTests(DeadlineTestCase):
                                                         'hasHumanTrait', 'getHumanTrait', 'selectedFamily')})
         self.assertEqual(session.state['matrixLifecycle']['mutations'], [])
         self.assertIn('HumanBaseline', session.state['matrixLifecycle']['snapshots'])
+
+    def test_real_evaluator_caps_both_branches_and_recomputes_remaining_parent(self):
+        # Keep the real evaluator validation, pin reads and shared CLI deadline.
+        # Only the engine and subprocess are fake; a permissive evaluate mock
+        # previously concealed the public 30-second limit at this boundary.
+        actual_evaluate = matrix_evaluator.evaluate
+        for seconds, before_counterfactual in ((120, None), (25, None), (120, 5), (120, 0)):
+            with self.subTest(seconds=seconds, before_counterfactual=before_counterfactual), \
+                    tempfile.TemporaryDirectory() as temporary:
+                self.clock.now, self.captured = 1000.0, []
+                session = self.new_session()
+                config = session.state['configuration']['native_session']['matrixLifecycle']
+                for field, name in (('executable', 'fake-cli.exe'), ('matrix', 'fake-matrix.xml')):
+                    path = Path(temporary) / name
+                    path.write_bytes(name.encode())
+                    config['evaluator'][field] = str(path)
+                    config['evaluator'][field + 'Sha256'] = hashlib.sha256(path.read_bytes()).hexdigest()
+                request = {'domain': 'actor-matrix-state', 'actor': {'fixtureTag': 'Fixture'},
+                           'stage': 'human', 'captureSnapshot': 'HumanBaseline', 'familyId': 'Example.UNP',
+                           'counterfactual': {'weightRaw': 100}}
+                entries, cli_deadlines = [], []
+
+                def run(argv, **kwargs):
+                    cli_deadlines.append(self.clock.now + kwargs['timeout'])
+                    self.clock.advance(1)
+                    value = ({'schema': 'claw-matrix-input-graph/1', 'profile': 'Example.UNP',
+                              'sex': 'female', 'activeRules': 0, 'sources': [], 'targets': []}
+                             if argv[1] == 'matrix-info' else {'TargetA': .2, 'Unmapped': 0.0})
+                    return subprocess.CompletedProcess(argv, 0, json.dumps(value).encode(), b'')
+
+                def evaluate(*args):
+                    expected = min(30, self.parent - self.clock.now)
+                    self.assertGreater(expected, 0)
+                    self.assertEqual(args[-1], expected)
+                    entries.append((self.clock.now, args[-1]))
+                    result = actual_evaluate(*args)
+                    if len(entries) == 1 and before_counterfactual is not None:
+                        # Delay after the first evaluator has returned; never
+                        # renew the original parent for the second evaluation.
+                        self.clock.now = self.parent - before_counterfactual
+                    return result
+
+                with patch.object(visual_freeze, 'require_frozen', side_effect=self.require), \
+                        patch.object(bindings, 'guarded_call', side_effect=self.binding), \
+                        patch.object(matrix_evaluator, 'evaluate', side_effect=evaluate), \
+                        patch.object(matrix_evaluator.subprocess, 'run', side_effect=run) as native:
+                    if before_counterfactual == 0:
+                        with self.assertRaisesRegex(TimeoutError, 'deadline exhausted'):
+                            self.run_step(session, {'operation': 'world.read', 'request': request}, seconds)
+                        self.assertEqual(len(entries), 1)
+                        self.assertEqual(native.call_count, 2)
+                        self.assertFalse(session.state['matrixLifecycle']['snapshots'])
+                    else:
+                        result = self.run_step(session, {'operation': 'world.read', 'request': request}, seconds)
+                        self.assertEqual(len(entries), 2)
+                        self.assertEqual(native.call_count, 4)
+                        self.assertEqual(result['matrix']['nativePrediction']['inputs']['weightRaw'], 50)
+                        self.assertEqual(result['matrix']['counterfactual']['inputs']['weightRaw'], 100)
+                        if before_counterfactual is not None:
+                            self.assertEqual(entries[1][1], before_counterfactual)
+                for index, (started, timeout) in enumerate(entries):
+                    self.assertEqual(cli_deadlines[2 * index:2 * index + 2], [started + timeout] * 2)
+                    self.assertLessEqual(started + timeout, self.parent)
+                self.assertTrue(all(backend.end == self.parent for backend in session.backends))
+                self.assertEqual(session.state['matrixLifecycle']['mutations'], [])
 
     def test_120_second_save_180_second_load_and_save_read_use_existing_primitive_caps(self):
         requests = [

@@ -91,7 +91,8 @@ class MatrixEvaluatorTests(unittest.TestCase):
         for kwargs in ({"sources": {"A": float("nan")}}, {"sources": {"A": True}},
                        {"sources": {"$actor.weight": .5}}, {"sources": {"Name": 0, "name": 1}},
                        {"sources": {"Bad\nname": 0}}, {"weight": None}, {"weight": True},
-                       {"weight": 101}, {"weight": float("inf")}, {"timeout": 0}, {"timeout": True}):
+                       {"weight": 101}, {"weight": float("inf")}, {"timeout": 0}, {"timeout": True},
+                       {"timeout": 30.001}, {"timeout": 120}):
             with self.subTest(kwargs=kwargs), self.assertRaises(BindingError):
                 self.run_native(**kwargs)
 
