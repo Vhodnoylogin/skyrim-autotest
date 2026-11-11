@@ -1,5 +1,8 @@
 # Modern DevBench candidate for SkyrimSE1.7.104
 
+For the separate official1.36 line, use the [exact array-decoder repair recipe](devbench-136-arraydecode.md).
+It preserves the historical1.32 source and qualification below.
+
 This is an acquisition/build recipe, not an installation or launch command.
 The candidate compiled offline and subsequently completed the bounded0.3.7 SE
 smoke described in [qualified SE setup](se-qualified.md). That smoke covers
