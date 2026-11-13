@@ -23,7 +23,7 @@ class Backend:
             self.sex = 1 - self.sex
             return {'queued': False, 'completed': True}
         return {'ok': True, 'sessionId': 's', 'loadGeneration': self.generation, 'refs': [
-            {'status': 'available', 'deleted': False, 'disabled': False, 'loaded3D': True,
+            {'status': 'available', 'deleted': False, 'disabled': False, 'loaded3D': True, 'baseForm': self.base,
              'identity': {'form': ACTOR['reference'], 'loadGeneration': self.generation, 'runtimeHandle': self.handle}}]}
     def pap(self, script, function, values=None, target=None):
         self.calls.append((function, values))
@@ -94,6 +94,27 @@ class ActorDomainTests(unittest.TestCase):
             with self.assertRaises(ValueError): domain.observe_actor(b, ACTOR)
         b = Backend(); b.sex = True
         with self.assertRaisesRegex(ValueError, 'sex unavailable'): domain.observe_actor(b, ACTOR)
+
+    def test_missing_observed_base_refuses_before_mutation_without_vm_fallback(self):
+        b=Backend();original=b.call
+        def call(tool,request):
+            result=original(tool,request)
+            if tool!='console':result['refs'][0].pop('baseForm')
+            return result
+        b.call=call
+        with self.assertRaisesRegex(ValueError,'base identity unavailable'):
+            domain.perform(b,{'action':'set-weight','actor':ACTOR,'weight':100})
+        self.assertFalse(any(c[0] in ('SetWeight','GetActorBase') for c in b.calls))
+
+    def test_observed_base_changes_across_read_brackets_refuse(self):
+        b=Backend();original=b.pap
+        def pap(script,function,values=None,target=None):
+            result=original(script,function,values,target)
+            if function=='GetWeight':b.base='0x8'
+            return result
+        b.pap=pap
+        with self.assertRaisesRegex(ValueError,'base differs across'):
+            domain.observe_actor(b,ACTOR)
 
     def test_validate_exact_units_fields_and_safe_identity(self):
         req = {'action': 'set-weight', 'actor': ACTOR, 'weight': 100, 'units': 'Skyrim actor-base weight 0..100'}

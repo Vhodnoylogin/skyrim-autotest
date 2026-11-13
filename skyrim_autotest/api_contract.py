@@ -1,15 +1,56 @@
 """Read live provider contracts before test fixture/input mutations."""
 
 
+def validate_menu_shutdown_descriptor(descriptor):
+    """Require the official UI operations used by the fenced stock-menu adapter."""
+    tools = descriptor.get('tools') if isinstance(descriptor, dict) else None
+    if not isinstance(tools, list):
+        raise ValueError('Official DevBench tool descriptors unavailable')
+    found = [row for row in tools if isinstance(row, dict) and row.get('name') == 'gfx']
+    schema = found[0].get('inputSchema') if len(found) == 1 else None
+    properties = schema.get('properties') if isinstance(schema, dict) else None
+    operation = properties.get('op') if isinstance(properties, dict) else None
+    choices = operation.get('enum') if isinstance(operation, dict) else None
+    if (not isinstance(choices, list) or not {'get', 'set', 'call'}.issubset(choices) or
+            any(properties.get(key, {}).get('type') != kind for key, kind in
+                (('menu', 'string'), ('path', 'string'), ('args', 'array')))):
+        raise ValueError('Official DevBench Scaleform get/set/call interface unavailable')
+    return {'transport': 'devbench-gfx-main-menu/1', 'operations': ['snapshot', 'select-quit', 'confirm-quit']}
+
+
 def qualify_readiness(session):
     """Require explicit native menu metadata before any world-changing bootstrap."""
     from .runner import request, Blocked
     descriptor = request(session.state['port'], 'api/tools', timeout=3)
+    shutdown_api = None
+    if session.state.get('configuration', {}).get('se_shutdown') == 'main-menu-v1':
+        try:
+            shutdown_api = validate_menu_shutdown_descriptor(descriptor)
+        except ValueError as error:
+            raise Blocked(str(error)) from error
     tools = descriptor.get('tools') if isinstance(descriptor, dict) else None
     menus = [row for row in tools or [] if isinstance(row, dict) and row.get('name') == 'menu']
     schema = menus[0].get('inputSchema', {}) if len(menus) == 1 else {}
     if schema.get('properties', {}).get('includeFlags', {}).get('type') != 'boolean':
-        raise Blocked('DevBench native menu flags unavailable; build/qualify tools/build_devbench_current.py compatibility candidate')
+        notices = [row for row in tools or [] if isinstance(row, dict) and row.get('name') == 'notice']
+        notice_schema = notices[0].get('inputSchema', {}) if len(notices) == 1 else {}
+        actions = notice_schema.get('properties', {}).get('action', {}).get('enum', [])
+        if 'list' not in actions:
+            raise Blocked('Official DevBench blocking-menu annotation interface unavailable')
+        validate_menu_shutdown_descriptor(descriptor)
+        session.state['readinessApi'] = {'nativeMenuFlags': False, 'contract': 'official-menu-blockedBy'}
+        observation = session.tool('menu', {'action': 'list'}, timeout=8)
+        names = observation.get('openMenus')
+        if (type(observation.get('messageBoxOpen')) is not bool or not isinstance(names, list)
+                or any(not isinstance(name, str) for name in names) or len(set(names)) != len(names)
+                or not isinstance(observation.get('blockedBy', []), list)):
+            raise Blocked('Official DevBench menu observation unavailable')
+        if shutdown_api is not None:
+            session.state['readinessApi']['mainMenuExit'] = shutdown_api
+        session.log('readiness-api-contract', nativeMenuFlags=False, contract='official-menu-blockedBy',
+                    gameplayReady=False, warning='Raw native menu flags unavailable; all unrecognized menus block actions')
+        session.save()
+        return
     observation = session.tool('menu', {'action': 'list', 'includeFlags': True}, timeout=8)
     rows = observation.get('menuStates')
     names = observation.get('openMenus')
@@ -25,6 +66,8 @@ def qualify_readiness(session):
     session.log('readiness-api-contract', nativeMenuFlags=True, gameplayReady=False,
                 basis='Observed native metadata availability, not a playable-world assertion')
     session.state['readinessApi'] = {'nativeMenuFlags': True}
+    if shutdown_api is not None:
+        session.state['readinessApi']['mainMenuExit'] = shutdown_api
     session.save()
 
 def validate_observer_descriptor(result):

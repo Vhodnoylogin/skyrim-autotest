@@ -15,7 +15,7 @@ import time
 import urllib.parse
 import uuid
 
-from .voice_audio import Utterances, capture, wav_blocks
+from .voice_audio import CAPTURE_PENDING_BLOCKS, BLOCK_SAMPLES, RATE, CaptureGap, Utterances, capture, wav_blocks
 from .voice_inbox import atomic, locked, records
 from .microphone_probe import devices
 
@@ -106,6 +106,16 @@ class Session:
         self.health['ok'] = self.error is None
         atomic(self.folder / 'health.json', self.health)
 
+    def fail_capture(self, error):
+        # Serialize the fault with final ASR admission. Previously queued clips
+        # remain evidence but cannot become newly executable after capture loss.
+        with self.gate_mutex:
+            self.error = str(error) or type(error).__name__
+        self.event({'event': 'capture.gap' if isinstance(error, CaptureGap) else 'capture.failed',
+                    'reason': self.error, 'audioComplete': False, 'executable': False,
+                    'bufferedAudioReplayed': False})
+        self.update_health(captureActive=False, audioCoverageComplete=False)
+
     def event(self, event):
         with self.mutex:
             with self.events.open('a', encoding='utf-8') as stream:
@@ -163,32 +173,33 @@ class Session:
         now = time.monotonic()
         with self.gate_mutex:
             fresh = audio.get('captureStartedAt', 0) >= self.control_started_at
-            if self.wake and self.wake in text.casefold() and fresh:
+            if self.error is None and self.wake and self.wake in text.casefold() and fresh:
                 self.woke, self.until = now, now + self.window
                 if self.control_deadline is not None and now >= self.control_deadline:
                     self.control_deadline = None
             controlled = self.control_deadline is not None and now < self.control_deadline
-            accepted = (bool(text) and not re.fullmatch(r'[\s\[(].*[\])\s]', text)
+            accepted = (self.error is None and bool(text) and not re.fullmatch(r'[\s\[(].*[\])\s]', text)
                         and fresh and (not self.wake or controlled
                             or now < self.until and now - self.woke < self.conversation))
             if accepted and not controlled:
                 self.until = now + self.window
-        ended = time.time()
-        final = {**audio, 'event': 'speech.final', 'revision': 2, 'text': text,
-                 'segments': segments, 'asrStartedAt': started, 'asrEndedAt': ended,
-                 'audioSha256': hashlib.sha256(Path(audio['wav']).read_bytes()).hexdigest(),
-                 'accepted': accepted, 'executable': accepted,
-                 'note': 'Final ASR is fallible; human intent still requires operator review'}
-        atomic(self.folder / (identity + '.final.json'), final)
-        self.event(final)
-        if accepted:
-            self.seq += 1
-            row = {**final, 'seq': self.seq, 'at': datetime.datetime.now(
-                datetime.timezone.utc).isoformat(), 'receivedAt': time.time()}
-            with self.heard.open('a', encoding='utf-8') as stream:
-                stream.write(json.dumps(row, ensure_ascii=False) + '\n')
-                stream.flush()
-                os.fsync(stream.fileno())
+            ended = time.time()
+            final = {**audio, 'event': 'speech.final', 'revision': 2, 'text': text,
+                     'segments': segments, 'asrStartedAt': started, 'asrEndedAt': ended,
+                     'audioSha256': hashlib.sha256(Path(audio['wav']).read_bytes()).hexdigest(),
+                     'accepted': accepted, 'executable': accepted,
+                     'admissionError': self.error,
+                     'note': 'Final ASR is fallible; human intent still requires operator review'}
+            atomic(self.folder / (identity + '.final.json'), final)
+            self.event(final)
+            if accepted:
+                self.seq += 1
+                row = {**final, 'seq': self.seq, 'at': datetime.datetime.now(
+                    datetime.timezone.utc).isoformat(), 'receivedAt': time.time()}
+                with self.heard.open('a', encoding='utf-8') as stream:
+                    stream.write(json.dumps(row, ensure_ascii=False) + '\n')
+                    stream.flush()
+                    os.fsync(stream.fileno())
 
     def close(self):
         self.pending.join()
@@ -268,6 +279,7 @@ def main(argv=None):
                                    args.threshold, args.pause, args.maximum)
             audio = None
             server = None
+            endpoint_reason = 'capture_interrupted'
             try:
                 if args.serve:
                     server = serve(session, args.serve)
@@ -278,7 +290,8 @@ def main(argv=None):
                     if len(matches) != 1:
                         raise ValueError('Explicit input absent/ambiguous; no default fallback')
                     audio = capture(matches[0]['index'])
-                session.update_health(captureActive=True, replay=bool(args.replay_wav))
+                session.update_health(captureActive=True, replay=bool(args.replay_wav),
+                                      captureBufferSeconds=CAPTURE_PENDING_BLOCKS * BLOCK_SAMPLES / RATE)
                 updated = time.monotonic()
                 for pcm in audio:
                     if session.error:
@@ -289,13 +302,14 @@ def main(argv=None):
                         session.update_health(captureActive=True, capturedSamples=collector.sample)
                         updated = time.monotonic()
             except BaseException as error:
-                session.error = str(error) or type(error).__name__
+                endpoint_reason = 'capture_gap' if isinstance(error, CaptureGap) else 'capture_interrupted'
+                session.fail_capture(error)
                 raise
             finally:
                 try:
                     if audio is not None:
                         audio.close()
-                    collector.finish()
+                    collector.finish(endpoint_reason, False)
                 finally:
                     try:
                         session.close()

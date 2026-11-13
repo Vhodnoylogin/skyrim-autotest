@@ -20,6 +20,7 @@ OBSERVATIONS = {'form.identity', 'body_slot.settings', 'body_slot.display',
                 'reference.state', 'reference.physics', 'form.alchemy', 'save.state', 'lifecycle.state'}
 
 
+from .native_session import settings as native_settings
 from .readiness_state import menus_block_gameplay, world_loaded, gameplay_ready
 
 
@@ -44,6 +45,12 @@ def validate(args):
     req = args.get('request', {})
     if not isinstance(req, dict):
         raise ValueError('Semantic request must be an object')
+    from . import frame_progress
+    if frame_progress.validate(operation, req): return
+    from . import se_gameplay
+    if se_gameplay.validate(operation, req): return
+    from . import morph_session
+    if morph_session.validate(operation,req): return
     from . import preset_domain
     if preset_domain.validate(operation, req): return
     from . import grip_exchange
@@ -876,6 +883,18 @@ def execute(session, args, deadline):
         raise ValueError('Common gameplay bootstrap must precede semantic actions')
     backend = Backend(session, deadline)
     op, req = args['operation'], args.get('request', {})
+    from . import frame_progress
+    if frame_progress.validate(op, req): return frame_progress.observe(backend, req)
+    from . import se_gameplay
+    if se_gameplay.validate(op, req):
+        return se_gameplay.observe(backend, req) if op == 'world.read' else se_gameplay.perform(backend, req)
+    from . import morph_session
+    if morph_session.validate(op,req):
+        policy=native_settings(session.state.get('configuration',{})).get('nativeBindings')
+        from . import npc_persistence
+        if req.get('domain') == 'save-state' and npc_persistence.generic_roster(session.state.get('configuration', {})) is not None:
+            return npc_persistence.execute_generic(session,args,deadline,policy)
+        return morph_session.execute(session,args,deadline,policy)
     if op == 'state.read':
         scene = backend.call('inspect', {'kind': 'scene'})
         menus = backend.call('menu', {'action': 'list', 'includeFlags': True})

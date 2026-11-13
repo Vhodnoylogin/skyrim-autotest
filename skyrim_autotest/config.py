@@ -43,15 +43,65 @@ def configure(value, base=None):
     missing = sorted(k for k in required if not value.get(k))
     if missing:
         raise ConfigurationError("Missing configuration fields: " + ", ".join(missing))
-    unknown = set(value) - PATH_KEYS - {"schemaVersion", "game_edition", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings", "allow_steam_client_restart", "boundary_collection", "fixture_actor_allowlist", "fixture_actor_base_allowlist", "photography", "native14_live", "root_builder", "se_new_game_ui"}
+    unknown = set(value) - PATH_KEYS - {"schemaVersion", "game_edition", "bridge_port", "required_mods", "extra_files", "collected_files", "staged_plugins", "devbench_runtime_files", "controller_start_positions_metres", "allow_background_physical_vr", "reuse_test_profile", "allow_owned_save_load", "physical_grip_geometry", "native_runtime_fixtures", "subject_state_bindings", "allow_steam_client_restart", "boundary_collection", "fixture_actor_allowlist", "fixture_actor_base_allowlist", "photography", "native14_live", "root_builder", "root_builder_passive", "se_new_game_ui", "se_shutdown", "se_fixture_anchor", "se_fixture_transition", "crash_capture", "interactive_session", "native_session", "copied_profile_mods", "owned_fixture_confirmation"}
     if unknown:
         raise ConfigurationError("Unknown configuration fields: " + ", ".join(sorted(unknown)))
     base = Path(base or Path.cwd()).resolve()
     result = dict(value)
     result['game_edition'] = selected['edition']
+    if 'copied_profile_mods' in result:
+        from .copied_profile import validate as validate_copied_profile
+        if selected['edition'] != 'se' or result.get('reuse_test_profile'):
+            raise ConfigurationError('Explicit copied-profile mod composition requires a cold-owned SE profile')
+        try:
+            result['copied_profile_mods'] = validate_copied_profile(result['copied_profile_mods'])
+        except (ValueError, TypeError, KeyError) as error:
+            raise ConfigurationError('Invalid copied-profile mod composition: ' + str(error)) from error
+    if 'crash_capture' in result:
+        if selected['edition'] != 'se':
+            raise ConfigurationError('Crash capture currently requires the SE target')
+        from .crash_capture import validate_config as validate_crash_capture
+        try:
+            result['crash_capture'] = validate_crash_capture(result['crash_capture'])
+        except (ValueError, TypeError, KeyError) as error:
+            raise ConfigurationError('Invalid crash capture policy: ' + str(error)) from error
+    if 'native_session' in result:
+        from .native_session import settings as native_settings
+        try:
+            result['native_session'] = native_settings(result)
+        except (ValueError, TypeError, KeyError) as error:
+            raise ConfigurationError('Invalid native-session policy: ' + str(error)) from error
+    if 'interactive_session' in result:
+        from .interactive import validate as validate_interactive
+        try:
+            result['interactive_session'] = validate_interactive(result['interactive_session'])
+        except (ValueError, TypeError, KeyError) as error:
+            raise ConfigurationError('Invalid interactive-session policy: ' + str(error)) from error
+    if any('npcPersistenceRoster' in result.get(key, {}) for key in ('native_session', 'interactive_session')) and selected['edition'] != 'se':
+        raise ConfigurationError('Generic NPC persistence requires the explicit SE target')
+    if 'owned_fixture_confirmation' in result:
+        if selected['edition'] != 'se' or result.get('allow_owned_save_load') is not True:
+            raise ConfigurationError('Owned fixture confirmation requires explicit SE owned-save loading')
+        from .fixture_confirmation import validate_policy
+        try:
+            result['owned_fixture_confirmation'] = validate_policy(result['owned_fixture_confirmation'])
+        except ValueError as error:
+            raise ConfigurationError(str(error)) from error
+    if 'se_shutdown' in result:
+        if selected['edition'] != 'se' or result['se_shutdown'] not in ('window-close-v1', 'main-menu-v1', 'console-qqq'):
+            raise ConfigurationError('se_shutdown requires explicit SE window-close-v1, main-menu-v1 or console-qqq')
     if 'se_new_game_ui' in result:
         if type(result['se_new_game_ui']) is not bool or selected['edition'] != 'se':
             raise ConfigurationError('se_new_game_ui is an explicit SE-only boolean startup policy')
+    if 'se_fixture_anchor' in result:
+        if (result['se_fixture_anchor'] != 'qasmoke-west-navmesh-v1' or
+                selected['edition'] != 'se' or result.get('se_new_game_ui') is not True):
+            raise ConfigurationError('se_fixture_anchor requires the explicit SE New Game route and qasmoke-west-navmesh-v1')
+    if 'se_fixture_transition' in result:
+        if (result['se_fixture_transition'] != 'qasmoke-marker-moveto-v1' or
+                selected['edition'] != 'se' or result.get('se_new_game_ui') is not True or
+                result.get('se_fixture_anchor') != 'qasmoke-west-navmesh-v1'):
+            raise ConfigurationError('se_fixture_transition requires the explicit native SE New Game and QASmoke anchor recipe')
     if 'root_builder' in result:
         from .root_builder import configuration
         try:
@@ -60,6 +110,14 @@ def configure(value, base=None):
             raise ConfigurationError('Invalid Root Builder policy: ' + str(error)) from error
         if not result.get('root_builder_data') or selected['edition'] != 'vr' or result.get('reuse_test_profile'):
             raise ConfigurationError('Explicit Root Builder requires VR, root_builder_data and a cold-owned MO2 profile')
+    if 'root_builder_passive' in result:
+        from .root_builder_passive import configuration as passive_configuration
+        try:
+            result['root_builder_passive'] = passive_configuration(result['root_builder_passive'])
+        except (ValueError, TypeError, KeyError) as error:
+            raise ConfigurationError('Invalid passive Root Builder policy: ' + str(error)) from error
+        if selected['edition'] != 'se' or result.get('root_builder') or result.get('root_builder_data') or result.get('reuse_test_profile'):
+            raise ConfigurationError('Passive Root Builder requires separate cold-owned SE mode without root deployment')
     if 'native14_live' in result:
         if selected['edition'] != 'vr':
             raise ConfigurationError('Native14 observations require the VR target')
@@ -227,4 +285,6 @@ def template(edition='vr'):
     result = {"schemaVersion": 1, "game_edition": edition, "runtime": str(default_runtime()), "mo2": "REPLACE/MO2", "game": "REPLACE/" + selected['bridgeGame'], "mods": "REPLACE/MO2/mods", "profiles": "REPLACE/MO2/profiles", "overwrite": "REPLACE/MO2/overwrite", "bridge_token": "REPLACE/MO2/plugins/mo2aibridge/mo2aibridge-token.txt", "bridge_port": 8930, "skse_logs": "REPLACE/Documents/My Games/" + ('Skyrim VR' if edition == 'vr' else 'Skyrim Special Edition') + "/SKSE", "fixture_dir": "REPLACE/authorized-fixture", "required_mods": ["DevBench"] + (["VRIK Player Avatar", "HIGGS - Enhanced VR Interaction"] if edition == 'vr' else []), "extra_files": [], "staged_plugins": [], "devbench_runtime_files": []}
     if edition == 'vr':
         result['openvr_paths'] = str(Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "openvr/openvrpaths.vrpath")
+    else:
+        result['se_shutdown'] = 'window-close-v1'
     return result

@@ -11,9 +11,20 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="skyrim-autotest")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--config", type=Path, help="External configuration JSON; required for live operations")
-    parser.add_argument("command", choices=["init", "config-check", "preflight", "run", "status", "recover", "queue", "build-driver", "guardian", "guide", "review-plan", "validate-native14"])
+    parser.add_argument("command", choices=["init", "setup", "doctor", "channel", "asr-bridge", "config-check", "preflight", "run", "status", "recover", "queue", "build-driver", "guardian", "guide", "review-plan", "validate-native14"])
     args, rest = parser.parse_known_args(argv)
     try:
+        if args.command == 'asr-bridge':
+            from .asr_bridge import main as bridge_main
+            return bridge_main(rest)
+        if args.command in ('setup', 'doctor'):
+            from .setup import main as setup_main
+            return setup_main(['install' if args.command == 'setup' else 'doctor', *rest])
+        if args.command == 'channel':
+            from .command_bus import main as channel_main
+            if not args.config:
+                raise ConfigurationError('Use --config <external command-channel JSON> for channel')
+            return channel_main(['--config', str(args.config), *rest])
         if args.command == 'validate-native14':
             from .native14_cli import main as validate_native14
             return validate_native14(rest)
@@ -26,9 +37,17 @@ def main(argv=None):
             return 0
         if args.command == "init":
             sub = argparse.ArgumentParser(prog="skyrim-autotest init")
-            sub.add_argument("--directory", type=Path, required=True)
+            sub.add_argument("--directory", type=Path)
+            sub.add_argument("--spec", type=Path, help='Deploy filled external configuration from a pinned setup specification')
             sub.add_argument("--edition", choices=['vr', 'se'], default='vr')
             options = sub.parse_args(rest)
+            if options.spec:
+                if options.directory:
+                    raise ConfigurationError('Choose either --spec or the legacy --directory template')
+                from .setup import main as setup_main
+                return setup_main(['install', '--spec', str(options.spec)])
+            if not options.directory:
+                raise ConfigurationError('init requires --spec or --directory')
             directory = options.directory.resolve()
             directory.mkdir(parents=True, exist_ok=True)
             with (directory / "config.json").open("x", encoding="utf-8") as stream:

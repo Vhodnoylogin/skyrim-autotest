@@ -5,13 +5,15 @@ import os
 from pathlib import Path
 import time
 
+from .native_session import settings as native_settings
 
 def prepare_required_mapping_probe(session, target):
     """Capability opt-in alone must not require a save in a no-save new game."""
     scenario = session.state['scenario']
     save_actions = {'save_game', 'load_game', 'restart_game'}
     steps = [*scenario.get('steps', []), *scenario.get('postSteps', [])]
-    required = bool(scenario.get('fixture')) or any(
+    npc = native_settings(session.state.get('configuration',{})).get('npcPersistence') is True
+    required = npc or bool(scenario.get('fixture')) or any(
         step.get('tool') == 'platform' and step.get('args', {}).get('operation') == 'input.perform'
         and step['args'].get('request', {}).get('action') in save_actions for step in steps)
     session.state['ownedSaveMappingRequired'] = required
@@ -32,6 +34,22 @@ def prepare_mapping_probe(session, target):
         raise ValueError('Save mapping probe must precede game launch')
     if target.resolve()!=Path(state['ownedSaveDirectory']).resolve():
         raise ValueError('Mapping probe outside owned save directory')
+    configuration = state.get('configuration', {})
+    # A fresh SE New Game has no ESS to copy. Prove the same USVFS alias with
+    # the native read-only nonce service instead; no NPC fixture is required.
+    native_nonce = (native_settings(configuration).get('npcPersistence') is True or
+                    (configuration.get('game_edition') == 'se' and
+                     configuration.get('allow_owned_save_load') is True and
+                     not state.get('fixture') and not state.get('scenario', {}).get('fixture')))
+    if native_nonce:
+        marker,nonce=uuid.uuid4().hex,uuid.uuid4().hex
+        challenge=target/('Autotest_Map_'+marker+'.probe')
+        with challenge.open('xb') as stream:stream.write(nonce.encode('ascii'))
+        state['ownedSaveMappingProbe']={'kind':'native-nonce/1','marker':marker,'nonce':nonce,
+            'path':str(challenge.resolve()),'sha256':hashlib.sha256(nonce.encode('ascii')).hexdigest(),
+            'preparedBeforeLaunch':True,'preparedAt':time.time()}
+        session.save()
+        return
     fixture=state.get('fixture',{})
     stem=fixture.get('saveStem','')
     if not stem or Path(stem).name!=stem or '/' in stem or '\\' in stem:
@@ -63,6 +81,27 @@ def verify_mo2_save_mapping(backend, target, observed):
     if not all(settings.getboolean('General',key,fallback=False) for key in ('LocalSaves','LocalSettings')):
         raise ValueError('MO2 save mapping requires owned local saves/settings')
     probe=state.get('ownedSaveMappingProbe',{})
+    if probe.get('kind')=='native-nonce/1':
+        marker,nonce=probe.get('marker'),probe.get('nonce')
+        if (not isinstance(marker,str) or not re.fullmatch(r'[0-9a-f]{32}',marker) or
+                not isinstance(nonce,str) or not re.fullmatch(r'[0-9a-f]{32}',nonce) or
+                probe.get('preparedBeforeLaunch') is not True):raise ValueError('Invalid prelaunch native nonce')
+        challenge=target/('Autotest_Map_'+marker+'.probe')
+        if (challenge.is_symlink() or Path(probe.get('path','')).resolve()!=challenge.resolve() or
+                challenge.read_bytes()!=nonce.encode('ascii') or hashlib.sha256(challenge.read_bytes()).hexdigest()!=probe['sha256']):
+            raise ValueError('Owned mapping nonce changed')
+        receipt=backend.call('npc_persistence',{'action':'mapping_probe','marker':marker,'nonce':nonce,
+            'timeoutMs':max(1,min(3000,int(backend.remaining()*1000)))})
+        expected=Path(state['configuration']['skse_logs']).parent/observed
+        if (not isinstance(receipt,dict) or receipt.get('protocol')!='npc-save-mapping/1' or
+                type(receipt.get('pid')) is not int or receipt.get('pid')!=state['game']['pid'] or
+                receipt.get('marker')!=marker or receipt.get('nonce')!=nonce or receipt.get('exactBytes')!=32 or
+                type(receipt.get('exactBytes')) is not int or
+                receipt.get('readOnly') is not True or Path(receipt.get('nativeDirectory','')).resolve()!=expected.resolve()):
+            raise ValueError('Native USVFS read did not prove owned prelaunch save mapping')
+        backend.s.log('owned-save-virtual-mapping-verified',probe=probe,nativeReceipt=receipt,
+            basis='random32-byte prelaunch owned nonce read through native default save directory')
+        return
     marker=probe.get('stem','')
     if (not re.fullmatch(r'Autotest_Map_[0-9a-f]{32}',marker) or probe.get('preparedBeforeLaunch') is not True or
             Path(probe.get('path','')).resolve()!=(target/(marker+'.ess')).resolve()):
@@ -253,6 +292,10 @@ def perform(backend, req, restart_prepare=None):
     state['platformReferences'] = {}
     state['invalidatedRuntimeItemTags']=sorted(set(state.get('invalidatedRuntimeItemTags',[]))|set(state.get('runtimeItems',{})))
     state['runtimeItems']={}
+    # Keep creation/uncertainty evidence, but never use pre-load dynamic IDs in
+    # the newly loaded world. Stable plugin/local-ID snapshots resolve afresh.
+    for fixture in state.get('seGameplayFixtures', {}).values():
+        fixture.update(status='invalidated-by-load', invalidatedBySaveTag=tag)
     b.s.invalidate_probe_reference('owned save load requested')
     state['gameplayBootstrap']['completed'] = False
     history=state.setdefault('ownedLoadHistory',[])
@@ -275,11 +318,25 @@ def perform(backend, req, restart_prepare=None):
         transition['restartRequested']=True
         b.s.save()
         BoundSession(b).phase('gameplay-owned-restart-load',b.remaining())
-    b.call('game', {'action':'load', 'name':record['stem'], 'dir':str(target)})
+    load_settings = None
+    if state.get('configuration', {}).get('game_edition') == 'se':
+        from . import load_modal
+        load_settings = load_modal.prepare(b)
+    # Persist the same-process, pinned-pair intent before the one load request.
+    transition['loadIntent'] = {'game': copy.deepcopy(state['game']), 'saveTag': tag,
+        'stem': record['stem'], 'files': copy.deepcopy(record['files']),
+        'directory': state['ownedSaveDirectory'], 'requestAttempted': True, 'acknowledged': False}
+    b.s.save()
+    receipt = b.call('game', {'action':'load', 'name':record['stem'], 'dir':str(target)})
+    if (not isinstance(receipt, dict) or receipt.get('queued') is not True or receipt.get('name') != record['stem']):
+        raise ValueError('Owned load acknowledgement unavailable; never replay')
+    transition['loadIntent'].update(acknowledged=True, receipt=copy.deepcopy(receipt))
+    b.s.save()
     events = Events(b, cursor)
     saw_pre, completed_events = False, []
     while True:
-        for event in events.read():
+        batch = events.read()
+        for event in batch:
             name = lifecycle(event)
             if name == 'newGame': raise ValueError('Unexpected New Game during owned load')
             if name == 'preLoadGame':
@@ -290,6 +347,13 @@ def perform(backend, req, restart_prepare=None):
                 if not saw_pre or len(completed_events) != 1: raise ValueError('Owned load completion lacks unique ordered preLoadGame')
                 completed_events.append(event)
         if len(completed_events) == 2: break
+        if load_settings is not None and any(
+                event.get('topic') == 'menu' and event.get('data', {}).get('name') == 'MessageBoxMenu'
+                and event['data'].get('opening') is True for event in batch):
+            from .fixture_confirmation import confirm_pending_owned_load
+            if not confirm_pending_owned_load(b, transition, record):
+                from . import load_modal
+                load_modal.handle(b, transition, load_settings)
         b.pause(.2)
     from .bootstrap import wait_gameplay_ready
     proxy = BoundSession(b)

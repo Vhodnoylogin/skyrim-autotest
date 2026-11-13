@@ -38,6 +38,7 @@ class SENewGameTests(unittest.TestCase):
             initial.return_value.read.return_value = ['newGame']
             bootstrap.prepare_gameplay(session, scenario)
         start.assert_called_once_with(session, 'QASmoke')
+        session.wait_task_queue.assert_called_once_with()
         self.assertEqual(initial.call_args.args[1], 'new-game')
         self.assertEqual(scenario, {'cell': 'QASmoke'})
         self.assertEqual(session.state['gameplayBootstrap']['startupSelection'], 'platform')

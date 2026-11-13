@@ -202,9 +202,10 @@ class VoiceAudioTests(unittest.TestCase):
         with patch.object(voice_audio, 'api', return_value=fake):
             stream = voice_audio.capture(0)
             self.assertEqual(len(next(stream)), BLOCK_SAMPLES * 2)
-            self.assertEqual(fake.calls.count('queue'), 17)
+            self.assertEqual(len(fake.headers),128)  # Explicit bounded producer ring in this candidate.
+            self.assertEqual(fake.calls.count('queue'),len(fake.headers)+1)
             stream.close()
-        self.assertEqual(fake.calls.count('unprepare'), 16)
+        self.assertEqual(fake.calls.count('unprepare'),len(fake.headers))
         self.assertEqual(fake.calls[-1], 'close')
 
     def test_exhausted_capture_ring_never_claims_complete_audio(self):

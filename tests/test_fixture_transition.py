@@ -16,6 +16,7 @@ class FixtureTransitionTests(unittest.TestCase):
                     def save(self): pass
                     def tool(self, name, args, **kwargs):
                         timeline.append((name, args))
+                        if name=='game' and args.get('action')=='load':return {'queued':True,'name':args['name']}
                         return {'cell': {'editorId': 'VRPlayroom01'}, 'frame': 100}
                 ready_scene = {'playerLoaded': True, 'cell': {'editorId': 'QASmoke'}}
                 def ready(session, cell, new_game, **kwargs):
@@ -29,7 +30,7 @@ class FixtureTransitionTests(unittest.TestCase):
                      patch.object(runner, 'request', return_value={'events': [
                          {'topic': 'lifecycle', 'event': 'postLoadGame', 'frame': 101}]}):
                     session = Session()
-                    session.state = {'port': 1}
+                    session.state = {'port': 1, 'game': {'pid':17,'birth':3,'path':'SkyrimVR.exe'}}
                     bootstrap.prepare_gameplay(session, {'cell': 'QASmoke', 'fixture': {'saveStem': 'pinned'}})
                 transitions = [row for row in timeline if row[0] == 'console']
                 self.assertEqual(len(transitions), 0 if loaded_cell == 'QASmoke' else 1)

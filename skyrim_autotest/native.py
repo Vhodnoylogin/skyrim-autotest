@@ -259,6 +259,106 @@ def close(ident, *, system_command=False):
             'shutdownObserved': False}
 
 
+def close_game_window(ident, *, expected_class):
+    """Post one WM_CLOSE only to a uniquely identified owned primary window.
+
+    Unlike generic close(), this never closes helper windows. A query failure,
+    ambiguous selection or identity change refuses without a broad fallback.
+    Posting remains asynchronous and never proves exit or a successful teardown.
+    """
+    if (not isinstance(expected_class, str) or not 1 <= len(expected_class) <= 128
+            or '\0' in expected_class):
+        raise ValueError('Primary game close requires an explicit window class')
+    selection = {'policy': 'unique-visible-ownerless-game-class-v1',
+                 'expectedClass': expected_class, 'observedOwnedWindows': []}
+    result = {'requested': False, 'windows': [], 'systemCommand': False,
+              'shutdownObserved': False, 'selection': selection}
+    if not alive(ident):
+        return dict(result, reason='identity-not-live')
+    U.GetWindowThreadProcessId.argtypes = [W.HWND, C.POINTER(W.DWORD)]
+    U.GetWindowThreadProcessId.restype = W.DWORD
+    U.IsWindowVisible.argtypes = [W.HWND]
+    U.IsWindowVisible.restype = W.BOOL
+    U.GetClassNameW.argtypes = [W.HWND, W.LPWSTR, C.c_int]
+    U.GetClassNameW.restype = C.c_int
+    U.GetWindow.argtypes = [W.HWND, W.UINT]
+    U.GetWindow.restype = W.HWND
+    U.GetWindowLongPtrW.argtypes = [W.HWND, C.c_int]
+    U.GetWindowLongPtrW.restype = C.c_ssize_t
+    U.PostMessageW.argtypes = [W.HWND, W.UINT, W.WPARAM, W.LPARAM]
+    U.PostMessageW.restype = W.BOOL
+    callback_type = C.WINFUNCTYPE(W.BOOL, W.HWND, W.LPARAM)
+    U.EnumWindows.argtypes = [callback_type, W.LPARAM]
+    U.EnumWindows.restype = W.BOOL
+    errors, candidates = [], []
+
+    def query(hwnd):
+        pid = W.DWORD()
+        thread = int(U.GetWindowThreadProcessId(hwnd, C.byref(pid)))
+        if not thread:
+            raise RuntimeError('Window thread/process identity unavailable')
+        if pid.value != ident['pid']:
+            return None
+        name = C.create_unicode_buffer(256)
+        length = int(U.GetClassNameW(hwnd, name, len(name)))
+        if not 0 < length < len(name) - 1:
+            raise RuntimeError('Owned window class unavailable or truncated')
+        C.set_last_error(0)
+        owner = U.GetWindow(hwnd, 4)  # GW_OWNER; an owned popup is not primary.
+        if not owner and C.get_last_error():
+            raise RuntimeError('Owned window owner query unavailable')
+        C.set_last_error(0)
+        style = int(U.GetWindowLongPtrW(hwnd, -20))  # GWL_EXSTYLE / LONG_PTR.
+        if style == 0 and C.get_last_error():
+            raise RuntimeError('Owned window extended styles unavailable')
+        return {'hwnd': int(hwnd), 'pid': int(pid.value), 'thread': thread,
+                'class': name.value, 'visible': bool(U.IsWindowVisible(hwnd)),
+                'owner': int(owner or 0), 'extendedStyle': style}
+
+    def eligible(row):
+        return (row['class'] == expected_class and row['visible'] and
+                row['owner'] == 0 and not row['extendedStyle'] & 0x80)  # WS_EX_TOOLWINDOW.
+
+    def visit(hwnd, _):
+        try:
+            row = query(hwnd)
+            if row is not None:
+                selection['observedOwnedWindows'].append(row)
+                if eligible(row):
+                    candidates.append(row)
+            return True
+        except Exception as error:
+            # ctypes callbacks cannot propagate Python exceptions safely.
+            errors.append(str(error))
+            return False
+
+    C.set_last_error(0)
+    enumerated = bool(U.EnumWindows(callback_type(visit), 0))
+    if errors or not enumerated:
+        selection['queryErrors'] = errors
+        return dict(result, reason='window-inventory-unavailable')
+    selection['candidateCount'] = len(candidates)
+    if len(candidates) != 1:
+        return dict(result, reason='primary-window-unavailable' if not candidates else 'primary-window-ambiguous')
+    chosen = candidates[0]
+    if not alive(ident):
+        return dict(result, reason='identity-changed-before-close')
+    try:
+        current = query(chosen['hwnd'])
+    except Exception as error:
+        selection['recheckError'] = str(error)
+        return dict(result, reason='primary-window-recheck-unavailable')
+    if current != chosen or current is None or not eligible(current) or not alive(ident):
+        return dict(result, reason='primary-window-changed-before-close')
+    selection['targetWindow'] = chosen['hwnd']
+    C.set_last_error(0)
+    accepted = bool(U.PostMessageW(chosen['hwnd'], 0x10, 0, 0))
+    result['windows'] = [dict(current, message=0x10, accepted=accepted,
+                              error=0 if accepted else C.get_last_error())]
+    result['requested'] = True
+    return result
+
+
 def terminate(ident):
     if not alive(ident):
         return

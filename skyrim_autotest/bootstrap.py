@@ -469,11 +469,23 @@ def prepare_gameplay(session, scenario):
         new_game = True
     if new_game and fixture:
         raise AssertionError('New Game cannot load a save fixture')
-    prepare_startup_screen(session)
+    # The explicit SE route has listener-side Main Menu admission and its own
+    # fenced UI-queue contract. Ordinary inspect/scene tasks may be paused there.
+    from .se_startup import pinned_owned_fixture
+    fixture_boot = bool(fixture) and pinned_owned_fixture(session)
+    if fixture_boot:
+        from .startup_ui import listener_baseline
+        listener_baseline(session, session.state.get('seStartupAdmission', {}).get('cursor'))
+    elif not platform_new_game:
+        prepare_startup_screen(session)
     from .initial_world import InitialWorld
     initial = InitialWorld(session, 'fixture' if fixture else 'new-game' if new_game else 'cell')
     if new_game:
         start_new_game(session, cell)
+        if platform_new_game:
+            # Normal game-task/menu readiness remains mandatory after the
+            # actual NEW lifecycle/world transition, before gameplay/fixture work.
+            session.wait_task_queue()
         session.phase('gameplay-new-game-initial-world', 120)
         loaded_scene, _ = wait_gameplay_ready(session, None, True, lifecycle_poll=initial.read)
         if platform_new_game and initial.read() != ['newGame']:
@@ -482,9 +494,23 @@ def prepare_gameplay(session, scenario):
                     requestedFixtureCell=cell, subjectStarted=False)
     if fixture:
         session.phase('gameplay-load-pinned-fixture', 120)
-        session.tool('game', {'action': 'load', 'name': fixture['saveStem']})
+        if session.state.get('initialFixtureLoadIntent') is not None:
+            raise ValueError('Initial fixture load was already requested; no replay')
+        session.state['initialFixtureLoadIntent'] = {'fixture': dict(fixture), 'game': dict(session.state['game']),
+            'cursor': initial.record['cursorBefore'], 'requestAttempted': True,
+            'transport': 'official game/load', 'acknowledged': False}
+        session.save()
+        session.log('initial-fixture-load-intent', intent=session.state['initialFixtureLoadIntent'])
+        acknowledgement = session.tool('game', {'action': 'load', 'name': fixture['saveStem']})
+        if (not isinstance(acknowledgement, dict) or acknowledgement.get('queued') is not True or
+                acknowledgement.get('name') != fixture['saveStem']):
+            raise ValueError('Pinned fixture load acknowledgement unavailable; no replay')
+        session.state['initialFixtureLoadIntent'].update(acknowledged=True, receipt=acknowledgement)
+        session.save()
         end = time.monotonic() + 90
         while time.monotonic() < end:
+            from .fixture_confirmation import confirm_pending_fixture
+            confirm_pending_fixture(session, end)
             if initial.fixture_loaded():
                 session.log('gameplay-fixture-loaded', events=initial.record['events'])
                 break
@@ -493,6 +519,8 @@ def prepare_gameplay(session, scenario):
             raise AssertionError('Common gameplay fixture did not finish loading')
         # postLoadGame is a lifecycle signal, not settled render/gameplay state.
         # Never overlap a second world transition with save initialization.
+        if fixture_boot:
+            session.wait_task_queue()
         session.phase('gameplay-loaded-fixture-stabilization', 120)
         loaded_scene, _ = wait_gameplay_ready(session, None, False, lifecycle_poll=initial.read)
         session.log('gameplay-fixture-stable', scene=loaded_scene)
@@ -502,9 +530,19 @@ def prepare_gameplay(session, scenario):
         already_in_cell = ((fixture or new_game) and loaded_scene.get('playerLoaded') is True and
                            loaded_scene.get('cell', {}).get('editorId') == cell)
         if not already_in_cell:
-            session.tool('console', {'action': 'exec', 'command': 'coc ' + cell})
-            session.log('gameplay-fixture-cell-requested', cell=cell,
-                        afterInitialNewGameWorld=bool(new_game), subjectStarted=False)
+            if session.state.get('configuration', {}).get('se_fixture_transition') is not None:
+                if not platform_new_game or cell != 'QASmoke' or fixture:
+                    raise AssertionError('Native fixture transfer requires the owned New Game QASmoke initialization')
+                from .fixture_anchor import transition_to_anchor
+                session.phase('gameplay-native-fixture-transfer', 45)
+                transition_to_anchor(session, time.monotonic() + 30, initial.read)
+                session.phase('gameplay-native-fixture-destination', 105)
+                session.log('gameplay-fixture-cell-requested', cell=cell,
+                            transport='native-marker-moveto', afterInitialNewGameWorld=True, subjectStarted=False)
+            else:
+                session.tool('console', {'action': 'exec', 'command': 'coc ' + cell})
+                session.log('gameplay-fixture-cell-requested', cell=cell,
+                            afterInitialNewGameWorld=bool(new_game), subjectStarted=False)
         elif already_in_cell:
             session.log('gameplay-cell-transition-skipped', cell=cell,
                         reason='initialized fixture/new game already loaded in declared cell')
@@ -515,11 +553,32 @@ def prepare_gameplay(session, scenario):
         # New-game scripts may post their notification only after cell loading.
         # Re-read the world after answering a classified notification.
         scene = session.tool('inspect', {'kind': 'scene'})
+    if session.state.get('fixtureTransition') is not None:
+        session.phase('gameplay-native-fixture-stabilization', 135)
     scene, menus = wait_gameplay_ready(session, cell, False, lifecycle_poll=initial.read)
+    transfer = session.state.get('fixtureTransition')
+    if transfer is not None:
+        if (transfer.get('recipe') != 'qasmoke-marker-moveto-v1' or transfer.get('status') != 'returned' or
+                transfer.get('nativeCallbackReturned') is not True or transfer.get('game') != session.state.get('game') or
+                cell != 'QASmoke' or scene.get('cell', {}).get('formId') != '0x00032AE7'):
+            raise AssertionError('Native marker transfer lacks exact owned destination evidence')
+        transfer.update(status='arrived', cellReadinessVerified=True, destinationScene=scene, destinationMenus=menus)
+        session.save()
+        session.log('fixture-transition-arrival-verified', snapshot=transfer)
     initial.complete(scene, menus)
+    anchor = None
+    if session.state.get('configuration', {}).get('se_fixture_anchor') is not None:
+        if not platform_new_game or cell != 'QASmoke' or fixture:
+            raise AssertionError('SE fixture anchor requires the owned New Game QASmoke initialization')
+        from .fixture_anchor import prepare_anchor
+        session.phase('gameplay-fixture-anchor', 45)
+        anchor = prepare_anchor(session, time.monotonic() + 30)
+        scene, menus = wait_gameplay_ready(session, cell, False, lifecycle_poll=initial.read)
     session.state['gameplayBootstrap'] = {'completed': True, 'cell': cell,
                                           'loadedFixture': bool(fixture), 'startMode': 'new-game' if new_game else scenario.get('startMode'),
                                           'startupSelection': 'platform' if platform_new_game else 'scenario',
                                           'scene': scene, 'menus': menus}
+    if anchor is not None:
+        session.state['gameplayBootstrap']['fixtureAnchor'] = anchor
     session.save()
     session.log('gameplay-ready', scene=scene, menus=menus)

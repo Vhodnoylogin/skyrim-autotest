@@ -222,6 +222,7 @@ def preflight(profile, restart_idle_mo2=False):
         if caps.get('profileSelect') != 'nativeQt':
             raise Blocked('Reusable profiles require native Bridge profile selection')
     vrpaths = runtime = config = vive_profile = original = rbdata = None
+    passive_contract = None
     root_contract = None
     if root_policy:
         from . import root_builder
@@ -247,6 +248,13 @@ def preflight(profile, restart_idle_mo2=False):
     required = set(P.required_mods)
     if not required <= enabled:
         raise Blocked('Required disabled mods: ' + str(sorted(required - enabled)))
+    composition = P.value.get('copied_profile_mods')
+    if composition is not None:
+        selected_mods = set(composition['enabledMods'])
+        if not selected_mods <= enabled:
+            raise Blocked('Copied-profile composition cannot enable source-disabled/missing mods: ' + str(sorted(selected_mods - enabled)))
+        if not required <= selected_mods:
+            raise Blocked('Copied-profile composition excludes required mods: ' + str(sorted(required - selected_mods)))
     if vr and not root_policy:
         rb = P.mo2 / 'plugins/data/RootBuilder'
         originals = [p for p in rb.rglob('openvr_api.dll') if p.parent.name == 'Backup' and p.stat().st_size < 2000000]
@@ -254,8 +262,15 @@ def preflight(profile, restart_idle_mo2=False):
             raise Blocked('Need exactly one verified stock openvr_api.dll in Root Builder backup')
         original = originals[0]
         rbdata = original.parent.parent
-    elif not vr and ((P.mo2 / 'plugins/data/RootBuilder').exists() or any((m / 'Root').is_dir() for m in P.mods.iterdir())):
-        raise Blocked('SE Root Builder integration is not qualified; no Root Builder files will be modified')
+    elif not vr and (P.value.get('root_builder_passive') or (P.mo2 / 'plugins/data/RootBuilder').exists() or
+                    (P.mo2 / 'plugins/rootbuilder').exists() or any((m / 'Root').is_dir() for m in P.mods.iterdir())):
+        if not P.value.get('root_builder_passive'):
+            raise Blocked('SE Root Builder integration is not qualified; no Root Builder files will be modified')
+        from . import root_builder_passive
+        try:
+            passive_contract = root_builder_passive.preflight(P.snapshot(), source)
+        except (ValueError, OSError, KeyError) as error:
+            raise Blocked('Passive Root Builder preflight: ' + str(error)) from error
     # Fingerprint installed binaries, rather than the stale business index.
     dlls = {}
     for mod in sorted(required):
@@ -274,7 +289,7 @@ def preflight(profile, restart_idle_mo2=False):
     from . import steam_restore
     steam_client = steam_restore.preflight(P.snapshot())
     return {'profile': profile, 'gameEdition': selected['edition'], 'loaderContract': loader_contract, 'bridgeSession': bridge_session, 'originalBridgeProfile': bridge_profile,
-            'rootBuilder': root_contract,
+            'rootBuilder': root_contract, 'rootBuilderPassive': passive_contract,
             'steamClientRestart': steam_client,
             'runtime': str(runtime) if runtime else None, 'settings': str(config) if config else None,
             'viveInputProfile': str(vive_profile) if vive_profile else None, 'viveInputProfileHash': sha(vive_profile) if vive_profile else None,
@@ -296,6 +311,8 @@ class Session:
         self.heartbeat_failed = threading.Event()
         self.heartbeat_error = None
         self.heartbeat_thread_id = None
+        self._game_exit_tracker = None
+        self._game_exit_identity = None
         if not native.alive(self.state.get('runner')):
             from . import runner_monitor
             runner_monitor.restore(self.dir, self.state)
@@ -323,7 +340,54 @@ class Session:
         self.log('phase', name=name, deadline=self.state['deadline'])
         print(name, flush=True)
 
+    def observe_game_exit(self, stage):
+        """Diagnostic only: retain an exact owned handle, never alter recovery."""
+        game = self.state.get('game')
+        if not game:
+            return
+        try:
+            tracker = getattr(self, '_game_exit_tracker', None)
+            if tracker is not None and getattr(self, '_game_exit_identity', None) != game:
+                previous = tracker.snapshot()
+                previous.update(stage='before-game-rebind', phase=self.state.get('phase'))
+                self.state.setdefault('gameProcessObservations', []).append(previous)
+                self.log('game-process-observation', **previous)
+                tracker.close()
+                tracker = None
+                self._game_exit_tracker = None
+            if tracker is None:
+                from .process_exit import capture
+                tracker = capture(game)
+                self._game_exit_tracker = tracker
+                self._game_exit_identity = copy.deepcopy(game)
+            value = tracker.snapshot()
+            value.update(stage=stage, phase=self.state.get('phase'))
+            self.state.setdefault('gameProcessObservations', []).append(value)
+            self.log('game-process-observation', **value)
+            self.save()
+        except Exception as error:
+            self.state['gameProcessObservationError'] = type(error).__name__
+            try:
+                self.log('game-process-observation-unavailable', stage=stage, errorType=type(error).__name__)
+                self.save()
+            except Exception:
+                pass  # Diagnostics must never prevent ordinary cleanup/restoration.
+
+    def close_game_exit_tracker(self):
+        tracker = getattr(self, '_game_exit_tracker', None)
+        self._game_exit_tracker = None
+        self._game_exit_identity = None
+        if tracker is not None:
+            try:
+                result = tracker.close()
+                self.log('game-process-observer-closed', **result)
+            except Exception:
+                pass  # close() is diagnostic; never replace a restoration failure.
     def snapshot(self, path):
+        passive = self.state.get('rootBuilderPassive', {}).get('contract') or self.state.get('preflight', {}).get('rootBuilderPassive')
+        if passive:
+            from . import root_builder_passive
+            root_builder_passive.guard_snapshot_target(self.state['configuration'], path)
         path = Path(path).resolve()
         # An immutable shared game executable must never enter generic recovery,
         # even through another hardlink supplied as an extra/staged write target.
@@ -644,12 +708,21 @@ class Session:
         health = request(self.state['port'], 'api/health', timeout=bounded_timeout(3))
         if health.get('pid') != self.state['game']['pid'] or not native.alive(self.state['game']):
             raise Blocked('DevBench identity no longer matches the owned game')
+        official_menu = (name == 'menu' and args.get('action') == 'list' and
+                         self.state.get('readinessApi', {}).get('contract') == 'official-menu-blockedBy')
+        omitted_flags = official_menu and 'includeFlags' in args
+        if omitted_flags:
+            args = {key: value for key, value in args.items() if key != 'includeFlags'}
         started = time.monotonic()
         try:
             result = request(self.state['port'], f'api/tool/{name}', args, timeout=bounded_timeout(timeout))
         except Exception as e:
             self.log('tool-error', tool=name, args=args, error=str(e), elapsedMs=int((time.monotonic() - started) * 1000))
             raise
+        if official_menu and isinstance(result, dict):
+            result = dict(result, menuObservationContract='official-menu-blockedBy')
+            if omitted_flags:
+                result['adapterWarnings'] = ['includeFlags unavailable in official DevBench; conservative menu names and blockedBy are used']
         self.log('tool', tool=name, args=args, result=result)
         if isinstance(result, dict) and (result.get('isError') or result.get('error')):
             raise ToolError(name, args, result)
@@ -735,6 +808,9 @@ class Session:
                         for name, digest in info['profileHashes'].items())):
                 raise Blocked('Root Builder or source profile changed while closing idle MO2; a new plan is required')
             root_builder.prepare(self, info['rootBuilder'])
+        if info.get('rootBuilderPassive'):
+            from . import root_builder_passive
+            root_builder_passive.before_setup_writes(self, info['rootBuilderPassive'])
         dep = ROOT / 'dependencies/driver-dedb8ab.zip'
         if vr and not dep.exists():
             dep.parent.mkdir(parents=True, exist_ok=True)
@@ -747,7 +823,7 @@ class Session:
             raise Blocked('Pinned driver archive hash mismatch')
         # Snapshot any Root Builder target including targets from disabled OCU.
         targets = {P.game / 'openvr_api.dll'} if vr and not info.get('rootBuilder') else set()
-        for mod in ([] if info.get('rootBuilder') else P.mods.iterdir()):
+        for mod in ([] if info.get('rootBuilder') or info.get('rootBuilderPassive') else P.mods.iterdir()):
             root = mod / 'Root'
             if root.is_dir():
                 for file in root.rglob('*'):
@@ -787,6 +863,9 @@ class Session:
             if sha(path) != digest:
                 raise Blocked('Mod configuration changed after preflight: ' + path)
             self.snapshot(path)
+        if info.get('rootBuilderPassive'):
+            from . import root_builder_passive
+            root_builder_passive.prepare(self, info['rootBuilderPassive'])
         # Existing deployed OCU entries must not be merged into the test build and
         # harvested back into third-party mods when Root Builder clears it.
         old_build = Path(info['rootBuilderData']) / 'BuildData.json' if info.get('rootBuilderData') and not info.get('rootBuilder') else None
@@ -863,6 +942,9 @@ class Session:
         text = modlist.read_text(encoding='utf-8-sig')
         text = '\n'.join('-' + line[1:] if line.startswith('+') and line[1:] in OCU else line for line in text.splitlines()) + '\n'
         modlist.write_text(text, encoding='utf-8')
+        if P.value.get('copied_profile_mods') is not None:
+            from .copied_profile import apply as apply_copied_profile
+            apply_copied_profile(self, P.snapshot())
         prefs = test_profile / 'SkyrimPrefs.ini'
         if prefs.exists():
             text = prefs.read_text(encoding='utf-8-sig')
@@ -946,6 +1028,9 @@ class Session:
         if self.state.get('borrowedMO2'):
             self.bridge_profile(self.state['testProfileName'])
         else:
+            if self.state.get('rootBuilderPassive'):
+                from . import root_builder_passive
+                root_builder_passive.before_launch(self)
             self.spawn([str(P.mo2_exe)], 'mo2', str(P.mo2))
         token_file = P.bridge_token
         end = time.monotonic() + 75
@@ -967,7 +1052,7 @@ class Session:
         if ping.get('game') != selected['bridgeGame'] or Path(ping.get('modsPath', '')).resolve() != P.mods.resolve():
             raise Blocked('MO2 bridge belongs to a different game/instance')
         bridge_identity = None
-        if self.state.get('rootBuilder'):
+        if self.state.get('rootBuilder') or self.state.get('rootBuilderPassive'):
             bridge_identity = request(P.bridge_port, 'session', token=token, timeout=3)
             owned_mo2 = [row['identity'] for row in self.state['owned'] if row['role'] == 'mo2']
             if (len(owned_mo2) != 1 or bridge_identity.get('mo2Pid') != owned_mo2[0]['pid'] or
@@ -975,6 +1060,9 @@ class Session:
                     not bridge_identity.get('serverBootId') or not bridge_identity.get('instanceId') or
                     Path(bridge_identity.get('profilesPath', '')).resolve() != P.profiles.resolve()):
                 raise Blocked('Root Builder requires the exact live owned MO2 Bridge boot')
+        if self.state.get('rootBuilderPassive'):
+            from . import root_builder_passive
+            root_builder_passive.verify_boot(self, bridge_identity)
         if selected['edition'] == 'vr':
             self.phase('start-steamvr', 90)
             self.spawn([str(Path(self.state['preflight']['runtime']) / 'bin/win64/vrstartup.exe')], 'vr')
@@ -1022,6 +1110,8 @@ class Session:
                     if not matching:
                         continue
                     self.state.update(port=port, game=matching)
+                    if getattr(self, '_game_exit_identity', None) != matching:
+                        Session.observe_game_exit(self, 'matching-game-attached')
                     self.save()
                     self.log('health', result=health)
                     frame = health.get('frame')
@@ -1040,10 +1130,29 @@ class Session:
                     except Exception as error:
                         focus = {'available': False, 'error': str(error)}
                     self.log('se-startup-focus-observed', observation=focus)
-                self.wait_task_queue()
+                self.complete_startup_admission(selected)
+                if self.state.get('configuration', {}).get('crash_capture'):
+                    from .crash_capture import start as start_crash_capture
+                    self.phase('startup-crash-capture', 30)
+                    start_crash_capture(self)
                 return
             time.sleep(1)
         raise Blocked('Fresh matching DevBench with advancing game frames not found')
+
+    def complete_startup_admission(self, selected):
+        from .se_startup import pinned_owned_fixture
+        fixture_boot = selected['edition'] == 'se' and pinned_owned_fixture(self)
+        if (selected['edition'] == 'se'
+                and (self.state.get('configuration', {}).get('se_new_game_ui') is True or fixture_boot)):
+            admission = self.state.get('seStartupAdmission', {})
+            if admission.get('completed') is not True or admission.get('game') != self.state.get('game'):
+                raise Blocked('SE initial world requires exact native startup admission')
+            # Main Menu runs its own UI queue. The ordinary task queue is
+            # qualified by bootstrap only after the actual New Game transition.
+            self.log('task-queue-probe-deferred', until='pinned-fixture-load' if fixture_boot else 'native-new-game-transition',
+                     admissionCursor=admission.get('cursor'))
+            return
+        self.wait_task_queue()
 
     def wait_task_queue(self):
         self.phase('wait-task-queue', 90)
@@ -1100,9 +1209,10 @@ class Session:
                 if row['name'].lower() not in GAME_NAMES:
                     continue
                 identity = native.identity(row['pid'])
-                if identity is None and any(i['pid'] == row['pid'] for i in owned):
+                if identity is None and any(i['pid'] in (row['pid'], row.get('parent')) for i in owned):
                     # Toolhelp's complete snapshot may outlive the process it lists.
-                    # PID membership permits observation only, never ownership/action.
+                    # An owned PID or its child permits bounded reobservation
+                    # only: parentage never grants ownership or process action.
                     unresolved.append({**row, 'identity': None})
                 elif identity is None or identity not in owned:
                     foreign.append({**row, 'identity': identity})
@@ -1129,6 +1239,16 @@ class Session:
             raise RuntimeError('Unexpected session before owned shutdown; shared runtime preserved: ' + str(foreign))
 
     def cleanup(self):
+        try:
+            Session.observe_game_exit(self, 'before-cleanup')
+            return Session._cleanup(self)
+        finally:
+            try:
+                Session.observe_game_exit(self, 'cleanup-finally')
+            finally:
+                Session.close_game_exit_tracker(self)
+
+    def _cleanup(self):
         self.phase('stop-and-restore', 150)
         if self.state.get('hardwareFrame'):
             from . import hardware
@@ -1143,10 +1263,21 @@ class Session:
         self.discover()
         self.guard_shutdown()
         if self.state.get('game') and native.alive(self.state['game']):
-            try:
-                self.tool('console', {'action': 'exec', 'command': 'qqq'}, timeout=4)
-            except Exception as e:
-                self.log('exit-request', error=str(e))
+            if self.state.get('configuration', {}).get('game_edition') == 'se':
+                if self.state.get('configuration', {}).get('se_shutdown') == 'main-menu-v1':
+                    from .menu_shutdown import request_and_wait
+                    request_and_wait(self)
+                else:
+                    from .game_shutdown import request_and_wait
+                    if self.state.get('configuration', {}).get('se_shutdown') == 'window-close-v1':
+                        request_and_wait(self, seconds=30, route='window-close')
+                    else:
+                        request_and_wait(self)
+            else:
+                try:
+                    self.tool('console', {'action': 'exec', 'command': 'qqq'}, timeout=4)
+                except Exception as e:
+                    self.log('exit-request', error=str(e))
         roles = ('game', 'loader', 'mo2', 'vr')
         for role in roles:
             self.discover()
@@ -1154,7 +1285,12 @@ class Session:
             owned = [p['identity'] for p in self.state['owned'] if p['role'] == role and native.alive(p['identity'])]
             for ident in owned:
                 self.guard_shutdown()
-                native.close(ident)
+                prior_exit = self.state.get('gracefulGameExit', {})
+                if (role == 'game' and prior_exit.get('game') == ident
+                        and prior_exit.get('command') == 'window-close' and prior_exit.get('requestAttempted') is True):
+                    self.log('owned-window-close-not-replayed', game=ident)
+                else:
+                    native.close(ident)
             end = time.monotonic() + (12 if owned else 0)
             while time.monotonic() < end and any(native.alive(i) for i in owned):
                 time.sleep(.5)
@@ -1162,12 +1298,36 @@ class Session:
                 if native.alive(ident):
                     self.guard_shutdown()
                     self.log('forced-stop', role=role, pid=ident['pid'])
+                    if role == 'game':
+                        self.state['forcedGameStop'] = True
+                        self.save()
                     native.terminate(ident)
             end = time.monotonic() + 4
             while time.monotonic() < end and any(native.alive(i) for i in owned):
                 time.sleep(.2)
             if any(native.alive(i) for i in owned):
                 raise RuntimeError(f'Owned {role} process did not exit; refusing file restoration')
+        Session.observe_game_exit(self, 'owned-processes-ended')
+        if self.state.get('configuration', {}).get('game_edition') == 'se':
+            from .game_shutdown import classify_exit
+            self.state['gameTermination'] = classify_exit(self)
+            termination = self.state['gameTermination']
+            if termination['kind'] != 'normal_close' and self.state.get('result') == 'passed':
+                self.state['result'] = 'failed'
+                self.state['reason'] = ('All action checks completed; owned game shutdown was ' + termination['kind']
+                                        + ' (' + str(termination.get('exitCodeHex', 'unavailable')) + ')')
+            self.save()
+            self.log('game-termination-summary', termination=termination, subjectChecksUnchanged=True)
+        if self.state.get('crashCapture'):
+            from .crash_capture import stop as stop_crash_capture
+            try:
+                stop_crash_capture(self)
+            except Exception as error:
+                self.state['crashCaptureStopError'] = str(error)
+                self.state['result'] = 'failed'
+                self.state['reason'] = (self.state.get('reason', '') + '; crash capture completion failed: ' + str(error)).lstrip('; ')
+                self.save()
+                self.log('crash-capture-stop-error', error=str(error), restorationStillRequired=True)
         if self.state.get('restoringFiles'):
             # A partial restore may already have removed generated outputs.
             # Preserve collected evidence/errors; do not overwrite its manifest
@@ -1234,6 +1394,15 @@ class Session:
         with self.lock:
             self.state['restoringFiles'] = True
             self.save()
+        if self.state.get('rootBuilderPassive'):
+            from . import root_builder_passive
+            try:
+                root_builder_passive.restore_precheck(self)
+            except Exception as error:
+                self.state['restored'] = False
+                self.state.setdefault('restoreErrors', []).append({'path': 'root-builder-passive-precheck', 'error': str(error)})
+                self.save()
+                raise
         from . import steam_restore
         steam_restore.prepare(self)
         errors = []
@@ -1241,6 +1410,8 @@ class Session:
         # write it first through the legacy loop, bypassing its immutable checks.
         root_snapshots = {str(Path(path).resolve()).casefold()
                           for path in self.state.get('rootBuilder', {}).get('snapshotPaths', [])}
+        root_snapshots.update(str(Path(path).resolve()).casefold()
+                              for path in self.state.get('rootBuilderPassive', {}).get('snapshotPaths', []))
         for snapshot in reversed(self.state['snapshots']):
             path = Path(snapshot['path'])
             if str(path.resolve()).casefold() in root_snapshots:
@@ -1267,6 +1438,14 @@ class Session:
                 root_builder.restore(self)
             except Exception as error:
                 self.state['restoreErrors'].append({'path': 'root-builder-managed-view', 'error': str(error)})
+                self.save()
+                raise
+        if self.state.get('rootBuilderPassive'):
+            from . import root_builder_passive
+            try:
+                root_builder_passive.restore(self)
+            except Exception as error:
+                self.state['restoreErrors'].append({'path': 'root-builder-passive-view', 'error': str(error)})
                 self.save()
                 raise
         steam_restore.reopen(self)
@@ -1301,8 +1480,22 @@ class Session:
                  f'Reason: {self.state.get("reason", "")}', '', '## Steps', '']
         for item in self.state.get('checks', []):
             lines.append(f'- {item["name"]}: {item["result"]}')
+        observations = self.state.get('gameProcessObservations', [])
+        if observations:
+            from .exit_projection import terminal_exit_observation
+            latest = observations[-1]
+            terminal = terminal_exit_observation(observations, self.state.get('game'))
+            observed = terminal or latest
+            lines += ['', '## Game process observation',
+                      f'Status: {observed.get("status", "unavailable")}',
+                      f'Exit code: {terminal["exitCodeHex"] if terminal else "unavailable"}',
+                      f'Observed at: {observed.get("stage", "unavailable")}',
+                      'The OS observation does not determine the exit cause or prove an unforced exit.']
+            if terminal is not None and terminal != latest:
+                lines.append(f'Latest recovery observation: {latest.get("status", "unavailable")} '
+                             f'({latest.get("stage", "unavailable")})')
         (self.dir / 'report.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
-        atomic_json(self.dir / 'result.json', {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors','heartbeatHealth','guardianRecovery')})
+        atomic_json(self.dir / 'result.json', {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors','heartbeatHealth','guardianRecovery','interactiveSession','interactiveArtifacts','interactiveActorFixtures','gameProcessObservations','gameProcessObservationError','crashCapture','crashCaptureStopError','gameTermination','gracefulGameExit','forcedGameStop')})
 
     def reopen_mo2(self):
         if self.state.get('reopenMO2') and self.state.get('restored'):
@@ -1313,6 +1506,87 @@ class Session:
                              creationflags=subprocess.CREATE_NO_WINDOW,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self.log('original-mo2-reopened')
+
+
+def _guardian_audit(directory, record):
+    with (Path(directory) / 'guardian-decisions.jsonl').open('a', encoding='utf-8') as output:
+        output.write(json.dumps(record, ensure_ascii=False) + '\n')
+        output.flush()
+        os.fsync(output.fileno())
+
+
+def _manual_health_diagnostic(state):
+    """Only an explicitly held manual world keeps health loss diagnostic."""
+    settings = state.get('configuration', {}).get('interactive_session', {})
+    return (isinstance(settings, dict) and settings.get('timeoutPolicy') == 'preserve-manual'
+            and state.get('phase') == 'interactive-session'
+            and state.get('gameplayBootstrap', {}).get('completed') is True
+            and isinstance(state.get('interactiveSession'), dict))
+
+
+def _guardian_recheck(directory, previous, last_health, health_changed, connection_failed):
+    """Fresh evidence may cancel a candidate; a live owner alone never permits kill."""
+    from . import runner_monitor
+    from .game_restart import expected_restart
+    state = read_json(Path(directory) / 'state.json')
+    binding = ('id', 'runner', 'game')
+    result = {'id': state.get('id'), 'runner': state.get('runner'), 'game': state.get('game'),
+              'done': state.get('done', False), 'reasons': [], 'ownerAlive': None}
+    if any(state.get(key) != previous.get(key) for key in binding):
+        return dict(result, cancelled='ownership-binding-changed')
+    if result['done']:
+        return dict(result, cancelled='runner-completed')
+    reason = None
+    manual_health = _manual_health_diagnostic(state)
+    diagnostics = []
+    stopping = state.get('phase', '').startswith('stop-and-restore')
+    restarting = expected_restart(state, time.time())
+    if state.get('game') and not stopping and not restarting:
+        result['gameAlive'] = native.alive(state['game'])
+        if not result['gameAlive']:
+            reason = 'Owned game process exited unexpectedly (CTD or external termination)'
+            result['reasons'].append('owned-game-unavailable')
+        else:
+            try:
+                health = request(state['port'], 'api/health', timeout=2)
+                result['health'] = health
+                marker = (health.get('frame'), health.get('lastTaskFrame'))
+                if health.get('pid') != state['game']['pid']:
+                    reason = 'DevBench process identity changed'
+                    result['reasons'].append('devbench-identity-changed')
+                elif (marker == last_health and health.get('pendingTasks', 0) > 0
+                      and time.monotonic() - health_changed > 20):
+                    if manual_health:
+                        diagnostics.append('pending-task-stall')
+                    else:
+                        reason = 'Game frames and SKSE task completion stalled with pending work'
+                        result['reasons'].append('pending-task-stall')
+            except (OSError, ValueError, RuntimeError) as error:
+                result['healthError'] = str(error)
+                if connection_failed is not None and time.monotonic() - connection_failed > 20:
+                    if manual_health:
+                        diagnostics.append('devbench-connection-lost')
+                    else:
+                        reason = 'DevBench connection lost while the owned game remains alive'
+                        result['reasons'].append('devbench-connection-lost')
+    # The health request can cross a phase transition or completion. Read the
+    # bound state and heartbeat again after it, immediately before the decision.
+    latest = read_json(Path(directory) / 'state.json')
+    if any(latest.get(key) != state.get(key) for key in (*binding, 'phase', 'deadline', 'done', 'configuration')):
+        return dict(result, reasons=[], cancelled='state-changed-during-recheck')
+    if diagnostics:
+        result['manualHealthDiagnostics'] = diagnostics
+    timing = runner_monitor.guardian_deadlines(directory, latest)
+    result['timing'] = timing
+    result['reasons'].extend(timing['reasons'])
+    if 'heartbeat-reported-failure' in timing['reasons']:
+        reason = 'Executor heartbeat reported failure'
+    elif reason is None and timing['reasons']:
+        reason = 'Runner exceeded its phase deadline or heartbeat limit'
+    result['ownerAlive'] = native.alive(latest.get('runner'))
+    result['reason'] = reason or 'Runner is unavailable; independent guardian recovered the session'
+    result['expired'] = bool(result['reasons'])
+    return result
 
 
 def guardian(directory):
@@ -1329,12 +1603,14 @@ def guardian(directory):
         owner = state.get('runner')
         reason = 'Runner died or exceeded its deadline; independent guardian recovered the session'
         from . import runner_monitor
-        pulse_at,pulse=runner_monitor.observed_at(directory,state)
-        expired = time.time() > state.get('deadline', time.time() + 1) + 15 or time.time() - pulse_at > 35
+        timing = runner_monitor.guardian_deadlines(directory,state)
+        pulse = timing['pulse']
+        expired = bool(timing['reasons'])
         if pulse and not pulse['healthy'] and not state.get('phase','').startswith('stop-and-restore'):
             reason,expired='Executor heartbeat reported failure',True
         from .game_restart import expected_restart
         restarting=expected_restart(state,time.time())
+        manual_health = _manual_health_diagnostic(state)
         if restarting:
             last_health=None;health_changed=time.monotonic();connection_failed=None;since=0
         if state.get('game') and not state.get('phase', '').startswith('stop-and-restore') and not restarting:
@@ -1347,26 +1623,69 @@ def guardian(directory):
                         reason, expired = 'DevBench process identity changed', True
                     connection_failed = None
                     marker = (health.get('frame'), health.get('lastTaskFrame'))
+                    diagnostics = []
                     if marker != last_health:
                         last_health, health_changed = marker, time.monotonic()
                     elif health.get('pendingTasks', 0) > 0 and time.monotonic() - health_changed > 20:
-                        reason, expired = 'Game frames and SKSE task completion stalled with pending work', True
+                        if manual_health:
+                            diagnostics.append('pending-task-stall')
+                        else:
+                            reason, expired = 'Game frames and SKSE task completion stalled with pending work', True
                     with (Path(directory) / 'health.jsonl').open('a', encoding='utf-8') as f:
-                        f.write(json.dumps({'at': time.time(), 'health': health}) + '\n')
+                        record = {'at': time.time(), 'health': health}
+                        if diagnostics:
+                            record.update(diagnosticOnly=True, manualHealthDiagnostics=diagnostics)
+                        f.write(json.dumps(record) + '\n')
                     events = request(state['port'], f'api/events?since={since}', timeout=2)
                     if events.get('events'):
                         with (Path(directory) / 'events.jsonl').open('a', encoding='utf-8') as f:
                             for event in events['events']:
                                 f.write(json.dumps(event) + '\n')
                         since = max(e['seq'] for e in events['events'])
-                except (OSError, ValueError, RuntimeError):
+                except (OSError, ValueError, RuntimeError) as error:
                     connection_failed = connection_failed or time.monotonic()
                     if time.monotonic() - connection_failed > 20:
-                        reason, expired = 'DevBench connection lost while the owned game remains alive', True
-        if native.alive(owner) and not expired:
+                        if manual_health:
+                            with (Path(directory) / 'health.jsonl').open('a', encoding='utf-8') as f:
+                                f.write(json.dumps({'at': time.time(), 'healthError': str(error),
+                                    'diagnosticOnly': True,
+                                    'manualHealthDiagnostics': ['devbench-connection-lost']}) + '\n')
+                        else:
+                            reason, expired = 'DevBench connection lost while the owned game remains alive', True
+        owner_alive = native.alive(owner)
+        if owner_alive and not expired:
             time.sleep(2)
             continue
-        if native.alive(owner):
+        if not owner_alive and not expired:
+            reason = 'Runner identity lookup was unavailable; fresh recovery decision required'
+        candidate = {'at': time.time(), 'kind': 'recovery-candidate', 'id': state.get('id'),
+                     'runner': owner, 'game': state.get('game'), 'ownerAlive': owner_alive,
+                     'expired': expired, 'reason': reason, 'timing': timing,
+                     'lastHealth': last_health, 'healthUnchangedSeconds': time.monotonic()-health_changed,
+                     'connectionFailedSince': connection_failed}
+        try:
+            _guardian_audit(directory, candidate)
+            decision = _guardian_recheck(directory, state, last_health, health_changed, connection_failed)
+            decision.update(at=time.time(), kind='recovery-decision')
+            if decision.get('done'):
+                decision['action'] = 'completed'
+            elif decision.get('cancelled') or (decision['ownerAlive'] and not decision['expired']):
+                decision['action'] = 'cancelled'
+            else:
+                decision['action'] = 'terminate-expired-owner' if decision['ownerAlive'] else 'claim-recovery-mutex'
+            _guardian_audit(directory, decision)
+        except (OSError, ValueError, RuntimeError):
+            # Never kill from stale evidence when the fresh proof/audit failed.
+            log.write_text(traceback.format_exc(), encoding='utf-8')
+            time.sleep(2)
+            continue
+        if decision['action'] == 'completed':
+            return
+        if decision['action'] == 'cancelled':
+            time.sleep(2)
+            continue
+        reason = decision['reason']
+        if decision['ownerAlive'] and decision['expired']:
             native.terminate(owner)
         try:
             with native.SessionMutex():
@@ -1374,10 +1693,14 @@ def guardian(directory):
                 # The runner can finish between the observer read and mutex claim.
                 if session.state.get('done'):
                     return
+                if any(session.state.get(key) != state.get(key) for key in ('id', 'runner', 'game')):
+                    _guardian_audit(directory, {'at': time.time(), 'kind': 'recovery-cancelled',
+                        'action': 'cancelled', 'reason': 'ownership-binding-changed-before-mutex-claim'})
+                    return
                 previous = {'result': session.state.get('result'),
                             'reason': session.state.get('reason'),
                             'phase': session.state.get('phase')}
-                session.state['guardianRecovery'] = {'trigger': reason, 'prior': previous}
+                session.state['guardianRecovery'] = {'trigger': reason, 'prior': previous, 'decision': decision}
                 prior_reason = previous['reason'] or ''
                 session.state.update(result='failed', reason=(prior_reason + '; ' + reason).lstrip('; '))
                 session.save()
@@ -1477,7 +1800,8 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
     requested_configuration = P.snapshot()
     recover()
     configure(requested_configuration)
-    with native.SessionMutex():
+    from .command_endpoint import managed_endpoint
+    with native.SessionMutex(), managed_endpoint(P.value.get('interactive_session')) as endpoint:
         info = preflight(profile, restart_idle_mo2)
         run_id = time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6]
         directory = RUNS / run_id
@@ -1500,6 +1824,10 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
         if order:
             state['order'] = order
         session = Session(directory, state)
+        if endpoint is not None:
+            session.command_endpoint = endpoint
+            state['commandEndpoint'] = endpoint.check()
+            session.log('command-endpoint-ready', phase='before-setup', **state['commandEndpoint'])
         session.save()
         (directory / 'scenario.json').write_bytes(scenario_bytes)
         boundary_collection.initialize(session, P.value.get('boundary_collection'))
@@ -1511,6 +1839,9 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
             session.setup()
             if fault == 'after-setup':
                 os._exit(99)  # Acceptance test: guardian must restore without finally.
+            if endpoint is not None:
+                session.state['commandEndpoint'] = endpoint.check()
+                session.log('command-endpoint-ready', phase='before-launch', **session.state['commandEndpoint'])
             session.launch()
             if session.state.get('rootBuilder'):
                 from . import root_builder
@@ -1526,6 +1857,11 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
             from .platform import initialize_controllers
             initialize_controllers(session, P.snapshot())
             execute(session, scenario)
+            if P.value.get('interactive_session'):
+                from .interactive import run as interactive_run
+                interactive_result = interactive_run(session, P.value['interactive_session'])
+                if interactive_result.get('uncertainCommandIds'):
+                    raise Blocked('Manual owner finished with uncertain command outcomes; inspect retained evidence; no replay')
             from .actor_scene import finish_captures
             finish_captures(session)
             if any(sha(Path(__file__).parent / name) != digest for name, digest in state['executorHashes'].items()):

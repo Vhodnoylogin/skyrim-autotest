@@ -33,6 +33,7 @@ class Backend:
             target=Path(self.s.state['ownedSaveDirectory'])
             (target/(args['name']+'.ess')).write_bytes(b'TESV_SAVEGAMEtest')
             (target/(args['name']+'.skse')).write_bytes(b'SKSEtest')
+        if tool=='game' and args['action']=='load':return {'queued':True,'name':args['name']}
         if tool=='inspect':return {'playerLoaded':True,'cell':{'editorId':'QASmoke'}}
         if tool=='menu':return {'messageBoxOpen':False,'openMenus':[],'menuStates':[]}
         return {'queued':True}
@@ -149,6 +150,19 @@ class OwnedSaveTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'flat'):owned_saves.pair(directory,'../foreign')
         (directory/'bad.ess').write_bytes(b'not-a-save');(directory/'bad.skse').write_bytes(b'SKSEtest')
         with self.assertRaisesRegex(ValueError,'header'):owned_saves.pair(directory,'bad')
+
+    def test_wrong_load_ack_name_refuses_before_native_completion_or_replay(self):
+        self.complete();original=self.b.call
+        def call(tool,args):
+            result=original(tool,args)
+            if tool=='game' and args.get('action')=='load':return {'queued':True,'name':'other'}
+            return result
+        self.b.call=call
+        with self.assertRaisesRegex(ValueError,'acknowledgement unavailable'):
+            owned_saves.perform(self.b,self.request('load_game'))
+        loads=[r for r in self.b.calls if r[0]=='game' and r[1]['action']=='load']
+        self.assertEqual(len(loads),1)
+        self.assertFalse(self.b.s.state['ownedLoadTransition']['loadIntent']['acknowledged'])
 
     def virtual_mapping(self, exposed=True):
         target=Path(self.b.s.state['ownedSaveDirectory'])

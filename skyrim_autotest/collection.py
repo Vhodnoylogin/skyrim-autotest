@@ -125,6 +125,9 @@ def collect(session, segment=None):
                 if artifact is not None and artifact['sha256'] != entry.get('sha256'):
                     error(name, 'Boundary evidence digest mismatch')
     if segment is None:
+        from .interactive_artifacts import collect as collect_interactive
+        try:collect_interactive(session,copy)
+        except (OSError,ValueError,KeyError,TypeError) as exception:error('interactive results',exception)
         from .actor_scene import collect as collect_actor_captures
         try:collect_actor_captures(session,copy)
         except (OSError,ValueError,KeyError,TypeError) as exception:error('actor contact captures',exception)

@@ -84,6 +84,7 @@ class ShutdownBoundaryTests(unittest.TestCase):
     def guardian_fixture(self, current):
         initial = {'id': 'handoff', 'runner': {'pid': 1}, 'done': False,
                    'phase': 'stop-and-restore', 'deadline': time.time()+100}
+        current.setdefault('id',initial['id']);current.setdefault('runner',dict(initial['runner']))
         recovered = Mock(); recovered.state = current
         recovered.cleanup.side_effect = lambda: current.update(restored=True)
         return initial, recovered

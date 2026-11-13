@@ -5,6 +5,13 @@ import json
 import math
 import re
 
+READ_ONLY_SUBJECT_CALLS = frozenset({
+    ('CLAWDistributionNative', 'GetStatus'),
+    ('CLAWDistributionNative', 'GetAppliedCoatPattern'),
+    ('CLAWDistributionNative', 'GetCoatPatternStatus'),
+    ('CLAWDistributionNative', 'GetCoatSurfaceAuditChunks'),
+})
+
 
 def validate(scenario):
     """Reject malformed or observation-only tests before launching or mutating files."""
@@ -82,6 +89,9 @@ def validate(scenario):
             if step['tool'] == 'platform':
                 from .platform import READS
                 readonly = step.get('args', {}).get('operation') in READS
+            if step['tool'] == 'papyrus':
+                readonly = (args.get('action') == 'call' and
+                            (args.get('script'), args.get('function')) in READ_ONLY_SUBJECT_CALLS)
             if step['tool'] == 'native14':
                 if (set(step.get('args', {})) & {'tag', 'baseline', 'haptics'} or
                         step.get('args', {}).get('transition', 'same-context') != 'same-context'):
@@ -206,8 +216,7 @@ def execute(session, scenario):
                     if remaining <= 0:
                         raise TimeoutError('Step deadline exceeded during reference validation')
                 if step['tool'] == 'platform':
-                    result = session.tool(step['tool'], resolve_args(step.get('args', {}), session.state),
-                                          timeout=min(remaining, 12), deadline=end)
+                    result = scenario_platform_call(session, step, remaining, end)
                 else:
                     result = session.tool(step['tool'], resolve_args(step.get('args', {}), session.state),
                                           timeout=min(remaining, 12), deadline=end)
@@ -247,6 +256,39 @@ def execute(session, scenario):
         if section == 'steps':
             from .boundary_collection import after_step
             after_step(session, index, step)
+
+
+def scenario_platform_call(session, step, remaining, deadline):
+    """Give standard scenarios the same once-only domain identity as operator calls.
+
+    The domain persists its own mutation intent before dispatch. Re-entering the
+    same frozen step yields the same ID, so an uncertain mutation cannot acquire
+    a new identity and be replayed. This is not a retry/permission mechanism.
+    """
+    from .restart_budget import digest
+    if 'activeSemanticCommandId' in session.state:
+        raise ValueError('A scenario cannot replace an active semantic command')
+    identity = session.state.get('activeScenarioStep')
+    if not isinstance(identity, dict):
+        raise ValueError('A scenario platform call requires its frozen step identity')
+    command_id = 'scenario-' + digest(identity)
+    session.state['activeSemanticCommandId'] = command_id
+    primary_error = None
+    try:
+        session.save()
+        return session.tool('platform', resolve_args(step.get('args', {}), session.state),
+                            timeout=min(remaining, 12), deadline=deadline)
+    except BaseException as error:
+        primary_error = error
+        raise
+    finally:
+        session.state.pop('activeSemanticCommandId', None)
+        try:
+            session.save()
+        except Exception as cleanup_error:
+            if primary_error is None:
+                raise
+            primary_error.add_note('Semantic scope cleanup save also failed: ' + str(cleanup_error))
 
 
 def resolve_args(value, state):

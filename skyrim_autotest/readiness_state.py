@@ -1,6 +1,9 @@
 """Typed native readiness predicates shared by startup, actions and observations."""
 import re
 
+OFFICIAL_MENU_CONTRACT = 'official-menu-blockedBy'
+OFFICIAL_BENIGN_MENUS = frozenset({'HUD Menu', 'Cursor Menu', 'Fader Menu', 'Mist Menu'})
+
 
 def world_loaded(scene, expected_cell=None):
     if not isinstance(scene, dict) or not isinstance(scene.get('cell'), dict):
@@ -15,6 +18,14 @@ def menus_block_gameplay(observation):
     if not isinstance(observation, dict) or observation.get('messageBoxOpen') is not False:
         return True
     names, states = observation.get('openMenus'), observation.get('menuStates')
+    if observation.get('menuObservationContract') == OFFICIAL_MENU_CONTRACT:
+        blockers = observation.get('blockedBy', [])
+        if (not isinstance(names, list) or any(not isinstance(name, str) for name in names)
+                or len(set(names)) != len(names) or not isinstance(blockers, list)
+                or any(not isinstance(row, dict) or not isinstance(row.get('name'), str) for row in blockers)):
+            return True
+        return bool(blockers) or any(name not in OFFICIAL_BENIGN_MENUS for name in names)
+
     if (not isinstance(names, list) or not isinstance(states, list)
             or any(not isinstance(name, str) for name in names)
             or any(not isinstance(row, dict) or not isinstance(row.get('name'), str) for row in states)

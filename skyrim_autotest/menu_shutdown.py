@@ -1,0 +1,290 @@
+"""Owned SE world teardown, then the identified stock main-menu QUIT flow.
+
+Every mutation has a durable, non-replayable intent. This helper never closes a
+window or terminates a process; the caller retains its guarded fallback.
+"""
+import copy
+import math
+import time
+
+from . import game_shutdown as exit_observation
+
+
+from . import startup_ui
+
+CONTRACT = startup_ui.CONTRACT
+
+
+def release_crosshair(call, mutate, record, session, remaining):
+    """Release SKSE's strong crosshair reference while its actor/base still live.
+
+    SKSE2.3.1 keeps g_curCrosshairRef in a static NiPointer. Merely returning to
+    Main Menu does not clear it; its CRT destructor can outlive the actor base.
+    No reference is deleted/adopted. One player pitch adjustment is allowed,
+    and the actual SKSE getter must return None twice before world teardown.
+    """
+    from .api_contract import validate_description
+
+    def crosshair():
+        value = call('papyrus', {'action': 'call', 'script': 'Game', 'function': 'GetCurrentCrosshairRef', 'args': []})
+        if (not isinstance(value, dict) or value.get('called') is not True or 'returned' not in value
+                or str(value.get('returnedType')).casefold() not in ('none', 'objectreference')
+                or str(value.get('returnedType')).casefold() == 'none' and value['returned'] is not None):
+            raise ValueError('Typed SKSE crosshair-cache read unavailable')
+        if value['returned'] is not None:
+            from .actor_domain import returned_form
+            returned_form(value['returned'])
+        return value
+
+    before = crosshair()
+    receipt = {'before': copy.deepcopy(before), 'released': False, 'samples': []}
+    record['crosshairRelease'] = receipt
+    session.save()
+    if before['returned'] is not None:
+        metadata = call('papyrus', {'action': 'describe', 'script': 'ObjectReference'})
+        api = validate_description('ObjectReference', metadata, 'memberFunctions',
+            {'SetAngle': ['float', 'float', 'float'], 'GetAngleX': [], 'GetAngleY': [], 'GetAngleZ': []})
+        if (api[0].get('native') is not True or str(api[0].get('returnType')).casefold() != 'none'
+                or any(row.get('native') is not True or str(row.get('returnType')).casefold() != 'float' for row in api[1:])):
+            raise ValueError('Native player pitch interface unavailable')
+        angles = []
+        for axis in 'XYZ':
+            value = call('papyrus', {'action': 'call', 'script': 'ObjectReference',
+                'function': 'GetAngle' + axis, 'self': {'form': '0x00000014'}, 'args': []})
+            angle = value.get('returned') if isinstance(value, dict) else None
+            if (not isinstance(value, dict) or value.get('called') is not True
+                    or str(value.get('returnedType')).casefold() != 'float'
+                    or type(angle) not in (int, float) or not math.isfinite(angle) or abs(angle) > 3600):
+                raise ValueError('Actual finite player angle readback unavailable')
+            angles.append(angle)
+        receipt.update(api=api, player={'form': '0x00000014'}, anglesBeforeDegrees=angles, requestedPitchDegrees=-85.)
+        session.save()
+        answer = mutate('crosshairAim', 'papyrus', {'action': 'call', 'script': 'ObjectReference',
+            'function': 'SetAngle', 'self': {'form': '0x00000014'}, 'args': [-85., angles[1], angles[2]]})
+        if (not isinstance(answer, dict) or answer.get('called') is not True
+                or str(answer.get('returnedType')).casefold() != 'none'
+                or 'returned' not in answer or answer['returned'] is not None):
+            raise ValueError('Player pitch completion unavailable; no replay')
+    clear = 0
+    end = min(record['deadlineMonotonic'], time.monotonic() + 5)
+    while time.monotonic() < end:
+        remaining()
+        value = crosshair()
+        receipt['samples'].append(copy.deepcopy(value))
+        clear = clear + 1 if value['returned'] is None else 0
+        if clear >= 2:
+            receipt.update(released=True, basis='actual SKSE cached-crosshair getter returned None twice before world teardown')
+            session.save()
+            session.log('menu-exit-crosshair-released', receipt=copy.deepcopy(receipt))
+            return
+        time.sleep(min(.2, max(0, end - time.monotonic())))
+    session.save()
+    raise ValueError('SKSE crosshair strong reference remains; world teardown not requested')
+
+
+def selection(snapshot, state, selected=False):
+    if (not isinstance(snapshot, dict) or snapshot.get('contract') != CONTRACT
+            or snapshot.get('menu') != 'Main Menu' or snapshot.get('state') != state):
+        raise ValueError('Identified main-menu state unavailable for owned exit')
+    rows = snapshot.get('entries')
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 12:
+        raise ValueError('Typed main-menu entries unavailable for owned exit')
+    for i, row in enumerate(rows):
+        if (not isinstance(row, dict) or type(row.get('position')) is not int or row['position'] != i
+                or type(row.get('index')) is not int or not isinstance(row.get('text'), str)
+                or type(row.get('disabled')) is not bool):
+            raise ValueError('Malformed native main-menu entry')
+    matches = [r for r in rows if r['text'] == '$QUIT' and r['index'] == 9 and not r['disabled']]
+    if len(matches) != 1:
+        raise ValueError('Unique enabled stock QUIT entry unavailable')
+    current = snapshot.get('selected')
+    if selected and (not isinstance(current, dict) or type(current.get('index')) is not int
+                     or current['index'] != 9 or current.get('text') != '$QUIT'
+                     or current.get('disabled') is not False):
+        raise ValueError('Main-menu confirmation does not belong to QUIT')
+    return matches[0]
+
+
+def request_and_wait(session, seconds=45):
+    if type(seconds) not in (int, float) or not math.isfinite(seconds) or not 0 < seconds <= 60:
+        raise ValueError('Menu exit needs a finite original bound in (0,60]seconds')
+    if session.state.get('configuration', {}).get('game_edition') != 'se':
+        raise ValueError('Native main-menu exit is SE-only')
+    game = exit_observation._identity(session.state.get('game'))
+    record = session.state.get('gracefulGameExit')
+    if record is not None and (not isinstance(record, dict) or record.get('game') != game
+                               or record.get('command') != 'menu-main-quit'):
+        raise RuntimeError('Existing exit intent belongs to another process or route')
+    if not exit_observation._alive(session, game, before_request=record is None):
+        return exit_observation._capture_exited(session, game)
+    if record is None:
+        started = time.monotonic()
+        record = {'game': game, 'command': 'menu-main-quit', 'status': 'preparing',
+                  'startedMonotonic': started, 'deadlineMonotonic': started + seconds,
+                  'graceSeconds': seconds, 'requestAttempted': False}
+        session.state['gracefulGameExit'] = record
+        session.save()
+
+        def remaining():
+            value = record['deadlineMonotonic'] - time.monotonic()
+            if value <= 0:
+                raise TimeoutError('Original menu exit bound expired; no further action')
+            return value
+
+        def call(name, args):
+            return session.tool(name, args, timeout=min(4, remaining()), deadline=record['deadlineMonotonic'])
+
+        def menus():
+            value = call('menu', {'action': 'list'})
+            if not isinstance(value, dict) or not isinstance(value.get('openMenus'), list):
+                raise ValueError('Native open-menu state unavailable during exit')
+            return value
+
+        def snapshot():
+            return startup_ui.snapshot_call(call)
+
+        def mutate(stage, name, args, *, desktop=False):
+            remaining()
+            if not exit_observation._alive(session, game, before_request=True):
+                raise RuntimeError('Owned game ended before the next menu exit action')
+            remaining()
+            intent = {'game': copy.deepcopy(game), 'requestAttempted': True, 'arguments': copy.deepcopy(args)}
+            record[stage] = intent
+            if desktop:
+                record['requestAttempted'] = True
+            session.save()
+            session.log('menu-game-exit-intent', stage=stage, intent=copy.deepcopy(intent))
+            answer = call(name, args)
+            intent['acknowledgement'] = copy.deepcopy(answer)
+            session.save()
+            return answer
+
+        try:
+            # Recheck the actual provider before any teardown mutation. The
+            # startup contract name is shared by providers without QUIT support.
+            from .api_contract import validate_menu_shutdown_descriptor
+            from .runner import request
+            descriptor = request(session.state['port'], 'api/tools', timeout=min(3, remaining()))
+            record['startupApi'] = validate_menu_shutdown_descriptor(descriptor)
+            session.save()
+            current = menus()
+            if current.get('messageBoxOpen'):
+                raise ValueError('Unknown message box prevents owned menu exit')
+            if 'Main Menu' not in current['openMenus']:
+                from .api_contract import validate_description
+                description = call('papyrus', {'action': 'describe', 'script': 'Game'})
+                api = validate_description('Game', description, 'globalFunctions',
+                                           {'QuitToMainMenu': [], 'GetCurrentCrosshairRef': []})
+                if (api[0].get('native') is not True or str(api[0].get('returnType')).casefold() != 'none'
+                        or api[1].get('native') is not True or str(api[1].get('returnType')).casefold() != 'objectreference'):
+                    raise ValueError('Native Game.QuitToMainMenu signature unavailable')
+                release_crosshair(call, mutate, record, session, remaining)
+                from .runner import request
+                envelope = request(session.state['port'], 'api/events', timeout=min(3, remaining()))
+                cursor = envelope.get('headSeq')
+                if type(cursor) is not int or cursor < 0:
+                    raise ValueError('Fresh exit lifecycle cursor unavailable')
+                record['cursorBeforeMainMenu'] = cursor
+                record['mainMenuApi'] = api
+                session.save()
+                answer = mutate('mainMenuReturn', 'papyrus', {'action': 'call', 'script': 'Game',
+                    'function': 'QuitToMainMenu', 'args': []})
+                if (not isinstance(answer, dict) or answer.get('called') is not True
+                        or str(answer.get('returnedType')).casefold() != 'none'
+                        or 'returned' not in answer or answer['returned'] is not None):
+                    raise ValueError('QuitToMainMenu completion unavailable; no replay')
+                opened = False
+                while True:
+                    if not exit_observation._alive(session, game):
+                        raise RuntimeError('Game ended before desktop quit was requested')
+                    envelope = request(session.state['port'], 'api/events?since=' + str(cursor),
+                                       timeout=min(3, remaining()))
+                    events, head = envelope.get('events'), envelope.get('headSeq')
+                    if not isinstance(events, list) or type(head) is not int or head < cursor:
+                        raise ValueError('Exit event stream reset or malformed')
+                    for event in events:
+                        if (not isinstance(event, dict) or type(event.get('seq')) is not int
+                                or event['seq'] != cursor + 1 or event['seq'] > head
+                                or not isinstance(event.get('data'), dict)):
+                            raise ValueError('Exit event stream has a gap')
+                        cursor = event['seq']
+                        data = event['data']
+                        if event.get('topic') == 'lifecycle' and data.get('event') in ('newGame', 'preLoadGame', 'postLoadGame'):
+                            raise ValueError('Unexpected world load during owned menu exit')
+                        if event.get('topic') == 'menu' and data.get('name') == 'Main Menu':
+                            if type(data.get('opening')) is not bool:
+                                raise ValueError('Malformed Main Menu transition')
+                            opened = data['opening']
+                    record['mainMenuCursor'] = cursor
+                    if opened and cursor == head and 'Main Menu' in menus()['openMenus']:
+                        record['mainMenuOpenedObserved'] = True
+                        session.save()
+                        break
+                    time.sleep(min(.2, remaining()))
+            else:
+                record['mainMenuAlreadyOpen'] = True
+                session.save()
+            # Movie animation can settle without repeating the world transition.
+            while True:
+                before = snapshot()
+                if before.get('state') == 'Main':
+                    selection(before, 'Main')
+                    break
+                if before.get('state') == 'MainConfirm':
+                    raise ValueError('Unexpected existing confirmation; no exit selection')
+                time.sleep(min(.2, remaining()))
+            record['selectionBefore'] = copy.deepcopy(before)
+            entry = selection(before, 'Main')
+            packet = {'op': 'set', 'menu': 'Main Menu', 'path': startup_ui.MOVIE + '.MainList.selectedIndex', 'value': entry['position']}
+            answer = mutate('quitSelectionSet', 'gfx', packet)
+            if not isinstance(answer, dict) or answer.get('ok') is not True:
+                raise ValueError('QUIT selection write unavailable; no replay')
+            selection(snapshot(), 'Main', selected=True)
+            answer = mutate('quitSelection', 'gfx', startup_ui.invocation_packet('select-quit'))
+            if (not isinstance(answer, dict) or answer.get('ok') is not True):
+                raise ValueError('QUIT selection completion unavailable; no replay')
+            while True:
+                before = snapshot()
+                if before.get('state') == 'MainConfirm':
+                    selection(before, 'MainConfirm', selected=True)
+                    break
+                time.sleep(min(.2, remaining()))
+            record['desktopConfirmationBefore'] = copy.deepcopy(before)
+            # The process may exit before its HTTP acknowledgement. The exact
+            # durable desktop intent and retained exit handle are separate proof.
+            try:
+                answer = mutate('desktopQuit', 'gfx', startup_ui.invocation_packet('confirm-quit'), desktop=True)
+                if (not isinstance(answer, dict) or answer.get('ok') is not True):
+                    raise ValueError('Desktop quit acknowledgement unavailable; no replay')
+            except Exception as error:
+                record['desktopRequestError'] = {'type': type(error).__name__, 'message': str(error)}
+            record['status'] = 'waiting'
+            session.save()
+        except Exception as error:
+            record.update(status='menu-flow-unavailable', error={'type': type(error).__name__, 'message': str(error)})
+            session.save()
+            session.log('menu-game-exit-unavailable', record=copy.deepcopy(record), noReplay=True)
+            # A missing return/selection receipt can still leave an engine
+            # mutation in flight. Preserve its original observation grace
+            # before the caller may use another shutdown path.
+    started, deadline = record.get('startedMonotonic'), record.get('deadlineMonotonic')
+    if (type(started) not in (int, float) or type(deadline) not in (int, float)
+            or not math.isfinite(started) or not math.isfinite(deadline) or not 0 < deadline - started <= 60):
+        raise RuntimeError('Original menu exit deadline unavailable; no replay')
+    desktop = record.get('desktopQuit', {})
+    if record.get('requestAttempted') is not True or desktop.get('requestAttempted') is not True or desktop.get('game') != game:
+        pending = any(isinstance(record.get(stage), dict) and record[stage].get('requestAttempted') is True
+                      for stage in ('crosshairAim', 'mainMenuReturn', 'quitSelectionSet', 'quitSelection'))
+        if not pending:
+            return False
+    while True:
+        alive = exit_observation._alive(session, game)
+        gone = exit_observation._capture_exited(session, game) if not alive else False
+        remaining = deadline - time.monotonic()
+        if gone or remaining <= 0:
+            record.update(status='observed-gone' if gone else 'grace-expired', observedGone=gone,
+                          waitFinishedMonotonic=time.monotonic())
+            session.save()
+            session.log('menu-game-exit-wait-finished', record=copy.deepcopy(record))
+            return gone
+        time.sleep(min(.2, remaining))

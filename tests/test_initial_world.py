@@ -23,7 +23,8 @@ class Session:
         self.log = Mock()
         self.phase = Mock()
         self.capture_probe_cursor = Mock(return_value=10)
-        self.tool = Mock(return_value={})
+        self.tool = Mock(side_effect=lambda name,args,**kwargs: {'queued':True,'name':args['name']} if name=='game' and args.get('action')=='load' else {})
+        self.wait_task_queue = Mock()
 
 
 class InitialWorldTests(unittest.TestCase):

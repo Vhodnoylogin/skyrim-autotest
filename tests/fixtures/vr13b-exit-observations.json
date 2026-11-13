@@ -1,0 +1,268 @@
+{
+  "sourceState": "D:\\Skyrim VR Modding\\Builds\\claw-vr-platform-selftest-20261113\\source-02\\native-runtime\\runs\\20261113-052044-522aa4\\state.json",
+  "sourceStateSha256": "beaa7f4cada5b862abc17ffa5b07e25270403bd46a04fb9cfe431470a2d3a1a1",
+  "game": {
+    "pid": 9884,
+    "birth": 134390100675620689,
+    "path": "D:\\SteamLibrary\\steamapps\\common\\SkyrimVR\\SkyrimVR.exe"
+  },
+  "gameProcessObservations": [
+    {
+      "schemaVersion": 1,
+      "status": "running",
+      "identityVerified": true,
+      "identity": {
+        "pid": 9884,
+        "birth": 134390100675620689,
+        "path": "D:\\SteamLibrary\\steamapps\\common\\SkyrimVR\\SkyrimVR.exe"
+      },
+      "expectedIdentity": {
+        "pid": 9884,
+        "birth": 134390100675620689,
+        "path": "D:\\SteamLibrary\\steamapps\\common\\SkyrimVR\\SkyrimVR.exe"
+      },
+      "capturedAtUtc": "2026-11-13T02:21:10.108Z",
+      "observedAtUtc": "2026-11-13T02:21:10.108Z",
+      "firstExitObservedAtUtc": null,
+      "exitCode": null,
+      "exitCodeHex": null,
+      "exitCodeAvailable": false,
+      "handleRetained": true,
+      "diagnostic": null,
+      "stage": "matching-game-attached",
+      "phase": "wait-devbench"
+    },
+    {
+      "schemaVersion": 1,
+      "status": "running",
+      "identityVerified": true,
+      "identity": {
+        "pid": 9884,
+        "birth": 134390100675620689,
+        "path": "D:\\SteamLibrary\\steamapps\\common\\SkyrimVR\\SkyrimVR.exe"
+      },
+      "expectedIdentity": {
+        "pid": 9884,
+        "birth": 134390100675620689,
+        "path": "D:\\SteamLibrary\\steamapps\\common\\SkyrimVR\\SkyrimVR.exe"
+      },
+      "capturedAtUtc": "2026-11-13T02:21:10.108Z",
+      "observedAtUtc": "2026-11-13T02:21:16.023Z",
+      "firstExitObservedAtUtc": null,
+      "exitCode": null,
+      "exitCodeHex": null,
+      "exitCodeAvailable": false,
+      "handleRetained": true,
+      "diagnostic": null,
+      "stage": "before-cleanup",
+      "phase": "wait-task-queue"
+    },
+    {
+      "schemaVersion": 1,
+      "status": "exited",
+      "identityVerified": true,
+      "identity": {
+        "pid": 9884,
+        "birth": 134390100675620689,
+        "path": "D:\\SteamLibrary\\steamapps\\common\\SkyrimVR\\SkyrimVR.exe"
+      },
+      "expectedIdentity": {
+        "pid": 9884,
+        "birth": 134390100675620689,
+        "path": "D:\\SteamLibrary\\steamapps\\common\\SkyrimVR\\SkyrimVR.exe"
+      },
+      "capturedAtUtc": "2026-11-13T02:21:10.108Z",
+      "observedAtUtc": "2026-11-13T02:21:18.392Z",
+      "firstExitObservedAtUtc": "2026-11-13T02:21:18.392Z",
+      "exitCode": 0,
+      "exitCodeHex": "0x00000000",
+      "exitCodeAvailable": true,
+      "handleRetained": true,
+      "diagnostic": null,
+      "stage": "owned-processes-ended",
+      "phase": "stop-and-restore"
+    },
+    {
+      "schemaVersion": 1,
+      "status": "exited",
+      "identityVerified": true,
+      "identity": {
+        "pid": 9884,
+        "birth": 134390100675620689,
+        "path": "D:\\SteamLibrary\\steamapps\\common\\SkyrimVR\\SkyrimVR.exe"
+      },
+      "expectedIdentity": {
+        "pid": 9884,
+        "birth": 134390100675620689,
+        "path": "D:\\SteamLibrary\\steamapps\\common\\SkyrimVR\\SkyrimVR.exe"
+      },
+      "capturedAtUtc": "2026-11-13T02:21:10.108Z",
+      "observedAtUtc": "2026-11-13T02:21:35.570Z",
+      "firstExitObservedAtUtc": "2026-11-13T02:21:18.392Z",
+      "exitCode": 0,
+      "exitCodeHex": "0x00000000",
+      "exitCodeAvailable": true,
+      "handleRetained": true,
+      "diagnostic": null,
+      "stage": "cleanup-finally",
+      "phase": "stop-and-restore"
+    },
+    {
+      "schemaVersion": 1,
+      "status": "unavailable",
+      "identityVerified": false,
+      "identity": null,
+      "expectedIdentity": {
+        "pid": 9884,
+        "birth": 134390100675620689,
+        "path": "D:\\SteamLibrary\\steamapps\\common\\SkyrimVR\\SkyrimVR.exe"
+      },
+      "capturedAtUtc": "2026-11-13T02:21:36.950Z",
+      "observedAtUtc": "2026-11-13T02:21:36.950Z",
+      "firstExitObservedAtUtc": null,
+      "exitCode": null,
+      "exitCodeHex": null,
+      "exitCodeAvailable": false,
+      "handleRetained": false,
+      "diagnostic": {
+        "operation": "QueryFullProcessImageNameW",
+        "errorType": "_APIError",
+        "winerror": 31
+      },
+      "observedIdentity": null,
+      "stage": "before-cleanup",
+      "phase": "stop-and-restore"
+    },
+    {
+      "schemaVersion": 1,
+      "status": "unavailable",
+      "identityVerified": false,
+      "identity": null,
+      "expectedIdentity": {
+        "pid": 9884,
+        "birth": 134390100675620689,
+        "path": "D:\\SteamLibrary\\steamapps\\common\\SkyrimVR\\SkyrimVR.exe"
+      },
+      "capturedAtUtc": "2026-11-13T02:21:36.950Z",
+      "observedAtUtc": "2026-11-13T02:21:49.412Z",
+      "firstExitObservedAtUtc": null,
+      "exitCode": null,
+      "exitCodeHex": null,
+      "exitCodeAvailable": false,
+      "handleRetained": false,
+      "diagnostic": {
+        "operation": "QueryFullProcessImageNameW",
+        "errorType": "_APIError",
+        "winerror": 31
+      },
+      "observedIdentity": null,
+      "stage": "owned-processes-ended",
+      "phase": "stop-and-restore"
+    },
+    {
+      "schemaVersion": 1,
+      "status": "unavailable",
+      "identityVerified": false,
+      "identity": null,
+      "expectedIdentity": {
+        "pid": 9884,
+        "birth": 134390100675620689,
+        "path": "D:\\SteamLibrary\\steamapps\\common\\SkyrimVR\\SkyrimVR.exe"
+      },
+      "capturedAtUtc": "2026-11-13T02:21:36.950Z",
+      "observedAtUtc": "2026-11-13T02:21:49.439Z",
+      "firstExitObservedAtUtc": null,
+      "exitCode": null,
+      "exitCodeHex": null,
+      "exitCodeAvailable": false,
+      "handleRetained": false,
+      "diagnostic": {
+        "operation": "QueryFullProcessImageNameW",
+        "errorType": "_APIError",
+        "winerror": 31
+      },
+      "observedIdentity": null,
+      "stage": "cleanup-finally",
+      "phase": "stop-and-restore"
+    },
+    {
+      "schemaVersion": 1,
+      "status": "unavailable",
+      "identityVerified": false,
+      "identity": null,
+      "expectedIdentity": {
+        "pid": 9884,
+        "birth": 134390100675620689,
+        "path": "D:\\SteamLibrary\\steamapps\\common\\SkyrimVR\\SkyrimVR.exe"
+      },
+      "capturedAtUtc": "2026-11-13T02:23:13.761Z",
+      "observedAtUtc": "2026-11-13T02:23:13.761Z",
+      "firstExitObservedAtUtc": null,
+      "exitCode": null,
+      "exitCodeHex": null,
+      "exitCodeAvailable": false,
+      "handleRetained": false,
+      "diagnostic": {
+        "operation": "QueryFullProcessImageNameW",
+        "errorType": "_APIError",
+        "winerror": 31
+      },
+      "observedIdentity": null,
+      "stage": "before-cleanup",
+      "phase": "stop-and-restore"
+    },
+    {
+      "schemaVersion": 1,
+      "status": "unavailable",
+      "identityVerified": false,
+      "identity": null,
+      "expectedIdentity": {
+        "pid": 9884,
+        "birth": 134390100675620689,
+        "path": "D:\\SteamLibrary\\steamapps\\common\\SkyrimVR\\SkyrimVR.exe"
+      },
+      "capturedAtUtc": "2026-11-13T02:23:13.761Z",
+      "observedAtUtc": "2026-11-13T02:23:13.970Z",
+      "firstExitObservedAtUtc": null,
+      "exitCode": null,
+      "exitCodeHex": null,
+      "exitCodeAvailable": false,
+      "handleRetained": false,
+      "diagnostic": {
+        "operation": "QueryFullProcessImageNameW",
+        "errorType": "_APIError",
+        "winerror": 31
+      },
+      "observedIdentity": null,
+      "stage": "owned-processes-ended",
+      "phase": "stop-and-restore"
+    },
+    {
+      "schemaVersion": 1,
+      "status": "unavailable",
+      "identityVerified": false,
+      "identity": null,
+      "expectedIdentity": {
+        "pid": 9884,
+        "birth": 134390100675620689,
+        "path": "D:\\SteamLibrary\\steamapps\\common\\SkyrimVR\\SkyrimVR.exe"
+      },
+      "capturedAtUtc": "2026-11-13T02:23:13.761Z",
+      "observedAtUtc": "2026-11-13T02:23:23.401Z",
+      "firstExitObservedAtUtc": null,
+      "exitCode": null,
+      "exitCodeHex": null,
+      "exitCodeAvailable": false,
+      "handleRetained": false,
+      "diagnostic": {
+        "operation": "QueryFullProcessImageNameW",
+        "errorType": "_APIError",
+        "winerror": 31
+      },
+      "observedIdentity": null,
+      "stage": "cleanup-finally",
+      "phase": "stop-and-restore"
+    }
+  ],
+  "terminationContext": "SteamVR explicitly sent Quit then killed SkyrimVR9884 for room setup before10054; OS exit0 is not normal/unforced proof."
+}

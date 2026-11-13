@@ -1,5 +1,8 @@
 """SE startup admission using listener-side native events, before task requests."""
 import time
+import hashlib
+from pathlib import Path
+import re
 
 
 def wait_main_menu(session, timeout=75):
@@ -55,3 +58,26 @@ def wait_main_menu(session, timeout=75):
             return
         time.sleep(min(.25, max(0, end - time.monotonic())))
     raise runner.Blocked('SE dataLoaded/Main Menu startup events did not settle before deadline')
+
+
+def pinned_owned_fixture(session):
+    """Verify the declared local save before deferring pre-world task probes."""
+    if session.state.get('configuration', {}).get('game_edition') != 'se':
+        return False
+    fixture = session.state.get('scenario', {}).get('fixture')
+    if fixture is None:
+        return False
+    if (not isinstance(fixture, dict) or not re.fullmatch(r'[A-Za-z0-9_-]+', fixture.get('saveStem', ''))
+            or any(not re.fullmatch(r'[0-9a-f]{64}', fixture.get(ext + 'Sha256', '')) for ext in ('ess', 'skse'))
+            or session.state.get('configuration', {}).get('allow_owned_save_load') is not True):
+        raise ValueError('Declared owned fixture lacks explicit save-load authority or exact source pins')
+    directory = Path(session.state.get('ownedSaveDirectory', ''))
+    if not directory.is_absolute():
+        raise ValueError('Owned fixture save directory unavailable')
+    for extension in ('ess', 'skse'):
+        path = directory / (fixture['saveStem'] + '.' + extension)
+        if (not path.is_file() or path.is_symlink() or
+                getattr(path.lstat(), 'st_file_attributes', 0) & 0x400 or
+                hashlib.sha256(path.read_bytes()).hexdigest() != fixture[extension + 'Sha256']):
+            raise ValueError('Pinned owned fixture changed before startup: ' + extension)
+    return True

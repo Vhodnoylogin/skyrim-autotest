@@ -8,7 +8,7 @@ class ApiContractTests(unittest.TestCase):
         from skyrim_autotest.runner import Blocked
         session = Mock(); session.state = {'port': 1}
         with patch('skyrim_autotest.runner.request', return_value={'tools': [{'name':'menu','inputSchema':{'properties':{}}}]}):
-            with self.assertRaisesRegex(Blocked, 'native menu flags unavailable'):
+            with self.assertRaisesRegex(Blocked, 'blocking-menu annotation interface unavailable'):
                 api_contract.qualify_readiness(session)
         session.tool.assert_not_called()
 

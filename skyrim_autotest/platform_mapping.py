@@ -6,7 +6,7 @@ def operations():
         'state.read': ['world.ready'],
         'player.read': ['player.health.points', 'actor.reference', 'actor.base', 'actor.sex',
                         'actor.race', 'actor.loaded3D', 'actor.weight'],
-        'world.read': ['catalog.presetNames','catalog.sex','catalog.emptyAvailabilityUnknown',
+        'world.read': ['gameFrames.advanced', 'gameFrames.delta', 'catalog.presetNames','catalog.sex','catalog.emptyAvailabilityUnknown',
                        'preset.name','preset.status','preset.statusName','preset.lastError','save.completed', 'save.ownedByAttempt', 'save.essSha256', 'save.skseSha256',
                        'lifecycle.worldReady', 'lifecycle.pidChanged', 'lifecycle.generationChanged',
                        'lifecycle.oldReferenceTagsInvalidated', 'alchemy.effects.0.runtimeId', 'alchemy.runtimeId', 'alchemy.poison', 'alchemy.hostile', 'alchemy.food',
@@ -31,15 +31,57 @@ def operations():
                        'speech.broker.interfaceVersion', 'speech.broker.adapters', 'speech.broker.asrSource',
                        'speech.subscribers.namespaces', 'speech.vocabulary.phrase', 'speech.events.roundtripCompleted',
                        'speech.recognition.doorTextCount', 'speech.auction.doorGreedyAwardCount', 'speech.utterances.records'],
-        'controller.perform': ['inputIssued','gripExchange.singlePublication'], 'object.perform': ['action.admitted','action.completed','fixture.actor.prepared','fixture.actor.movementEnabled','fixture.actor.pushCompleted',
+        'controller.perform': ['inputIssued','gripExchange.singlePublication'], 'object.perform': ['action.admitted','action.completed',
+            'fixture.status', 'fixture.creationId', 'actor.reference', 'actor.base', 'actor.race', 'actor.loaded3D',
+            'preparation.completed', 'actor.displayName', 'fixture.registryIdentityMatch', 'fixture.dontMove',
+            'fixture.wornArmorItemCount', 'fixture.equippedWeaponCount',
+            'fixture.actor.prepared','fixture.actor.movementEnabled','fixture.actor.pushCompleted',
             'fixture.actor.created','camera.framing.completed','camera.target.inFrame','photo.saved','photo.decoded',
             'photo.configuration.matchesReadback','photo.camera.matchesReadback','photo.target.inFrame','photo.hud.hidden',
             'camera.restored','hud.restored'], 'input.perform': [], 'menu.read': []
     }
+    # Explicit SE domain actions retain measured effects and their mechanism.
+    # Publishing these fields is source support, not live platform qualification.
+    fields['input.perform'].extend([
+        'gameplay.completed', 'movement.distanceGameUnits', 'pickup.quantityDeltaItems',
+        'inventory.open', 'equipment.equipped', 'equipment.mechanism', 'weapon.drawn',
+        'combat.healthDeltaPoints', 'combat.targetAlive', 'combat.attackInputs'])
+    fields['object.perform'].extend(['gameplay.completed', 'fixture.created', 'fixture.reference', 'fixture.base'])
+    fields['world.read'].extend(['gameplay.completed', 'player.currentHealthPoints', 'inventory.open',
+                                 'item.runtimeId', 'item.quantityItems', 'item.equipped',
+                                 'equipment.right', 'equipment.left', 'equipment.ammo'])
     result = {}
     for op, names in fields.items():
         args = {'operation': op}
         if op in ('world.read', 'controller.perform', 'object.perform', 'input.perform', 'menu.read'):
             args['request'] = {'$parameter': 'request'}
         result[op] = {'tool': 'platform', 'args': args, 'fields': {name: name for name in names}}
+    return result
+
+
+def matrix_operations():
+    """Explicit candidate fields; never selects/replaces a qualified platform.
+
+    Complete vector objects remain available as raw measurements; native parity
+    and source/trait availability must be asserted separately by the subject.
+    """
+    result = operations()
+    fields = ('matrix.sources', 'matrix.targets', 'matrix.traits', 'matrix.nativePrediction',
+              'matrix.selectedFamily', 'matrix.selectedFamily.available', 'matrix.selectedFamily.value',
+              'matrix.requestedFamily', 'matrix.availability', 'matrix.publicTargetCount',
+              'matrix.nativeParityAvailable', 'matrix.selectedFamily.matchesRequested',
+              'matrix.ownKeyPresentCount', 'matrix.zeroExpectedOwnKeyPresentCount', 'matrix.inputTraits',
+              'matrix.mismatchCount', 'matrix.sourcePreserved', 'matrix.traitsPreserved',
+              'matrix.weightPreserved', 'matrix.ordinarySourceMapAvailable', 'matrix.ordinarySourceMapEmpty',
+              'matrix.counterfactual', 'actor.weightRaw', 'actor.weightNormalized')
+    result['world.read']['fields'].update({field: field for field in fields})
+    result['world.read']['fields'].update({field: field for field in (
+        'fixture.visualFrozen', 'fixture.dontMove', 'actor.referenceCollisionsEnabled', 'inspectionFreeze',
+        'save.actorWitnessCount', 'save.actorRemapWitnessCount', 'save.worldReady', 'load.actorWitnessCount',
+        'load.completed', 'load.sameProcess', 'actor.sameRunCreationWitnessCount')})
+    result['object.perform']['fields'].update({field: field for field in (
+        'fixture.visualFrozen', 'fixture.dontMove', 'actor.aiEnabled', 'actor.collisionsEnabled',
+        'actor.referenceCollisionsEnabled', 'inspectionFreeze', 'freezeEvidence', 'preparation.completed',
+        'save.completed', 'save.actorWitnessCount', 'load.completed', 'load.actorWitnessCount',
+        'request.admitted', 'request.completed')})
     return result
