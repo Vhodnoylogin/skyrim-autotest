@@ -6,6 +6,7 @@ import re
 import sys
 
 from .exit_projection import terminal_exit_observation
+from .collected_fault import collected_game_faults
 
 
 HTTP_ERROR = re.compile(r'^HTTP ([45][0-9]{2})\b(?: api/tool/([^:\s]+):)?')
@@ -85,6 +86,7 @@ def summarize(state, steps_path):
     """Keep scenario, OS exit and restoration facts visible in one terminal review."""
     log = read_steps(Path(steps_path))
     termination = terminal_exit_observation(state.get('gameProcessObservations'), state.get('game'))
+    collected_faults = collected_game_faults(state, Path(steps_path).parent, termination)
     checks = Counter(row['result'] for row in (state.get('checks') or ())
                      if isinstance(row, dict) and isinstance(row.get('result'), str))
     collection = state.get('collectionComplete')
@@ -112,7 +114,8 @@ def summarize(state, steps_path):
             'nativeExit': None if termination is None else {
                 'code': termination['exitCode'], 'hex': termination['exitCodeHex'],
                 'stage': termination.get('stage'),
-            }, 'windowsFault': state.get('windowsFault'), 'collectionComplete': collection, 'restored': restored,
+            }, 'windowsFault': state.get('windowsFault'), 'collectedGameFaults': collected_faults,
+            'collectionComplete': collection, 'restored': restored,
             'execution': log, 'improvementCandidates': improvements}
 
 

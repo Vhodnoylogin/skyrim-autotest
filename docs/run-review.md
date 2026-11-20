@@ -40,3 +40,12 @@ missing event does not change the scenario result, native exit or restoration.
 The default replay uses the saved correlation. Add `--query-windows-fault`
 to inspect a retained run with the current machine's event log. This performs
 one read and leaves the original run directory unchanged.
+
+`collectedGameFaults` summarizes a fresh CrashLogger artifact when the final
+collection manifest and copied log hashes agree, the recorded PID matches
+the owned process, and the log modification time falls within its lifetime
+and near exit. The report keeps the exception, fault location and up to eight
+probable stack positions. It leaves raw stack and system data in the collected
+log. CrashLogger and Windows Application Error are independent sources. The
+summary can preserve diagnostic evidence even when the process exit code is 1
+and Windows reports no matching Event 1000.
