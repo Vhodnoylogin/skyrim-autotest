@@ -1,7 +1,40 @@
 import copy
 import unittest
 from unittest.mock import patch
-from skyrim_autotest import bootstrap
+from skyrim_autotest import bootstrap, se_gameplay
+
+
+class OrdinarySeMenuTests(unittest.TestCase):
+    # The flagless response fields observed in the owned SE run 181811.
+    menus = {'openMenus': ['HUD Menu'], 'messageBoxOpen': False,
+             'menuObservationContract': 'official-menu-blockedBy'}
+
+    def observe(self, menus, *, inventory=False):
+        class Backend:
+            def call(self, tool, args):
+                if tool != 'menu' or args != {'action': 'list', 'includeFlags': True}:
+                    raise AssertionError('Expected a fresh menu read')
+                return menus
+
+        return se_gameplay._menus(Backend(), inventory)
+
+    def test_observed_official_hud_permits_ordinary_gameplay(self):
+        self.assertEqual(self.observe(self.menus), (self.menus, False))
+
+    def test_official_incomplete_or_blocking_menu_evidence_refuses(self):
+        for change in ({'openMenus': ['HUD Menu', 'UnknownChoice']},
+                       {'openMenus': ['HUD Menu', 'InventoryMenu']},
+                       {'openMenus': ['HUD Menu', 'HUD Menu']},
+                       {'messageBoxOpen': True}, {'messageBoxOpen': None},
+                       {'blockedBy': [{'name': 'MessageBoxMenu'}]}, {'blockedBy': 'unknown'}):
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, 'blocked'):
+                self.observe(dict(self.menus, **change))
+
+    def test_inventory_and_unidentified_contracts_require_actual_flags(self):
+        with self.assertRaisesRegex(ValueError, 'native menu identities'):
+            self.observe(self.menus, inventory=True)
+        with self.assertRaisesRegex(ValueError, 'native menu identities'):
+            self.observe(dict(self.menus, menuObservationContract=None))
 
 
 class Clock:

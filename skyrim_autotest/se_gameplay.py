@@ -12,7 +12,7 @@ import re
 import uuid
 
 from .actor_domain import bounded, form, returned_form
-from .readiness_state import gameplay_ready, menus_block_gameplay
+from .readiness_state import OFFICIAL_MENU_CONTRACT, gameplay_ready, menus_block_gameplay
 
 DOMAIN = 'se-gameplay'
 ACTIONS = frozenset(('move', 'inventory-open', 'inventory-close', 'pickup', 'equip',
@@ -107,6 +107,10 @@ def _pap(b, script, function, params, result, args=(), target=None, *, nullable=
 
 def _menus(b, inventory=False):
     raw = b.call('menu', {'action': 'list', 'includeFlags': True})
+    if not inventory and raw.get('menuObservationContract') == OFFICIAL_MENU_CONTRACT:
+        if menus_block_gameplay(raw):
+            raise ValueError('SE gameplay is blocked by an unexpected menu')
+        return raw, False
     names, states = raw.get('openMenus'), raw.get('menuStates')
     if (not isinstance(names, list) or not isinstance(states, list)
             or any(not isinstance(n, str) for n in names)
