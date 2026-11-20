@@ -39,7 +39,32 @@ if os.name == 'nt':
     K.CreateMutexW.restype = W.HANDLE
     K.WaitForSingleObject.argtypes = [W.HANDLE, W.DWORD]
     K.ReleaseMutex.argtypes = [W.HANDLE]
+    for query in (K.QueryPerformanceCounter, K.QueryPerformanceFrequency):
+        query.argtypes = [C.POINTER(C.c_longlong)]
+        query.restype = W.BOOL
     U.PostMessageW.argtypes = [W.HWND, W.UINT, W.WPARAM, W.LPARAM]
+
+
+def _read_performance_counter(name):
+    if os.name != 'nt':
+        raise OSError('Windows performance counter unavailable')
+    value = C.c_longlong()
+    if not getattr(K, name)(C.byref(value)):
+        raise C.WinError(C.get_last_error())
+    return value.value
+
+
+def qpc_ticks():
+    """Read native QPC ticks for brackets shared with Windows game providers."""
+    return _read_performance_counter('QueryPerformanceCounter')
+
+
+def qpc_frequency():
+    """Return the native ticks per second, without converting the time origin."""
+    frequency = _read_performance_counter('QueryPerformanceFrequency')
+    if frequency <= 0:
+        raise OSError('Windows performance counter frequency is not positive')
+    return frequency
 
 
 def identity(pid):

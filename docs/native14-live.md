@@ -50,6 +50,13 @@ Missing/duplicate/unreadable modules, wrong paths/hashes or an expected-absent
 module invalidate the read. File and endpoint checks can take time: use settled
 boundaries, never insert them into a time-sensitive stroke or callback race.
 
+For a provider that explicitly declares Windows QueryPerformanceCounter
+timestamps, use `native.qpc_ticks()` and `native.qpc_frequency()` for
+executor-side brackets. Keep integer ticks and compare frequencies before
+joining. Python deadlines and driver lease milliseconds retain their own
+clocks. An archived wall time, driver tick or Python monotonic timestamp
+cannot supply a missing QPC boundary.
+
 ## Scenario reads
 
 The request contains measurement aliases, with optional immutable evidence tags
