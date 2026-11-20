@@ -1,6 +1,7 @@
-"""Explicit composition reduction of a fresh owned disposable SE profile only."""
+"""Owned SE profile reduction and offline additive profile projection."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 import copy
 import hashlib
 import os
@@ -107,6 +108,50 @@ def _encode(rows, original, desired, *, mods):
             lines.append(line)
     prefix = b'\xef\xbb\xbf' if original.startswith(b'\xef\xbb\xbf') else b''
     return prefix + ''.join(lines).encode('utf-8')
+
+
+def project_additive(source, *, source_sha256, mods, plugins):
+    """Project pinned MO2 bytes to canonical UTF-8/LF, without I/O.
+
+    `mods` names disabled managed rows exactly. `plugins` contains new plugin
+    names in the order to append in both order documents. Either may be empty.
+    Each SHA-256 pins the raw bytes of the corresponding member of `FILES`.
+    """
+    if (not isinstance(source, Mapping) or not isinstance(source_sha256, Mapping)
+            or source.keys() != set(FILES) or source_sha256.keys() != set(FILES)
+            or any(type(source[name]) is not bytes or type(source_sha256[name]) is not str
+                   or source_sha256[name] != _hash(source[name]) for name in FILES)):
+        raise ValueError('Additive profile projection requires exactly three SHA-256-pinned source byte strings')
+    for names, plugin in ((mods, False), (plugins, True)):
+        if not isinstance(names, (list, tuple)) or len(names) > 256:
+            raise ValueError('Additive profile projection requires an ordered list of at most 256 exact names')
+        for name in names:
+            _name(name, plugin=plugin)
+            if name.splitlines() != [name]:
+                raise ValueError('Additive profile names cannot contain line breaks')
+        if len({name.casefold() for name in names}) != len(names):
+            raise ValueError('Additive profile names must be unique ignoring case')
+    if not mods and not plugins:
+        raise ValueError('Additive profile projection requires a mod or plugin addition')
+
+    rows = {name: _rows(source[name], mods=name == 'modlist.txt') for name in FILES}
+    requested = set(mods)
+    disabled = {name for _, marker, name in rows['modlist.txt'] if marker == '-'}
+    if not requested <= disabled:
+        raise ValueError('Every additive mod must already be disabled under its exact managed name')
+    existing = {name.casefold() for filename in FILES[1:] for _, _, name in rows[filename] if name is not None}
+    if existing.intersection(name.casefold() for name in plugins):
+        raise ValueError('Every appended plugin must be absent from both original order files ignoring case')
+    if any(marker == '*' for _, marker, _ in rows['loadorder.txt']):
+        raise ValueError('Original loadorder.txt must contain unmarked plugin rows')
+
+    output = {filename: [line.rstrip('\r\n') for line, _, _ in parsed] for filename, parsed in rows.items()}
+    for index, (_, _, name) in enumerate(rows['modlist.txt']):
+        if name in requested:
+            output['modlist.txt'][index] = '+' + name
+    output['plugins.txt'].extend('*' + name for name in plugins)
+    output['loadorder.txt'].extend(plugins)
+    return {name: ''.join(line + '\n' for line in lines).encode('utf-8') for name, lines in output.items()}
 
 
 def _atomic(path, data):

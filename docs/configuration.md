@@ -73,6 +73,14 @@ VR. It preserves the existing guarded fallback after the grace and the
 default VR route when the setting is absent. See [per-run review](run-review.md)
 for the observations used to qualify this route.
 
+Platform preparation code can use `copied_profile.project_additive` to
+calculate a prospective MO2 profile from exact SHA-256-pinned
+`modlist.txt`, `plugins.txt` and `loadorder.txt` bytes. It enables exact
+disabled managed rows and appends new plugins in supplied order. It returns
+canonical UTF-8/LF bytes and performs no filesystem or MO2 operations. The
+planner still owns verification of the installed source files, VFS winners,
+Root Builder effects and the disposable profile's lifecycle.
+
 Optional `allow_steam_client_restart: true` requires an explicit `steam_exe` path.
 It authorizes one graceful `steam.exe -shutdown` only if the exact preflight
 client is still alive, holds our staged null-driver module, its executable and
