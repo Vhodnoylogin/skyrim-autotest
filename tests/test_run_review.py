@@ -47,7 +47,8 @@ class RunReviewTests(unittest.TestCase):
         state = {'game': self.game, 'gracefulGameExit': grace, 'gameProcessObservations': [self.exit]}
         review = summarize(state, self.ledger)
         self.assertEqual(review['gracefulExit'], {'route': 'qqq', 'requestAttempted': True,
-                                                'queueAcknowledged': True, 'observedGone': False})
+                                                'queueAcknowledged': True, 'observedGone': False,
+                                                'waitObservation': None})
         self.assertEqual(review['execution']['ownedGameWindowClose'], [{'requested': True, 'accepted': True}])
         self.assertEqual(review['nativeExit']['code'], 0xC0000005)
         self.assertNotIn('private', json.dumps(review))
@@ -55,6 +56,21 @@ class RunReviewTests(unittest.TestCase):
         self.assertIsNone(summarize(state, self.ledger)['gracefulExit']['queueAcknowledged'])
         grace['game'] = dict(self.game, birth=999)
         self.assertIsNone(summarize(state, self.ledger)['gracefulExit'])
+
+    def test_quit_wait_duration_requires_a_consistent_finished_bracket(self):
+        self.ledger.touch()
+        grace = {'game': self.game, 'command': 'qqq', 'requestAttempted': True, 'observedGone': True,
+                 'startedMonotonic': 100, 'deadlineMonotonic': 110, 'waitFinishedMonotonic': 106.5}
+        state = {'game': self.game, 'gracefulGameExit': grace}
+        def observation():
+            return summarize(state, self.ledger)['gracefulExit']['waitObservation']
+
+        self.assertEqual(observation(), {'elapsedSeconds': 6.5, 'graceSeconds': 10,
+                                         'processGoneByDeadline': True})
+        grace['waitFinishedMonotonic'] = 111.0
+        self.assertFalse(observation()['processGoneByDeadline'])
+        grace['waitFinishedMonotonic'] = 99.0
+        self.assertIsNone(observation())
 
     def test_payloads_stay_in_raw_log_and_error_counts_use_observed_phase(self):
         self.append({'kind': 'phase', 'name': 'wait-devbench'},

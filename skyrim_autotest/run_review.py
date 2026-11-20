@@ -58,11 +58,18 @@ def graceful_exit_summary(state):
     if route not in ('qqq', 'window-close', 'menu-main-quit'):
         return None
     acknowledgement = record.get('requestAcknowledgement')
-    queued = (route == 'qqq' and isinstance(acknowledgement, dict)
+    attempted = record.get('requestAttempted') is True
+    queued = (attempted and route == 'qqq' and isinstance(acknowledgement, dict)
               and acknowledgement.get('command') == 'qqq' and acknowledgement.get('queued') is True)
     gone = record.get('observedGone')
-    return {'route': route, 'requestAttempted': record.get('requestAttempted') is True,
-            'queueAcknowledged': True if queued else None, 'observedGone': gone if type(gone) is bool else None}
+    observation = None
+    start, deadline, end = (record.get(key) for key in ('startedMonotonic', 'deadlineMonotonic', 'waitFinishedMonotonic'))
+    if (type(gone) is bool and all(type(value) in (int, float) and 0 <= value < 2**53 for value in (start, deadline, end))
+            and 0 < deadline - start <= 30 and end >= start):
+        observation = {'elapsedSeconds': end - start, 'graceSeconds': deadline - start,
+                       'processGoneByDeadline': gone and end <= deadline}
+    return {'route': route, 'requestAttempted': attempted, 'queueAcknowledged': True if queued else None,
+            'observedGone': gone if type(gone) is bool else None, 'waitObservation': observation}
 
 
 def read_steps(path):

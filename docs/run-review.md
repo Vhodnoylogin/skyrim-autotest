@@ -65,4 +65,6 @@ quit intent and observes the original ten-second exit window. Window close is
 eligible only after that grace if the owned game remains alive. A console
 queue acknowledgement, a Windows close receipt, and a retained process exit
 are separate observations. Historical ledgers may have no window close
-receipts. The new VR route needs a paired in-game check.
+receipts. A complete shutdown bracket reports the elapsed wait and whether
+the game was seen gone by the recorded deadline. Use the native exit code
+to determine whether that exit succeeded.
