@@ -6,6 +6,13 @@ import unittest
 from skyrim_autotest.run_review import summarize
 
 
+def inspect_abandonment_error():
+    message = ('main-thread task did not start within 5000ms; queued task abandoned '
+               '(169 frames elapsed -- main thread busy)')
+    return ('HTTP 504 api/tool/inspect: ' + json.dumps({'code': 504, 'error': message})
+            + ' {"Content-Type": "application/json"}')
+
+
 class RunReviewTests(unittest.TestCase):
     def setUp(self):
         self.scratch = TemporaryDirectory()
@@ -84,7 +91,8 @@ class RunReviewTests(unittest.TestCase):
                     {'kind': 'tool-error', 'tool': 'gfx', 'error': 'HTTP 504'},
                     {'kind': 'common-readiness-abandoned-read', 'tool': 'gfx'})
         review = summarize({}, self.ledger)
-        self.assertEqual(review['execution']['gatewayDispositions'], {'abandonedBeforeStart': 1, 'unresolved': 2})
+        self.assertEqual(review['execution']['gatewayDispositions'],
+                         {'abandonedBeforeStart': 1, 'dispatchedCompletionUnknown': 0, 'unresolved': 2})
         self.assertEqual(review['improvementCandidates'][0]['area'], 'transport')
 
     def test_known_disposition_needs_no_generic_gateway_suggestion(self):
@@ -98,7 +106,81 @@ class RunReviewTests(unittest.TestCase):
                     {'kind': 'tool-error', 'tool': 'platform', 'error': error})
         log = summarize({}, self.ledger)['execution']
         self.assertEqual(len(log['toolErrors']), 2)
-        self.assertEqual(log['gatewayDispositions'], {'abandonedBeforeStart': 0, 'unresolved': 1})
+        self.assertEqual(log['gatewayDispositions'],
+                         {'abandonedBeforeStart': 0, 'dispatchedCompletionUnknown': 0, 'unresolved': 1})
+
+    def test_direct_inspect_abandonment_and_queue_recovery_have_separate_counts(self):
+        error = inspect_abandonment_error()
+        self.append({'kind': 'phase', 'name': 'wait-task-queue'},
+                    {'kind': 'tool-error', 'tool': 'inspect', 'args': {'kind': 'state'}, 'error': error},
+                    {'kind': 'task-queue-not-ready', 'error': error},
+                    {'kind': 'task-queue-ready'})
+        review = summarize({}, self.ledger)
+        self.assertEqual(review['execution']['gatewayDispositions'],
+                         {'abandonedBeforeStart': 1, 'dispatchedCompletionUnknown': 0, 'unresolved': 0})
+        self.assertEqual(review['execution']['taskQueue']['recoveredWaits'], 1)
+        self.assertEqual(review['execution']['abandonedStartupReads'], [])
+        self.assertEqual(review['improvementCandidates'], [])
+
+    def test_direct_inspect_abandonment_counts_once_with_matching_decision_and_forwarded_error(self):
+        error = inspect_abandonment_error()
+        self.append({'kind': 'phase', 'name': 'menu'},
+                    {'kind': 'tool-error', 'tool': 'inspect', 'args': {'kind': 'scene'},
+                     'error': error, 'clientRequestId': 'same'},
+                    {'kind': 'common-readiness-abandoned-read', 'tool': 'inspect', 'clientRequestId': 'same'},
+                    {'kind': 'tool-error', 'tool': 'platform', 'error': error})
+        log = summarize({}, self.ledger)['execution']
+        self.assertEqual(log['gatewayDispositions'],
+                         {'abandonedBeforeStart': 1, 'dispatchedCompletionUnknown': 0, 'unresolved': 0})
+        self.assertEqual(log['abandonedStartupReads'], [{'phase': 'menu', 'tool': 'inspect', 'count': 1}])
+        self.assertEqual(len(log['toolErrors']), 2)
+
+    def test_inspect_errors_require_the_direct_provider_receipt_and_known_request(self):
+        known = inspect_abandonment_error()
+        for args, error in (
+            ({'kind': 'state'}, 'HTTP 504 api/tool/inspect: generic timeout'),
+            ({'kind': 'state'}, known.replace('api/tool/inspect:', '')),
+            ({'kind': 'state'}, known.replace('"code": 504', '"code": 500')),
+            ({'kind': 'state'}, known.replace('did not start', 'did not finish')),
+            ({'kind': 'refs'}, known),
+        ):
+            self.append({'kind': 'tool-error', 'tool': 'inspect', 'args': args, 'error': error})
+        self.assertEqual(summarize({}, self.ledger)['execution']['gatewayDispositions'],
+                         {'abandonedBeforeStart': 0, 'dispatchedCompletionUnknown': 0, 'unresolved': 5})
+
+    def test_one_confirmed_dispatch_preserves_unknown_completion_and_payload_privacy(self):
+        args = {'action': 'call', 'script': 'PRIVATE_SCRIPT', 'function': 'Begin', 'timeoutMs': 2600}
+        message = ("papyrus call 'PRIVATE_SCRIPT.Begin' was dispatched but did not complete within 2600ms "
+                   "(latent call or VM stalled?); it may still run, so check its effect before calling again"
+                   "; omitted args filled: PRIVATE_PAYLOAD")
+        error = 'HTTP 504 api/tool/papyrus: ' + json.dumps({'code': 504, 'error': message})
+        self.append({'kind': 'phase', 'name': 'scenario'},
+                    {'kind': 'tool-error', 'tool': 'papyrus', 'error': error + ' {"PRIVATE_HEADER": "private"}',
+                     'args': args, 'clientRequestId': 'leaf'},
+                    {'kind': 'tool-error', 'tool': 'platform', 'error': error})
+        review = summarize({'result': 'failed', 'scenarioResult': 'failed', 'restored': True}, self.ledger)
+        self.assertEqual(review['execution']['gatewayDispositions'],
+                         {'abandonedBeforeStart': 0, 'dispatchedCompletionUnknown': 1, 'unresolved': 0})
+        self.assertEqual([row['trigger'] for row in review['improvementCandidates']],
+                         ['dispatched-tool-completion-unknown'])
+        self.assertNotIn('PRIVATE_', json.dumps(review))
+
+    def test_unproven_or_foreign_dispatch_stays_unresolved(self):
+        args = {'action': 'call', 'script': 'Other', 'function': 'Begin'}
+        known = ("papyrus call 'Other.Begin' was dispatched but did not complete within 3000ms "
+                 "(latent call or VM stalled?); it may still run, so check its effect before calling again")
+        for message, request in (
+            ("papyrus call 'Other.Begin' was not dispatched within 3000ms "
+             "(main thread busy?); it may still be dispatched later", args),
+            (known.replace("'Other.Begin'", "'Different.Begin'"), args),
+            (known, {**args, 'timeoutMs': 2600}),
+            (known, {**args, 'action': 'describe'}),
+        ):
+            self.append({'kind': 'tool-error', 'tool': 'papyrus',
+                         'error': 'HTTP 504 api/tool/papyrus: ' + json.dumps({'code': 504, 'error': message}),
+                         'args': request})
+        self.assertEqual(summarize({}, self.ledger)['execution']['gatewayDispositions'],
+                         {'abandonedBeforeStart': 0, 'dispatchedCompletionUnknown': 0, 'unresolved': 4})
 
     def test_missing_or_damaged_log_and_foreign_exit_remain_distinct(self):
         passport = {'game': dict(self.game, pid=99), 'gameProcessObservations': [self.exit]}

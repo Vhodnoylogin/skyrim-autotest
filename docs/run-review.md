@@ -26,8 +26,18 @@ Explicitly abandoned startup reads appear by tool and phase. An HTTP status
 alone gives no evidence that the request started or was abandoned.
 New requests carry a local identifier in the step ledger. The review can
 link a gateway error to the recorded abandonment decision for that same
-request. Older unlinked errors stay unresolved even if the same phase
-contains a later success or an abandonment for a different request.
+request. Without a matching decision or a provider receipt, an error stays
+unresolved even if the same phase contains a later success or an abandonment
+for a different request.
+For a direct DevBench state or scene read, the exact queued-task
+cancellation reply establishes abandonment before execution. A matching
+executor abandonment decision leaves the request counted once. Queue
+observations still track recovery independently.
+For Papyrus, an explicit DevBench reply that the recorded call was
+dispatched and its result timed out counts as `dispatchedCompletionUnknown`.
+The review matches the requested script, function and timeout. It records
+the dispatch while completion and the effect in game remain unknown.
+This classification leaves execution and recovery behavior unchanged.
 
 For a retained nonzero exit on Windows the terminal report also reads a bounded
 Application Error Event 1000 window around the first observed exit. A match

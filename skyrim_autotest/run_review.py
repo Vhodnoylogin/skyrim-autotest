@@ -7,9 +7,47 @@ import sys
 
 from .exit_projection import terminal_exit_observation
 from .collected_fault import collected_game_faults
+from .readiness_reads import _abandoned_timeout
 
 
 HTTP_ERROR = re.compile(r'^HTTP ([45][0-9]{2})\b(?: api/tool/([^:\s]+):)?')
+
+
+def provider_timeout_body(tool, error):
+    prefix = f'HTTP 504 api/tool/{tool}: '
+    if not error.startswith(prefix):
+        return None
+    try:
+        # HTTPResponseError may append separate response headers to the JSON body.
+        body, _ = json.JSONDecoder().raw_decode(error[len(prefix):].lstrip())
+    except (ValueError, RecursionError):
+        return None
+    if isinstance(body, dict) and type(body.get('code')) is int and body['code'] == 504:
+        return body
+    return None
+
+
+def dispatched_papyrus_timeout(args, error):
+    """Recognize DevBench's explicit dispatch receipt for this recorded call."""
+    if not isinstance(args, dict) or args.get('action') != 'call':
+        return False
+    script, function = args.get('script'), args.get('function')
+    timeout = args.get('timeoutMs', 3000)
+    if not all(isinstance(name, str) and name for name in (script, function)) or type(timeout) is not int or timeout <= 0:
+        return False
+    body = provider_timeout_body('papyrus', error)
+    if body is None:
+        return False
+    message = body.get('error')
+    expected = (f"papyrus call '{script}.{function}' was dispatched but did not complete within {timeout}ms "
+                "(latent call or VM stalled?); it may still run, so check its effect before calling again")
+    return isinstance(message, str) and (message == expected or message.startswith(expected + '; omitted args filled: '))
+
+
+def abandoned_inspect_timeout(args, error):
+    """Recognize an explicit before-start cancellation for a direct scene read."""
+    return args in ({'kind': 'state'}, {'kind': 'scene'}) and _abandoned_timeout(
+        provider_timeout_body('inspect', error), startup_snapshot=False, main_menu_read=False)
 
 
 def read_steps(path):
@@ -24,6 +62,8 @@ def read_steps(path):
     abandoned_reads = Counter()
     gateway_requests = Counter()
     resolved_gateways = set()
+    dispatched_timeouts = 0
+    direct_abandonments = 0
     try:
         with path.open(encoding='utf-8') as stream:
             for line in stream:
@@ -59,7 +99,13 @@ def read_steps(path):
                     status = int(http.group(1)) if http else None
                     errors[(phase, row['tool'], status)] += 1
                     if status in (502, 503, 504) and http.group(2) in (None, row['tool']):
-                        gateway_requests[correlation] += 1
+                        if row['tool'] == 'papyrus' and dispatched_papyrus_timeout(row.get('args'), error):
+                            dispatched_timeouts += 1
+                        elif row['tool'] == 'inspect' and abandoned_inspect_timeout(row.get('args'), error):
+                            direct_abandonments += 1
+                        else:
+                            # Only requests without their own disposition can be resolved by a later decision.
+                            gateway_requests[correlation] += 1
                 if kind == 'mo2-launch' and isinstance(row.get('result'), dict):
                     bridge_requests += 1
                     response = row['result']
@@ -76,7 +122,8 @@ def read_steps(path):
             'taskQueue': task_queue,
             'abandonedStartupReads': [{'phase': phase, 'tool': tool, 'count': count}
                                       for (phase, tool), count in abandoned_reads.items()],
-            'gatewayDispositions': {'abandonedBeforeStart': joined,
+            'gatewayDispositions': {'abandonedBeforeStart': direct_abandonments + joined,
+                                    'dispatchedCompletionUnknown': dispatched_timeouts,
                                     'unresolved': sum(gateway_requests.values()) - joined},
             'bridgeLaunchRequests': bridge_requests, 'bridgeStartAcknowledgements': bridge_starts,
             'malformedRows': malformed}
@@ -98,6 +145,9 @@ def summarize(state, steps_path):
     if log['available'] and log['gatewayDispositions']['unresolved']:
         improvements.append({'area': 'transport', 'trigger': 'gateway-tool-error',
                              'suggestion': 'Correlate each gateway error with the specific request disposition.'})
+    if log['available'] and log['gatewayDispositions']['dispatchedCompletionUnknown']:
+        improvements.append({'area': 'transport', 'trigger': 'dispatched-tool-completion-unknown',
+                             'suggestion': 'Preserve the dispatched attempt and verify its effect independently.'})
     if log['available'] and log['bridgeLaunchRequests'] > log['bridgeStartAcknowledgements']:
         improvements.append({'area': 'launch', 'trigger': 'bridge-did-not-confirm-start',
                              'suggestion': 'Correlate the Bridge request, selected profile and actual process start.'})
