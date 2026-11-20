@@ -21,6 +21,8 @@ def read_steps(path):
     task_queue = {'waitingObservations': 0, 'readyObservations': 0, 'recoveredWaits': 0}
     waiting_for_queue = False
     abandoned_reads = Counter()
+    gateway_requests = Counter()
+    resolved_gateways = set()
     try:
         with path.open(encoding='utf-8') as stream:
             for line in stream:
@@ -33,6 +35,9 @@ def read_steps(path):
                     malformed += 1
                     continue
                 kind = row.get('kind')
+                phase = phases[-1] if phases else None
+                request_id = row.get('clientRequestId')
+                correlation = (phase, row.get('tool'), request_id) if isinstance(request_id, str) and request_id else None
                 if kind == 'phase' and isinstance(row.get('name'), str):
                     phases.append(row['name'])
                     waiting_for_queue = False
@@ -44,12 +49,16 @@ def read_steps(path):
                     task_queue['recoveredWaits'] += int(waiting_for_queue)
                     waiting_for_queue = False
                 if kind == 'common-readiness-abandoned-read' and isinstance(row.get('tool'), str):
-                    abandoned_reads[(phases[-1] if phases else None, row['tool'])] += 1
+                    abandoned_reads[(phase, row['tool'])] += 1
+                    if correlation in gateway_requests:
+                        resolved_gateways.add(correlation)
                 if kind == 'tool-error' and isinstance(row.get('tool'), str):
                     error = row.get('error')
                     http = HTTP_ERROR.match(error) if isinstance(error, str) else None
-                    errors[(phases[-1] if phases else None, row['tool'],
-                            int(http.group(1)) if http else None)] += 1
+                    status = int(http.group(1)) if http else None
+                    errors[(phase, row['tool'], status)] += 1
+                    if status in (502, 503, 504):
+                        gateway_requests[correlation] += 1
                 if kind == 'mo2-launch' and isinstance(row.get('result'), dict):
                     bridge_requests += 1
                     response = row['result']
@@ -58,13 +67,16 @@ def read_steps(path):
     except (OSError, UnicodeError):
         return {'available': False, 'phases': [], 'toolErrors': [], 'bridgeLaunchRequests': None,
                 'bridgeStartAcknowledgements': None, 'malformedRows': None,
-                'taskQueue': None, 'abandonedStartupReads': None}
+                'taskQueue': None, 'abandonedStartupReads': None, 'gatewayDispositions': None}
+    joined = sum(gateway_requests[key] == 1 for key in resolved_gateways if key is not None)
     return {'available': True, 'phases': phases,
             'toolErrors': [{'phase': phase, 'tool': tool, 'httpStatus': status, 'count': count}
                            for (phase, tool, status), count in errors.items()],
             'taskQueue': task_queue,
             'abandonedStartupReads': [{'phase': phase, 'tool': tool, 'count': count}
                                       for (phase, tool), count in abandoned_reads.items()],
+            'gatewayDispositions': {'abandonedBeforeStart': joined,
+                                    'unresolved': sum(gateway_requests.values()) - joined},
             'bridgeLaunchRequests': bridge_requests, 'bridgeStartAcknowledgements': bridge_starts,
             'malformedRows': malformed}
 
@@ -81,7 +93,7 @@ def summarize(state, steps_path):
     if termination is not None and termination['exitCode'] != 0:
         improvements.append({'area': 'shutdown', 'trigger': 'verified-nonzero-exit',
                              'suggestion': 'Report the scenario and the exact native exit separately.'})
-    if any(row['httpStatus'] in (502, 503, 504) for row in log['toolErrors']):
+    if log['available'] and log['gatewayDispositions']['unresolved']:
         improvements.append({'area': 'transport', 'trigger': 'gateway-tool-error',
                              'suggestion': 'Correlate each gateway error with the specific request disposition.'})
     if log['available'] and log['bridgeLaunchRequests'] > log['bridgeStartAcknowledgements']:

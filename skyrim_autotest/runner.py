@@ -57,6 +57,7 @@ class HTTPResponseError(RuntimeError):
     """Retain status/route/body without inferring the server's failure cause."""
     def __init__(self, status, route, body, diagnostics=None):
         self.status, self.route, self.body = status, route, body
+        self.client_request_id = None
         self.diagnostics = diagnostics or {}
         detail = ' ' + json.dumps(self.diagnostics) if self.diagnostics else ''
         super().__init__(f'HTTP {status} {route}: {body}' + detail)
@@ -64,10 +65,11 @@ class HTTPResponseError(RuntimeError):
 
 class ToolError(RuntimeError):
     """A structured error returned by an identity-checked owned tool endpoint."""
-    def __init__(self, tool, args, result):
+    def __init__(self, tool, args, result, *, client_request_id=None):
         self.tool = tool
         self.args_value = copy.deepcopy(args)
         self.result = copy.deepcopy(result)
+        self.client_request_id = client_request_id
         super().__init__(f'{tool}: {result}')
 
 
@@ -714,18 +716,22 @@ class Session:
         if omitted_flags:
             args = {key: value for key, value in args.items() if key != 'includeFlags'}
         started = time.monotonic()
+        request_id = uuid.uuid4().hex
         try:
             result = request(self.state['port'], f'api/tool/{name}', args, timeout=bounded_timeout(timeout))
-        except Exception as e:
-            self.log('tool-error', tool=name, args=args, error=str(e), elapsedMs=int((time.monotonic() - started) * 1000))
+        except Exception as error:
+            if isinstance(error, HTTPResponseError):
+                error.client_request_id = request_id
+            self.log('tool-error', tool=name, args=args, clientRequestId=request_id,
+                     error=str(error), elapsedMs=int((time.monotonic() - started) * 1000))
             raise
         if official_menu and isinstance(result, dict):
             result = dict(result, menuObservationContract='official-menu-blockedBy')
             if omitted_flags:
                 result['adapterWarnings'] = ['includeFlags unavailable in official DevBench; conservative menu names and blockedBy are used']
-        self.log('tool', tool=name, args=args, result=result)
+        self.log('tool', tool=name, args=args, result=result, clientRequestId=request_id)
         if isinstance(result, dict) and (result.get('isError') or result.get('error')):
-            raise ToolError(name, args, result)
+            raise ToolError(name, args, result, client_request_id=request_id)
         return result
 
     def bridge_profile(self, desired, restoring=False):

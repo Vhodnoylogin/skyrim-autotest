@@ -74,6 +74,24 @@ class RunReviewTests(unittest.TestCase):
                     {'kind': 'phase', 'name': 'new'}, {'kind': 'task-queue-ready'})
         self.assertEqual(summarize({}, self.ledger)['execution']['taskQueue']['recoveredWaits'], 0)
 
+    def test_only_explicit_same_request_links_a_gateway_disposition(self):
+        self.append({'kind': 'phase', 'name': 'menu'},
+                    {'kind': 'tool-error', 'tool': 'gfx', 'error': 'HTTP 504', 'clientRequestId': 'a'},
+                    {'kind': 'common-readiness-abandoned-read', 'tool': 'gfx', 'clientRequestId': 'a'},
+                    {'kind': 'tool-error', 'tool': 'gfx', 'error': 'HTTP 504', 'clientRequestId': 'b'},
+                    {'kind': 'phase', 'name': 'other'},
+                    {'kind': 'common-readiness-abandoned-read', 'tool': 'gfx', 'clientRequestId': 'b'},
+                    {'kind': 'tool-error', 'tool': 'gfx', 'error': 'HTTP 504'},
+                    {'kind': 'common-readiness-abandoned-read', 'tool': 'gfx'})
+        review = summarize({}, self.ledger)
+        self.assertEqual(review['execution']['gatewayDispositions'], {'abandonedBeforeStart': 1, 'unresolved': 2})
+        self.assertEqual(review['improvementCandidates'][0]['area'], 'transport')
+
+    def test_known_disposition_needs_no_generic_gateway_suggestion(self):
+        self.append({'kind': 'tool-error', 'tool': 'gfx', 'error': 'HTTP 504', 'clientRequestId': 'a'},
+                    {'kind': 'common-readiness-abandoned-read', 'tool': 'gfx', 'clientRequestId': 'a'})
+        self.assertEqual(summarize({}, self.ledger)['improvementCandidates'], [])
+
     def test_missing_or_damaged_log_and_foreign_exit_remain_distinct(self):
         passport = {'game': dict(self.game, pid=99), 'gameProcessObservations': [self.exit]}
         missing = summarize(passport, self.ledger)

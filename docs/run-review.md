@@ -24,6 +24,10 @@ Queue waits, readiness and recovery come from the corresponding executor
 events. A recovery requires a ready observation in the same phase as the wait.
 Explicitly abandoned startup reads appear by tool and phase. An HTTP status
 alone gives no evidence that the request started or was abandoned.
+New requests carry a local identifier in the step ledger. The review can
+link a gateway error to the recorded abandonment decision for that same
+request. Older unlinked errors stay unresolved even if the same phase
+contains a later success or an abandonment for a different request.
 
 For a retained nonzero exit on Windows the terminal report also reads a bounded
 Application Error Event 1000 window around the first observed exit. A match
