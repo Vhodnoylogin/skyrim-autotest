@@ -27,6 +27,13 @@ since the original write.
 Control frames and command identifiers stay in the original ledger. Driver
 acceptance alone does not establish game consumption.
 
+An instrumented scenario can log `native-sampling-window` once per observation
+window with `name`, `samples`, `producerSpanNs`, `minSpanNs`, `maxGapNs` and
+`maxAllowedGapNs`. `execution.nativeSamplingWindows` retains these source-clock
+values and indicates whether the recorded window meets its declared timing.
+This is a diagnostic summary. Original observations must still establish
+ownership, continuity, sample order and behavior. Older scenarios omit it.
+
 To review a run made with an earlier or frozen executor, point the current
 source at the retained run directory. This only reads the files.
 

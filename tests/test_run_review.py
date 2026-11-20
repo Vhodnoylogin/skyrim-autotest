@@ -186,6 +186,23 @@ class RunReviewTests(unittest.TestCase):
         self.assertEqual(review['execution']['bridgeStartAcknowledgements'], 1)
         self.assertEqual(review['improvementCandidates'], [])
 
+    def test_native_window_retains_producer_shortfall_and_gap_independently(self):
+        result = {'kind': 'native-sampling-window', 'name': 'contact-dwell', 'samples': 8,
+                  'producerSpanNs': 1_499_969_400, 'minSpanNs': 1_500_000_000,
+                  'maxGapNs': 235_876_700, 'maxAllowedGapNs': 900_000_000, 'raw': 'private-pose'}
+        self.append({'kind': 'phase', 'name': 'subject'}, result,
+                    {**result, 'producerSpanNs': 1_500_000_000},
+                    {**result, 'producerSpanNs': 1_700_000_000, 'maxGapNs': 901_000_000},
+                    {**result, 'samples': True}, {**result, 'maxGapNs': 9_000_000_000})
+        review = summarize({'scenarioResult': 'failed'}, self.ledger)
+        windows = review['execution']['nativeSamplingWindows']
+        self.assertEqual([row['meetsDeclaredTiming'] for row in windows], [False, True, False])
+        self.assertEqual(windows[0]['minSpanNs'] - windows[0]['producerSpanNs'], 30_600)
+        self.assertEqual(windows[0]['phase'], 'subject')
+        self.assertEqual(review['scenarioResult'], 'failed')
+        self.assertEqual(review['improvementCandidates'][0]['trigger'], 'declared-native-window-timing-missed')
+        self.assertNotIn('private-pose', json.dumps(review))
+
     def test_task_queue_recovery_and_declared_abandonment_use_recorded_events(self):
         self.append({'kind': 'phase', 'name': 'wait-task-queue'},
                     {'kind': 'task-queue-not-ready'}, {'kind': 'task-queue-not-ready'},

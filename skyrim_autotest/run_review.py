@@ -52,6 +52,20 @@ def record_driver(row, phase, counts, publications, acknowledgements):
                 acknowledgements[command] = None if delay is None else (sequence == issued_sequence, delay)
 
 
+def native_sampling_window(row, phase):
+    name = row.get('name')
+    keys = ('samples', 'producerSpanNs', 'minSpanNs', 'maxGapNs', 'maxAllowedGapNs')
+    measured = {key: row.get(key) for key in keys}
+    if (not isinstance(name, str) or not 0 < len(name) <= 120
+            or any(type(value) is not int or not 0 <= value < 2**63 for value in measured.values())):
+        return None
+    samples, span, minimum, gap, maximum = measured.values()
+    if not (samples and minimum and maximum and gap <= span):
+        return None
+    return {'phase': phase, 'name': name, **measured,
+            'meetsDeclaredTiming': samples >= 2 and span >= minimum and 0 < gap <= maximum}
+
+
 def provider_timeout_body(tool, error):
     prefix = f'HTTP 504 api/tool/{tool}: '
     if not error.startswith(prefix):
@@ -130,6 +144,7 @@ def read_steps(path):
     driver_counts = Counter()
     driver_publications = {}
     driver_acknowledgements = {}
+    sampling_windows = []
     try:
         with path.open(encoding='utf-8') as stream:
             for line in stream:
@@ -187,13 +202,17 @@ def read_steps(path):
                         bridge_starts += 1
                 if kind == 'driver':
                     record_driver(row, phase, driver_counts, driver_publications, driver_acknowledgements)
+                if kind == 'native-sampling-window':
+                    window = native_sampling_window(row, phase)
+                    if window is not None:
+                        sampling_windows.append(window)
                 if kind == 'owned-game-window-close' and type(row.get('requested')) is bool and type(row.get('accepted')) is bool:
                     window_close.append({'requested': row['requested'], 'accepted': row['accepted']})
     except (OSError, UnicodeError):
         return {'available': False, 'phases': [], 'failures': None, 'toolErrors': [], 'bridgeLaunchRequests': None,
                 'bridgeStartAcknowledgements': None, 'ownedGameWindowClose': None, 'malformedRows': None,
                 'taskQueue': None, 'abandonedStartupReads': None, 'gatewayDispositions': None,
-                'driver': None, 'driverAcknowledgementTiming': None}
+                'driver': None, 'driverAcknowledgementTiming': None, 'nativeSamplingWindows': None}
     joined = sum(gateway_requests[key] == 1 for key in resolved_gateways if key is not None)
     driver_timing = {}
     for command, writes in driver_publications.items():
@@ -224,6 +243,7 @@ def read_steps(path):
             'driverAcknowledgementTiming': [{'phase': phase, 'exactSequence': exact, 'samples': len(delays),
                                             'minMs': min(delays), 'maxMs': max(delays)}
                                            for (phase, exact), delays in driver_timing.items()],
+            'nativeSamplingWindows': sampling_windows,
             'bridgeLaunchRequests': bridge_requests, 'bridgeStartAcknowledgements': bridge_starts,
             'ownedGameWindowClose': window_close, 'malformedRows': malformed}
 
@@ -256,6 +276,9 @@ def summarize(state, steps_path):
     if log['available'] and log['malformedRows']:
         improvements.append({'area': 'evidence', 'trigger': 'malformed-log-row',
                              'suggestion': 'Check the steps log writer and retain the incomplete raw log.'})
+    if log['available'] and any(not row['meetsDeclaredTiming'] for row in log['nativeSamplingWindows']):
+        improvements.append({'area': 'sampling', 'trigger': 'declared-native-window-timing-missed',
+                             'suggestion': 'Use the source-clock span and largest gap to review sampling cadence.'})
     if collection is False or restored is False:
         improvements.append({'area': 'recovery', 'trigger': 'incomplete-collection-or-restoration',
                              'suggestion': 'Retain the original snapshot and identify the failing cleanup stage.'})
