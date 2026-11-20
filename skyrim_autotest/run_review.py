@@ -18,6 +18,9 @@ def read_steps(path):
     malformed = 0
     bridge_requests = 0
     bridge_starts = 0
+    task_queue = {'waitingObservations': 0, 'readyObservations': 0, 'recoveredWaits': 0}
+    waiting_for_queue = False
+    abandoned_reads = Counter()
     try:
         with path.open(encoding='utf-8') as stream:
             for line in stream:
@@ -32,6 +35,16 @@ def read_steps(path):
                 kind = row.get('kind')
                 if kind == 'phase' and isinstance(row.get('name'), str):
                     phases.append(row['name'])
+                    waiting_for_queue = False
+                if kind == 'task-queue-not-ready':
+                    task_queue['waitingObservations'] += 1
+                    waiting_for_queue = True
+                if kind == 'task-queue-ready':
+                    task_queue['readyObservations'] += 1
+                    task_queue['recoveredWaits'] += int(waiting_for_queue)
+                    waiting_for_queue = False
+                if kind == 'common-readiness-abandoned-read' and isinstance(row.get('tool'), str):
+                    abandoned_reads[(phases[-1] if phases else None, row['tool'])] += 1
                 if kind == 'tool-error' and isinstance(row.get('tool'), str):
                     error = row.get('error')
                     http = HTTP_ERROR.match(error) if isinstance(error, str) else None
@@ -44,10 +57,14 @@ def read_steps(path):
                         bridge_starts += 1
     except (OSError, UnicodeError):
         return {'available': False, 'phases': [], 'toolErrors': [], 'bridgeLaunchRequests': None,
-                'bridgeStartAcknowledgements': None, 'malformedRows': None}
+                'bridgeStartAcknowledgements': None, 'malformedRows': None,
+                'taskQueue': None, 'abandonedStartupReads': None}
     return {'available': True, 'phases': phases,
             'toolErrors': [{'phase': phase, 'tool': tool, 'httpStatus': status, 'count': count}
                            for (phase, tool, status), count in errors.items()],
+            'taskQueue': task_queue,
+            'abandonedStartupReads': [{'phase': phase, 'tool': tool, 'count': count}
+                                      for (phase, tool), count in abandoned_reads.items()],
             'bridgeLaunchRequests': bridge_requests, 'bridgeStartAcknowledgements': bridge_starts,
             'malformedRows': malformed}
 
@@ -66,7 +83,7 @@ def summarize(state, steps_path):
                              'suggestion': 'Report the scenario and the exact native exit separately.'})
     if any(row['httpStatus'] in (502, 503, 504) for row in log['toolErrors']):
         improvements.append({'area': 'transport', 'trigger': 'gateway-tool-error',
-                             'suggestion': 'Record whether the provider queued, started or abandoned the request.'})
+                             'suggestion': 'Correlate each gateway error with the specific request disposition.'})
     if log['available'] and log['bridgeLaunchRequests'] > log['bridgeStartAcknowledgements']:
         improvements.append({'area': 'launch', 'trigger': 'bridge-did-not-confirm-start',
                              'suggestion': 'Correlate the Bridge request, selected profile and actual process start.'})

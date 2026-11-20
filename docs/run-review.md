@@ -19,3 +19,8 @@ produce improvement candidates for launch, transport, shutdown or evidence
 collection. These candidates describe what the executor could expose or verify
 better. A clean run can have no candidates. A missing log or unavailable exit
 code appears explicitly in the review.
+
+Queue waits, readiness and recovery come from the corresponding executor
+events. A recovery requires a ready observation in the same phase as the wait.
+Explicitly abandoned startup reads appear by tool and phase. An HTTP status
+alone gives no evidence that the request started or was abandoned.

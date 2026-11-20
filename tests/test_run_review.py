@@ -56,6 +56,24 @@ class RunReviewTests(unittest.TestCase):
         self.assertEqual(review['execution']['bridgeStartAcknowledgements'], 1)
         self.assertEqual(review['improvementCandidates'], [])
 
+    def test_task_queue_recovery_and_declared_abandonment_use_recorded_events(self):
+        self.append({'kind': 'phase', 'name': 'wait-task-queue'},
+                    {'kind': 'task-queue-not-ready'}, {'kind': 'task-queue-not-ready'},
+                    {'kind': 'task-queue-ready'},
+                    {'kind': 'phase', 'name': 'gameplay-new-game-menu'},
+                    {'kind': 'tool-error', 'tool': 'gfx', 'error': 'HTTP 504 timeout'},
+                    {'kind': 'common-readiness-abandoned-read', 'tool': 'gfx', 'args': {'private': 'payload'}})
+        log = summarize({}, self.ledger)['execution']
+        self.assertEqual(log['taskQueue'], {'waitingObservations': 2, 'readyObservations': 1, 'recoveredWaits': 1})
+        self.assertEqual(log['abandonedStartupReads'], [
+            {'phase': 'gameplay-new-game-menu', 'tool': 'gfx', 'count': 1},
+        ])
+
+    def test_new_phase_does_not_confirm_recovery_for_an_unrelated_wait(self):
+        self.append({'kind': 'phase', 'name': 'old'}, {'kind': 'task-queue-not-ready'},
+                    {'kind': 'phase', 'name': 'new'}, {'kind': 'task-queue-ready'})
+        self.assertEqual(summarize({}, self.ledger)['execution']['taskQueue']['recoveredWaits'], 0)
+
     def test_missing_or_damaged_log_and_foreign_exit_remain_distinct(self):
         passport = {'game': dict(self.game, pid=99), 'gameProcessObservations': [self.exit]}
         missing = summarize(passport, self.ledger)
