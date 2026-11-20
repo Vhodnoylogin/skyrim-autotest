@@ -24,3 +24,15 @@ Queue waits, readiness and recovery come from the corresponding executor
 events. A recovery requires a ready observation in the same phase as the wait.
 Explicitly abandoned startup reads appear by tool and phase. An HTTP status
 alone gives no evidence that the request started or was abandoned.
+
+For a retained nonzero exit on Windows the terminal report also reads a bounded
+Application Error Event 1000 window around the first observed exit. A match
+requires the same executable path, PID, process creation time and exception
+code. The review keeps the event record number, timestamp, module basename and
+fault offset. The event describes where Windows observed the exception. The mod
+or engine component that caused it requires separate evidence. An unavailable or
+missing event does not change the scenario result, native exit or restoration.
+
+The default replay uses the saved correlation. Add `--query-windows-fault`
+to inspect a retained run with the current machine's event log. This performs
+one read and leaves the original run directory unchanged.

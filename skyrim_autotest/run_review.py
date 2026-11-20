@@ -100,21 +100,26 @@ def summarize(state, steps_path):
             'nativeExit': None if termination is None else {
                 'code': termination['exitCode'], 'hex': termination['exitCodeHex'],
                 'stage': termination.get('stage'),
-            }, 'collectionComplete': collection, 'restored': restored,
+            }, 'windowsFault': state.get('windowsFault'), 'collectionComplete': collection, 'restored': restored,
             'execution': log, 'improvementCandidates': improvements}
 
 
-def review_directory(directory):
+def review_directory(directory, *, query_windows_fault=False):
     directory = Path(directory)
     state = json.loads((directory / 'state.json').read_bytes())
+    if query_windows_fault:
+        from .windows_fault import capture_windows_fault
+        state['windowsFault'] = capture_windows_fault(state)
     return summarize(state, directory / 'steps.jsonl')
 
 
 def main(args):
-    if len(args) != 2:
-        print('Usage: python -m skyrim_autotest.run_review RUN_DIRECTORY', file=sys.stderr)
-        return 2
-    print(json.dumps(review_directory(args[1]), indent=2))
+    from argparse import ArgumentParser
+    parser = ArgumentParser(prog='python -m skyrim_autotest.run_review')
+    parser.add_argument('directory')
+    parser.add_argument('--query-windows-fault', action='store_true')
+    options = parser.parse_args(args[1:])
+    print(json.dumps(review_directory(options.directory, query_windows_fault=options.query_windows_fault), indent=2))
     return 0
 
 

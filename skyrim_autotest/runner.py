@@ -1488,6 +1488,12 @@ class Session:
         self.log('restored', files=len(self.state['snapshots']))
 
     def report(self):
+        if 'windowsFault' not in self.state:
+            from .windows_fault import capture_windows_fault
+            fault = capture_windows_fault(self.state)
+            if fault is not None:
+                self.state['windowsFault'] = fault
+                self.save()
         status = self.state.get('result', 'blocked')
         from .editions import target
         lines = [f'# Skyrim {target(self.state.get("configuration", {}))["edition"].upper()} run {self.state["id"]}', '', f'Result: **{status}**', '',
@@ -1515,6 +1521,10 @@ class Session:
             if terminal is not None and terminal != latest:
                 lines.append(f'Latest recovery observation: {latest.get("status", "unavailable")} '
                              f'({latest.get("stage", "unavailable")})')
+        fault = self.state.get('windowsFault')
+        if fault and fault['status'] == 'matched':
+            lines.append(f'Windows Application Error record {fault["recordId"]}: '
+                         f'{fault["module"]}+{fault["offsetHex"]} ({fault["exceptionHex"]})')
         (self.dir / 'report.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
         result = {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors','heartbeatHealth','guardianRecovery','interactiveSession','interactiveArtifacts','interactiveActorFixtures','gameProcessObservations','gameProcessObservationError','crashCapture','crashCaptureStopError','gameTermination','gracefulGameExit','forcedGameStop')}
         result.update((key, self.state[key]) for key in ('scenarioResult', 'scenarioReason') if key in self.state)
