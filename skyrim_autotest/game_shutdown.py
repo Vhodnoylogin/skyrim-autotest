@@ -181,3 +181,22 @@ def classify_exit(session):
     if result['kind'] == 'unknown':
         result['reason'] = 'Exit0 has no recorded owned quit request'
     return result
+
+
+def nonzero_vr_exit(state):
+    """Return a proven nonzero exit for the final owned VR game, if available."""
+    if state.get('configuration', {}).get('game_edition', 'vr') != 'vr':
+        return None
+    game = state.get('game')
+    if not any(row.get('role') == 'game' and row.get('identity') == game
+               for row in state.get('owned', [])):
+        return None
+    from .exit_projection import terminal_exit_observation
+    terminal = terminal_exit_observation(state.get('gameProcessObservations'), game)
+    if terminal is None or terminal['exitCode'] == 0:
+        return None
+    forced = state.get('forcedGameStop') is True
+    return {'kind': 'forced_stop' if forced else 'abnormal_exit', 'game': terminal['identity'],
+            'exitCode': terminal['exitCode'], 'exitCodeHex': terminal['exitCodeHex'],
+            'exitCodeAvailable': True, 'identityVerified': True, 'forcedGameStop': forced,
+            'observationStage': terminal.get('stage'), 'observedAtUtc': terminal.get('observedAtUtc')}

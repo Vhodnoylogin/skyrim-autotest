@@ -1,0 +1,67 @@
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import json
+import unittest
+
+from skyrim_autotest.run_review import summarize
+
+
+class RunReviewTests(unittest.TestCase):
+    def setUp(self):
+        self.scratch = TemporaryDirectory()
+        self.addCleanup(self.scratch.cleanup)
+        self.ledger = Path(self.scratch.name) / 'steps.jsonl'
+        self.game = {'pid': 47, 'birth': 123, 'path': 'SkyrimVR.exe'}
+        self.exit = {'schemaVersion': 1, 'status': 'exited', 'handleRetained': True,
+                     'exitCodeAvailable': True, 'identityVerified': True, 'identity': self.game,
+                     'expectedIdentity': self.game, 'exitCode': 0xC0000005, 'exitCodeHex': '0xC0000005',
+                     'stage': 'owned-processes-ended'}
+
+    def append(self, *rows):
+        with self.ledger.open('a', encoding='utf-8') as stream:
+            for row in rows:
+                stream.write(json.dumps(row) + '\n')
+
+    def test_exit_cannot_override_the_preserved_scenario_result(self):
+        self.ledger.touch()
+        review = summarize({'id': 'run', 'game': self.game, 'result': 'failed', 'scenarioResult': 'passed',
+                            'checks': [{'result': 'passed'}], 'gameProcessObservations': [self.exit],
+                            'collectionComplete': True, 'restored': True}, self.ledger)
+        self.assertEqual((review['scenarioResult'], review['result']), ('passed', 'failed'))
+        self.assertEqual(review['nativeExit']['hex'], '0xC0000005')
+        self.assertEqual(review['checks'], {'passed': 1})
+        self.assertEqual([row['area'] for row in review['improvementCandidates']], ['shutdown'])
+
+    def test_payloads_stay_in_raw_log_and_error_counts_use_observed_phase(self):
+        self.append({'kind': 'phase', 'name': 'wait-devbench'},
+                    {'kind': 'tool-error', 'tool': 'inspect', 'args': {'private': 'payload'},
+                     'error': 'HTTP 504 api/tool/inspect: private-response'},
+                    {'kind': 'tool-error', 'tool': 'inspect', 'error': 'HTTP 504 retry'},
+                    {'kind': 'phase', 'name': 'stop-and-restore'},
+                    {'kind': 'mo2-launch', 'result': {'started': False, 'token': 'private-token'}})
+        review = summarize({'configuration': {'game_edition': 'se'}, 'restored': True}, self.ledger)
+        self.assertEqual(review['gameEdition'], 'se')
+        self.assertEqual(review['execution']['toolErrors'], [
+            {'tool': 'inspect', 'phase': 'wait-devbench', 'httpStatus': 504, 'count': 2},
+        ])
+        self.assertEqual({row['area'] for row in review['improvementCandidates']}, {'transport', 'launch'})
+        self.assertNotIn('private-', json.dumps(review))
+
+    def test_known_clean_run_does_not_manufacture_a_suggestion(self):
+        self.append({'kind': 'mo2-launch', 'result': {'started': True, 'applied': True}})
+        normal = dict(self.exit, exitCode=0, exitCodeHex='0x00000000')
+        review = summarize({'game': self.game, 'gameProcessObservations': [normal], 'result': 'passed',
+                            'collectionComplete': True, 'restored': True}, self.ledger)
+        self.assertEqual(review['nativeExit']['code'], 0)
+        self.assertEqual(review['execution']['bridgeStartAcknowledgements'], 1)
+        self.assertEqual(review['improvementCandidates'], [])
+
+    def test_missing_or_damaged_log_and_foreign_exit_remain_distinct(self):
+        passport = {'game': dict(self.game, pid=99), 'gameProcessObservations': [self.exit]}
+        missing = summarize(passport, self.ledger)
+        self.assertFalse(missing['execution']['available'])
+        self.assertIsNone(missing['nativeExit'])
+        self.ledger.write_text('invalid\n42\n', encoding='utf-8')
+        damaged = summarize(dict(passport, restored=False), self.ledger)
+        self.assertEqual(damaged['execution']['malformedRows'], 2)
+        self.assertEqual({row['area'] for row in damaged['improvementCandidates']}, {'evidence', 'recovery'})

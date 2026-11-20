@@ -79,7 +79,7 @@ def validate(args):
         'save_game': ({'action', 'saveTag', 'scope'}, set()),
         'load_game': ({'action', 'saveTag', 'scope'}, set()),
         'restart_game': ({'action', 'saveTag', 'scope'}, set()),
-        'form.identity': ({'observation', 'form'}, set()),
+        'form.identity': ({'observation', 'form'}, {'requireFullPluginIdentity'}),
         'form.alchemy': ({'observation', 'form'}, set()),
         'body_slot.settings': ({'observation', 'slot'}, set()),
         'body_slot.display': ({'observation', 'slot'}, set()),
@@ -107,6 +107,8 @@ def validate(args):
         required, optional = selectors[selector]
         if not required <= set(req) or set(req) - required - optional:
             raise ValueError('Semantic request contains unsupported/missing fields')
+    if 'requireFullPluginIdentity' in req and type(req['requireFullPluginIdentity']) is not bool:
+        raise ValueError('Full plugin identity requires a boolean opt-in')
     if (operation == 'input.perform' or req.get('action') == 'save_game') and req.get('scope') != 'owned-disposable-profile':
         raise ValueError('Save/load requires owned-disposable-profile scope')
     for key in ('saveTag', 'afterSaveTag'):
@@ -133,6 +135,12 @@ def validate(args):
     for key in ('item', 'form'):
         if key in req:
             form = req[key]
+            if key == 'form' and req.get('requireFullPluginIdentity') is True:
+                from .plugin_forms import full_form_local_id
+                if not isinstance(form, dict):
+                    raise ValueError('Full plugin identity requires an installed form selector')
+                full_form_local_id(form.get('plugin'), form.get('localId'))
+                continue
             if runtime_items.selector(form):continue
             if not isinstance(form, dict) or not re.fullmatch(r'[A-Za-z0-9 _.-]+\.(esm|esp)', form.get('plugin', ''), re.I) or not re.fullmatch(r'[0-9a-fA-F]{1,6}', form.get('localId', '')):
                 raise ValueError('Form requires plugin and local hex ID')
@@ -176,13 +184,16 @@ class Backend:
         return self.s.tool(tool, args, timeout=min(12, self.remaining()), deadline=self.end)
 
     def pap(self, script, function, values=None, target=None, *, fill_neutral=False):
+        response = self._pap_response(script, function, values, target, fill_neutral=fill_neutral)
+        if 'returned' not in response: raise ValueError('Papyrus return value unavailable')
+        return response['returned']
+
+    def _pap_response(self, script, function, values=None, target=None, *, fill_neutral=False):
         args = {'action': 'call', 'script': script, 'function': function, 'args': values or [],
                 'timeoutMs': max(1, min(6000, int(self.remaining()*1000)))}
         if target: args['self'] = {'form': target}
         if fill_neutral: args['fillNeutral'] = True
-        response = self.call('papyrus', args)
-        if 'returned' not in response: raise ValueError('Papyrus return value unavailable')
-        return response['returned']
+        return self.call('papyrus', args)
 
     def pause(self, seconds):
         if seconds >= self.remaining(): raise TimeoutError('Insufficient operation time for settling')
@@ -203,6 +214,24 @@ class Backend:
             if len(rows) != 1 or rows[0].get('formType') != spec['type']:
                 raise ValueError('Resolved form has unexpected type')
         return observed['formId']
+
+    def resolve_full_plugin_form(self, spec):
+        from .plugin_forms import resolve_full_plugin_form
+
+        def read_game(function, arguments):
+            response = self._pap_response('Game', function, arguments)
+            self.remaining()
+            return response
+
+        observed = resolve_full_plugin_form(read_game, spec['plugin'], spec['localId'])
+        if spec.get('type'):
+            rows = self.call('inspect', {'kind': 'refs', 'formId': observed['runtimeId']}).get('refs')
+            self.remaining()
+            if (not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict)
+                    or str(rows[0].get('formId', '')).casefold() != observed['runtimeId'].casefold()
+                    or rows[0].get('formType') != spec['type']):
+                raise ValueError('Resolved full-plugin record has unexpected identity or type')
+        return observed
 
     def item(self, reference):
         from .config import P
@@ -513,7 +542,10 @@ class Backend:
             return observe(self, req)
         if kind == 'hand.held_item': return self.held(req)
         if kind == 'form.alchemy': return self.alchemy(req['form'])
-        if kind == 'form.identity': return {'form': {'runtimeId': self.resolve(req['form'])}}
+        if kind == 'form.identity':
+            if req.get('requireFullPluginIdentity') is True:
+                return {'form': self.resolve_full_plugin_form(req['form'])}
+            return {'form': {'runtimeId': self.resolve(req['form'])}}
         if kind == 'inventory.alchemy':
             raw = self.call('inspect', {'kind': 'inventory', 'formType': 'ALCH', 'limit': 100})
             return {'inventory': {'entries': raw['items']}, 'providerObservation': raw}

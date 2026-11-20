@@ -29,7 +29,14 @@ later recovery observations are unavailable. Selection requires exactly matching
 PID, creation time and executable path in both identity brackets. Unverified,
 malformed or conflicting trusted code records do not become known exit evidence.
 Every raw observation remains in the result; a later recovery diagnostic remains
-visible separately. This changes reporting only, not cleanup or acceptance.
+visible separately.
+
+Once VR cleanup has taken its final exit observation, a retained nonzero code
+for the exact owned game makes the overall run fail. The result records the
+preceding `scenarioResult` and `scenarioReason` separately and preserves the
+original `checks`. `gameTermination` records the code and whether the runner
+issued a forced stop. Restoration and evidence collection retain their own
+results. Zero and unavailable exit codes keep the existing VR acceptance rules.
 
 Exit code0 establishes neither cause nor an unforced normal exit. In the retained
 VR13b failure SteamVR launched room setup and forcibly terminated SkyrimVR; the

@@ -1,0 +1,105 @@
+"""Collect bounded per-run executor evidence and suggest follow-up from it."""
+from collections import Counter
+import json
+from pathlib import Path
+import re
+import sys
+
+from .exit_projection import terminal_exit_observation
+
+
+HTTP_ERROR = re.compile(r'^HTTP ([45][0-9]{2})\b')
+
+
+def read_steps(path):
+    """Summarize the retained tool log without copying arguments or response bodies."""
+    phases = []
+    errors = Counter()
+    malformed = 0
+    bridge_requests = 0
+    bridge_starts = 0
+    try:
+        with path.open(encoding='utf-8') as stream:
+            for line in stream:
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    malformed += 1
+                    continue
+                if not isinstance(row, dict):
+                    malformed += 1
+                    continue
+                kind = row.get('kind')
+                if kind == 'phase' and isinstance(row.get('name'), str):
+                    phases.append(row['name'])
+                if kind == 'tool-error' and isinstance(row.get('tool'), str):
+                    error = row.get('error')
+                    http = HTTP_ERROR.match(error) if isinstance(error, str) else None
+                    errors[(phases[-1] if phases else None, row['tool'],
+                            int(http.group(1)) if http else None)] += 1
+                if kind == 'mo2-launch' and isinstance(row.get('result'), dict):
+                    bridge_requests += 1
+                    response = row['result']
+                    if response.get('started') is True and response.get('applied') is not False:
+                        bridge_starts += 1
+    except (OSError, UnicodeError):
+        return {'available': False, 'phases': [], 'toolErrors': [], 'bridgeLaunchRequests': None,
+                'bridgeStartAcknowledgements': None, 'malformedRows': None}
+    return {'available': True, 'phases': phases,
+            'toolErrors': [{'phase': phase, 'tool': tool, 'httpStatus': status, 'count': count}
+                           for (phase, tool, status), count in errors.items()],
+            'bridgeLaunchRequests': bridge_requests, 'bridgeStartAcknowledgements': bridge_starts,
+            'malformedRows': malformed}
+
+
+def summarize(state, steps_path):
+    """Keep scenario, OS exit and restoration facts visible in one terminal review."""
+    log = read_steps(Path(steps_path))
+    termination = terminal_exit_observation(state.get('gameProcessObservations'), state.get('game'))
+    checks = Counter(row['result'] for row in (state.get('checks') or ())
+                     if isinstance(row, dict) and isinstance(row.get('result'), str))
+    collection = state.get('collectionComplete')
+    restored = state.get('restored')
+    improvements = []
+    if termination is not None and termination['exitCode'] != 0:
+        improvements.append({'area': 'shutdown', 'trigger': 'verified-nonzero-exit',
+                             'suggestion': 'Report the scenario and the exact native exit separately.'})
+    if any(row['httpStatus'] in (502, 503, 504) for row in log['toolErrors']):
+        improvements.append({'area': 'transport', 'trigger': 'gateway-tool-error',
+                             'suggestion': 'Record whether the provider queued, started or abandoned the request.'})
+    if log['available'] and log['bridgeLaunchRequests'] > log['bridgeStartAcknowledgements']:
+        improvements.append({'area': 'launch', 'trigger': 'bridge-did-not-confirm-start',
+                             'suggestion': 'Correlate the Bridge request, selected profile and actual process start.'})
+    if log['available'] and log['malformedRows']:
+        improvements.append({'area': 'evidence', 'trigger': 'malformed-log-row',
+                             'suggestion': 'Check the steps log writer and retain the incomplete raw log.'})
+    if collection is False or restored is False:
+        improvements.append({'area': 'recovery', 'trigger': 'incomplete-collection-or-restoration',
+                             'suggestion': 'Retain the original snapshot and identify the failing cleanup stage.'})
+    return {'schemaVersion': 1, 'runId': state.get('id'),
+            'gameEdition': state.get('configuration', {}).get('game_edition', 'vr'),
+            'result': state.get('result'), 'scenarioResult': state.get('scenarioResult'),
+            'gameIdentityRecorded': bool(state.get('game')), 'checks': dict(checks),
+            'nativeExit': None if termination is None else {
+                'code': termination['exitCode'], 'hex': termination['exitCodeHex'],
+                'stage': termination.get('stage'),
+            }, 'collectionComplete': collection, 'restored': restored,
+            'execution': log, 'improvementCandidates': improvements}
+
+
+def review_directory(directory):
+    directory = Path(directory)
+    state = json.loads((directory / 'state.json').read_bytes())
+    return summarize(state, directory / 'steps.jsonl')
+
+
+def main(args):
+    if len(args) != 2:
+        print('Usage: python -m skyrim_autotest.run_review RUN_DIRECTORY', file=sys.stderr)
+        return 2
+    print(json.dumps(review_directory(args[1]), indent=2))
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main(sys.argv))

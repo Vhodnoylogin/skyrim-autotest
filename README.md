@@ -5,6 +5,8 @@ runtime with this repository, preserving the agent guide, examples and existing
 source tests. Read [compatibility and qualification limits](docs/runtime-source-reconciliation.md)
 before selecting its provider/startup contracts. It is not a newly qualified VR
 platform. Earlier version entries below describe their historical scoped builds.
+The [per-run review](docs/run-review.md) records executor behavior and highlights
+possible improvements from launch, tool and cleanup observations.
 
 Version0.3.10 uses a separately pinned DevBench native startup-menu interface for
 the explicit SE New Game policy. It reads/selects/confirms the actual movie before

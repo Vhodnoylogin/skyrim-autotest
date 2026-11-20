@@ -181,6 +181,22 @@ the opt-in [runtime fixture candidate](runtime-fixtures.md) reads actual dynamic
 base/source identity through the owner DevBench fork. Effective subject settings
 and assignment counts use [native state bindings](subject-state-provider.md).
 
+For a static record in an active full ESP or ESM, opt into the strict read with
+`world.read` and this request.
+
+```json
+{"observation":"form.identity","requireFullPluginIdentity":true,"form":{"plugin":"Example.esp","localId":"000800"}}
+```
+
+The result includes `form.plugin`, `form.loadIndex`, `form.localId` and
+`form.runtimeId`. The executor reads the typed `GetModByName`, `GetModName` and
+`GetFormFromFile` replies within the same step deadline. It compares the whole
+ASCII filename case-insensitively and verifies both the full load index and the
+24-bit local ID in the returned FormID. An optional `form.type` check reads the
+type for that exact runtime ID. These are sequential engine reads. Omit the flag
+for the existing single lookup and its `form.runtimeId` result, including light
+plugin lookups. The strict option has offline replay coverage.
+
 Physical reach measures a local tracking-to-hand transform using three five-
 centimetre pose offsets; a singular transform or excessive reach fails. This
 requires separate live qualification of geometry and control routing. Fixed

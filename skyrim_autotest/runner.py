@@ -1239,6 +1239,7 @@ class Session:
             raise RuntimeError('Unexpected session before owned shutdown; shared runtime preserved: ' + str(foreign))
 
     def cleanup(self):
+        scenario = {name: self.state.get(name) for name in ('result', 'reason')}
         try:
             Session.observe_game_exit(self, 'before-cleanup')
             return Session._cleanup(self)
@@ -1247,6 +1248,21 @@ class Session:
                 Session.observe_game_exit(self, 'cleanup-finally')
             finally:
                 Session.close_game_exit_tracker(self)
+            from .game_shutdown import nonzero_vr_exit
+            termination = nonzero_vr_exit(self.state)
+            if termination is not None:
+                self.state.setdefault('scenarioResult', scenario['result'])
+                self.state.setdefault('scenarioReason', scenario['reason'])
+                self.state['result'] = 'failed'
+                reason = f'Owned Skyrim VR process exited with {termination["exitCodeHex"]}'
+                previous = self.state.get('reason')
+                if not previous:
+                    self.state['reason'] = reason
+                elif not previous.endswith(reason):
+                    self.state['reason'] = f'{previous}. {reason}'
+                self.state['gameTermination'] = termination
+                self.save()
+                self.log('game-termination-summary', termination=termination, subjectChecksUnchanged=True)
 
     def _cleanup(self):
         self.phase('stop-and-restore', 150)
@@ -1477,7 +1493,12 @@ class Session:
         lines = [f'# Skyrim {target(self.state.get("configuration", {}))["edition"].upper()} run {self.state["id"]}', '', f'Result: **{status}**', '',
                  f'Profile: {self.state["preflight"]["profile"]}',
                  f'Restored: {self.state.get("restored", False)}',
-                 f'Reason: {self.state.get("reason", "")}', '', '## Steps', '']
+                 f'Reason: {self.state.get("reason", "")}']
+        if self.state.get('scenarioResult') is not None:
+            lines.append(f'Scenario result: **{self.state["scenarioResult"]}**')
+            if self.state.get('scenarioReason'):
+                lines.append(f'Scenario reason: {self.state["scenarioReason"]}')
+        lines += ['', '## Steps', '']
         for item in self.state.get('checks', []):
             lines.append(f'- {item["name"]}: {item["result"]}')
         observations = self.state.get('gameProcessObservations', [])
@@ -1495,7 +1516,11 @@ class Session:
                 lines.append(f'Latest recovery observation: {latest.get("status", "unavailable")} '
                              f'({latest.get("stage", "unavailable")})')
         (self.dir / 'report.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
-        atomic_json(self.dir / 'result.json', {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors','heartbeatHealth','guardianRecovery','interactiveSession','interactiveArtifacts','interactiveActorFixtures','gameProcessObservations','gameProcessObservationError','crashCapture','crashCaptureStopError','gameTermination','gracefulGameExit','forcedGameStop')})
+        result = {k: self.state.get(k) for k in ('id', 'result', 'reason', 'restored', 'checks', 'restoreErrors', 'preflight', 'collectionComplete', 'collectionErrors','heartbeatHealth','guardianRecovery','interactiveSession','interactiveArtifacts','interactiveActorFixtures','gameProcessObservations','gameProcessObservationError','crashCapture','crashCaptureStopError','gameTermination','gracefulGameExit','forcedGameStop')}
+        result.update((key, self.state[key]) for key in ('scenarioResult', 'scenarioReason') if key in self.state)
+        atomic_json(self.dir / 'result.json', result)
+        from .run_review import summarize
+        atomic_json(self.dir / 'run-review.json', summarize(self.state, self.dir / 'steps.jsonl'))
 
     def reopen_mo2(self):
         if self.state.get('reopenMO2') and self.state.get('restored'):
@@ -1835,6 +1860,7 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
                          creationflags=subprocess.CREATE_NO_WINDOW, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         heartbeat = threading.Thread(target=session.heartbeat, daemon=True)
         heartbeat.start()
+        scenario_started = False
         try:
             session.setup()
             if fault == 'after-setup':
@@ -1856,6 +1882,7 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
             prepare_gameplay(session, scenario)
             from .platform import initialize_controllers
             initialize_controllers(session, P.snapshot())
+            scenario_started = True
             execute(session, scenario)
             if P.value.get('interactive_session'):
                 from .interactive import run as interactive_run
@@ -1873,6 +1900,9 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
             session.state.update(result='failed', reason=str(e))
             session.log('exception', trace=traceback.format_exc())
         finally:
+            if scenario_started and 'result' in session.state:
+                session.state['scenarioResult'] = session.state['result']
+                session.state['scenarioReason'] = session.state.get('reason')
             try:
                 session.cleanup()
             except Exception as e:
