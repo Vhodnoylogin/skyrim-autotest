@@ -94,6 +94,9 @@ def main():
     for module in ('voice_listener', 'voice_inbox', 'voice_operator'):
         companion='import sys;sys.path.insert(0,sys.argv[1]);from skyrim_autotest.'+module+' import main;raise SystemExit(main(["--help"]))'
         verify('wheel-isolated-'+module,[sys.executable,'-I','-c',companion,str(installed)])
+    review = ('import sys; sys.path.insert(0, sys.argv[1]); from skyrim_autotest.run_review import main; '
+              'raise SystemExit(main(["skyrim_autotest.run_review", "--help"]))')
+    verify('wheel-isolated-run-review', [sys.executable, '-I', '-c', review, str(installed)])
     # Execute tests from the freshly extracted source, never the checkout.
     test='import sys,unittest;sys.path.insert(0,sys.argv[1]);suite=unittest.defaultTestLoader.discover(sys.argv[1]+"/tests");r=unittest.TextTestRunner(verbosity=1).run(suite);raise SystemExit(not r.wasSuccessful())'
     verify('fresh-portable-regression-suite',[sys.executable,'-I','-c',test,str(portable)])
