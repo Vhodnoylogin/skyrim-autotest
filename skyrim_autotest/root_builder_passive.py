@@ -10,9 +10,11 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import stat
 import time
 
 from . import native, root_builder as rb
+from .copied_profile import FILES, _rows
 
 MODE = 'se-passive-5.1.1'
 PROOF = 'cold-portable-native-ini/1'
@@ -89,28 +91,84 @@ def _off(path):
     return settings
 
 
-def _ini_evidence(session, stage):
-    """Retain the exact bounded INI examined, including a failed boot's bytes."""
-    source = rb._safe(Path(session.state['configuration']['mo2_ini']))
+def _evidence(session, source, name):
+    """Retain one exact bounded startup input, including failed boot evidence."""
+    source = rb._safe(Path(source))
     before = rb._hash(source)
     with source.open('rb') as stream:
         raw = stream.read(before['size'] + 1)
     facts = {'sha256': hashlib.sha256(raw).hexdigest(), 'size': len(raw)}
     if facts != before or rb._hash(source) != before:
-        raise ValueError('MO2 INI changed during passive evidence capture')
+        raise ValueError('MO2 startup input changed during passive evidence capture: ' + source.name)
     directory = rb._safe(Path(session.dir) / 'evidence/root-builder-passive')
     directory.mkdir(parents=True, exist_ok=True)
-    artifact = rb._safe(directory / (stage + '.ini'))
+    artifact = rb._safe(directory / name)
     with artifact.open('xb') as stream:
         stream.write(raw)
         stream.flush()
         os.fsync(stream.fileno())
     if rb._hash(artifact) != facts:
-        raise ValueError('Passive INI evidence does not match captured bytes')
-    evidence = {'path': str(artifact), **facts}
+        raise ValueError('Passive startup evidence does not match captured bytes: ' + source.name)
+    return {'path': str(artifact), **facts}
+
+
+def _ini_evidence(session, stage):
+    evidence = _evidence(session, session.state['configuration']['mo2_ini'], stage + '.ini')
     session.state['rootBuilderPassive'].setdefault('iniEvidence', {})[stage] = evidence
     session.save()
     return evidence
+
+
+def _installed_mod_dirs(root):
+    """Identify ordinary direct mod directories without reading their contents."""
+    anchor = rb._safe(Path(root))
+    before = anchor.stat()
+    if not stat.S_ISDIR(before.st_mode) or not before.st_ino:
+        raise ValueError('Passive copied profile requires an ordinary physical mods directory')
+    dirs, folded = {}, set()
+    for index, path in enumerate(anchor.iterdir()):
+        if index >= 20000:
+            raise ValueError('Passive installed mod inventory exceeds its bound')
+        info = path.lstat()
+        if not stat.S_ISDIR(info.st_mode) or getattr(info, 'st_file_attributes', 0) & 0x400:
+            continue
+        key = path.name.casefold()
+        if key in folded or not info.st_ino:
+            raise ValueError('Ambiguous passive installed mod directory')
+        folded.add(key)
+        dirs[path.name] = [info.st_dev, info.st_ino]
+    after = rb._safe(anchor).stat()
+    if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+        raise ValueError('Passive installed mods directory changed during inspection')
+    return {'path': str(anchor), 'identity': [before.st_dev, before.st_ino], 'directories': dirs}
+
+
+def _registered_disabled_mods(before, after, installed):
+    """Find disabled registrations while requiring all original raw lines in order."""
+    if before == after:
+        return []
+    if before.startswith(b'\xef\xbb\xbf') != after.startswith(b'\xef\xbb\xbf'):
+        raise ValueError('Copied profile changed its encoding marker during MO2 startup')
+    old, new = (_rows(data, mods=True) for data in (before, after))
+    old_names = {name.casefold() for _, _, name in old if name is not None}
+    retained, additions = [], []
+    for line, marker, name in new:
+        if name is None or name.casefold() in old_names:
+            retained.append(line)
+        elif marker == '-' and name in installed and not name.casefold().endswith('_separator'):
+            additions.append(name)
+        else:
+            raise ValueError('Copied profile contains an unproved disabled registration after MO2 startup')
+    if retained != [line for line, _, _ in old] or not additions:
+        raise ValueError('Copied profile changed an original modlist row after MO2 startup')
+    return additions
+
+
+def _plugin_order_pins(profile):
+    try:
+        return {name: rb._hash(profile / name) for name in FILES[1:]}
+    except (OSError, rb.RootBuilderError):
+        return None  # Missing proof rules out only the disabled-registration exception.
 
 
 def _no_root(value, profile):
@@ -340,9 +398,17 @@ def before_launch(session):
     loader = validate_mo2_loader(Path(evidence['path']).read_text(encoding='utf-8-sig'), session.state['configuration'])
     if loader != contract['loaderContract']:
         raise ValueError('Registered SE SKSE loader changed before cold MO2 startup')
+    profile = Path(session.state['testProfile'])
+    modlist = _evidence(session, profile / 'modlist.txt', 'cold-staged.modlist.txt')
+    try:
+        installed = _installed_mod_dirs(session.state['configuration']['mods'])
+    except (OSError, ValueError):
+        installed = None  # Exact-byte startup can proceed without an exception proof.
     record.update(phase='cold-start-proof', coldStartProof={'iniSha256': evidence['sha256'],
                   'rootBuilderSettings': settings, 'loaderContract': loader,
-                  'profileModlistSha256': rb._hash(Path(session.state['testProfile']) / 'modlist.txt')['sha256'],
+                  'profileModlistSha256': modlist['sha256'], 'profileModlist': modlist,
+                  'profilePluginOrder': _plugin_order_pins(profile),
+                  'installedModDirs': installed,
                   'minimumProcessBirth': 116444736000000000 + time.time_ns() // 100, 'method': PROOF})
     session.save()
 
@@ -367,11 +433,33 @@ def verify_boot(session, bridge):
         raise ValueError('Registered SE SKSE loader changed after MO2 startup')
     _unchanged(session, contract)
     _no_root(session.state['configuration'], session.state['testProfile'])
-    if rb._hash(Path(session.state['testProfile']) / 'modlist.txt')['sha256'] != proof['profileModlistSha256']:
-        raise ValueError('Copied profile modlist changed after MO2 startup')
+    modlist = Path(session.state['testProfile']) / 'modlist.txt'
+    post_boot = rb._hash(modlist)['sha256']
+    additions = []
+    changed_evidence = {}
+    if post_boot != proof['profileModlistSha256']:
+        original = proof.get('profileModlist')
+        installed = proof.get('installedModDirs')
+        if not original or not installed:
+            raise ValueError('Copied profile modlist changed after MO2 startup')
+        order_pins = proof.get('profilePluginOrder')
+        if not order_pins or _plugin_order_pins(modlist.parent) != order_pins:
+            raise ValueError('Copied profile plugins.txt or loadorder.txt changed or unproved after MO2 startup')
+        if rb._hash(Path(contract['profile']) / 'modlist.txt')['sha256'] != contract['profileModlistSha256']:
+            raise ValueError('Source profile modlist changed after MO2 startup')
+        after = _evidence(session, modlist, 'post-boot.modlist.txt')
+        before_path = rb._safe(Path(original['path']))
+        before_raw, after_raw = before_path.read_bytes(), rb._safe(Path(after['path'])).read_bytes()
+        if (hashlib.sha256(before_raw).hexdigest() != proof['profileModlistSha256'] or
+                hashlib.sha256(after_raw).hexdigest() != post_boot or after['sha256'] != post_boot
+                or _installed_mod_dirs(session.state['configuration']['mods']) != installed):
+            raise ValueError('Passive modlist or installed mod directory evidence changed across MO2 startup')
+        additions = _registered_disabled_mods(before_raw, after_raw, installed['directories'])
+        changed_evidence['postBootProfileModlist'] = after
     record.update(phase='verified-before-game', effectiveSettingsProof={**proof, 'mo2': owned[0], 'bridge': copy.deepcopy(bridge),
                   'postBootIniSha256': evidence['sha256'], 'unrelatedIniSerializationChanged': evidence['sha256'] != proof['iniSha256'],
-                  'basis': 'Pinned portable native MO2 INI existed before process birth; local RootBuilder settings and registered SE loader unchanged after exact owned Bridge boot; copied profile unchanged; audited plugin reads organizer.pluginSetting'})
+                  'postBootProfileModlistSha256': post_boot, 'registeredDisabledMods': additions, **changed_evidence,
+                  'basis': 'Pinned portable native MO2 INI existed before process birth; local RootBuilder settings and registered SE loader unchanged after exact owned Bridge boot; original copied-profile rows preserved; audited plugin reads organizer.pluginSetting'})
     session.save()
 
 

@@ -76,3 +76,16 @@ The full original failed qualification and accounting remain immutable. Fixing
 this launch contract neither retries an old qualification ID nor clears an
 uncertain reservation. Polygon must finish reconciliation and freeze a new
 bounded qualification with the new source/configuration pins.
+
+## Passive SE copied profile
+
+The separate cold-owned passive SE mode records the exact copied modlist and
+direct installed mod directory identities before MO2 starts. MO2 may register
+an existing installed mod as disabled on its first read of the temporary profile.
+The boot check accepts these entries when the original modlist rows, markers,
+encoding marker and relative order remain byte-for-byte intact, the source
+modlist matches its preflight pin, and the same directory identities are still
+present. This exception requires the copied `plugins.txt` and `loadorder.txt`
+to match their cold pins. The record retains the exact pre- and post-boot bytes
+and the admitted disabled names. Root Builder, loader, process
+identity and static game inventory checks still apply.
