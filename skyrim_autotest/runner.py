@@ -1285,16 +1285,20 @@ class Session:
         self.discover()
         self.guard_shutdown()
         if self.state.get('game') and native.alive(self.state['game']):
-            if self.state.get('configuration', {}).get('game_edition') == 'se':
-                if self.state.get('configuration', {}).get('se_shutdown') == 'main-menu-v1':
+            configuration = self.state.get('configuration', {})
+            if configuration.get('game_edition') == 'se':
+                if configuration.get('se_shutdown') == 'main-menu-v1':
                     from .menu_shutdown import request_and_wait
                     request_and_wait(self)
                 else:
                     from .game_shutdown import request_and_wait
-                    if self.state.get('configuration', {}).get('se_shutdown') == 'window-close-v1':
+                    if configuration.get('se_shutdown') == 'window-close-v1':
                         request_and_wait(self, seconds=30, route='window-close')
                     else:
                         request_and_wait(self)
+            elif configuration.get('vr_shutdown') == 'console-qqq-grace-v1':
+                from .game_shutdown import request_and_wait
+                request_and_wait(self)
             else:
                 try:
                     self.tool('console', {'action': 'exec', 'command': 'qqq'}, timeout=4)
@@ -1312,7 +1316,10 @@ class Session:
                         and prior_exit.get('command') == 'window-close' and prior_exit.get('requestAttempted') is True):
                     self.log('owned-window-close-not-replayed', game=ident)
                 else:
-                    native.close(ident)
+                    receipt = native.close(ident)
+                    if role == 'game' and isinstance(receipt, dict):
+                        self.log('owned-game-window-close', requested=receipt['requested'],
+                                 accepted=any(row['accepted'] for row in receipt['windows']))
             end = time.monotonic() + (12 if owned else 0)
             while time.monotonic() < end and any(native.alive(i) for i in owned):
                 time.sleep(.5)

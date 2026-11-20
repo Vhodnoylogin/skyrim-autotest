@@ -98,20 +98,18 @@ def request_and_wait(session, seconds=10, *, route='qqq'):
             try:
                 remaining = record['deadlineMonotonic'] - time.monotonic()
                 if remaining > 0:
+                    record['requestAttempted'] = True
+                    session.save()  # Record the decision before a potentially uncertain send.
                     if route == 'window-close':
-                        record['requestAttempted'] = True
-                        session.save()  # Before the single possibly uncertain PostMessage operation.
                         response = native.close_game_window(game, expected_class='Skyrim Special Edition')
                         record['windowClose'] = copy.deepcopy(response)
                     else:
                         response = session.tool('console', {'action': 'exec', 'command': 'qqq'},
                                                 timeout=min(4, remaining), deadline=record['deadlineMonotonic'])
-                    record['requestAttempted'] = True
                     record['requestAcknowledgement'] = copy.deepcopy(response)
             except Exception as error:
                 # Transport uncertainty does not authorize replay or a second
                 # quit path while the original game grace is still running.
-                record['requestAttempted'] = True
                 record['requestError'] = {'type': type(error).__name__, 'message': str(error)}
             record['status'] = 'waiting'
             session.save()

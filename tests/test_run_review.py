@@ -39,6 +39,23 @@ class RunReviewTests(unittest.TestCase):
         self.assertEqual(review['checks'], {'passed': 1})
         self.assertEqual([row['area'] for row in review['improvementCandidates']], ['shutdown'])
 
+    def test_shutdown_summary_distinguishes_queue_receipt_window_close_and_exit(self):
+        self.append({'kind': 'owned-game-window-close', 'requested': True, 'accepted': True,
+                     'private': 'window details'})
+        grace = {'game': self.game, 'command': 'qqq', 'requestAttempted': True, 'observedGone': False,
+                 'requestAcknowledgement': {'queued': True, 'command': 'qqq', 'private': 'raw output'}}
+        state = {'game': self.game, 'gracefulGameExit': grace, 'gameProcessObservations': [self.exit]}
+        review = summarize(state, self.ledger)
+        self.assertEqual(review['gracefulExit'], {'route': 'qqq', 'requestAttempted': True,
+                                                'queueAcknowledged': True, 'observedGone': False})
+        self.assertEqual(review['execution']['ownedGameWindowClose'], [{'requested': True, 'accepted': True}])
+        self.assertEqual(review['nativeExit']['code'], 0xC0000005)
+        self.assertNotIn('private', json.dumps(review))
+        grace['requestAcknowledgement']['command'] = 'other'
+        self.assertIsNone(summarize(state, self.ledger)['gracefulExit']['queueAcknowledged'])
+        grace['game'] = dict(self.game, birth=999)
+        self.assertIsNone(summarize(state, self.ledger)['gracefulExit'])
+
     def test_payloads_stay_in_raw_log_and_error_counts_use_observed_phase(self):
         self.append({'kind': 'phase', 'name': 'wait-devbench'},
                     {'kind': 'tool-error', 'tool': 'inspect', 'args': {'private': 'payload'},

@@ -59,3 +59,10 @@ probable stack positions. It leaves raw stack and system data in the collected
 log. CrashLogger and Windows Application Error are independent sources. The
 summary can preserve diagnostic evidence even when the process exit code is 1
 and Windows reports no matching Event 1000.
+
+The optional VR `console-qqq-grace-v1` shutdown records one owned console
+quit intent and observes the original ten-second exit window. Window close is
+eligible only after that grace if the owned game remains alive. A console
+queue acknowledgement, a Windows close receipt, and a retained process exit
+are separate observations. Historical ledgers may have no window close
+receipts. The new VR route needs a paired in-game check.

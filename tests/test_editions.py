@@ -58,6 +58,16 @@ class EditionTests(unittest.TestCase):
         for scenario in ({'kind': 'vr-hand-probe'}, {'steps': [{'tool': 'driver'}]}, {'startMode': 'new-game'}):
             with self.assertRaises(ValueError): editions.validate_scenario(self.value, scenario, 'none', 'devbench')
 
+    def test_vr_quit_grace_is_an_explicit_vr_only_opt_in(self):
+        vr = config.template('vr')
+        vr.update({key: str(self.root / key) for key in config.REQUIRED})
+        self.assertNotIn('vr_shutdown', config.configure(vr))
+        policy = 'console-qqq-grace-v1'
+        self.assertEqual(config.configure(dict(vr, vr_shutdown=policy))['vr_shutdown'], policy)
+        for value in (dict(self.value, vr_shutdown=policy), dict(vr, vr_shutdown=True)):
+            with self.assertRaisesRegex(config.ConfigurationError, 'vr_shutdown'):
+                config.configure(value)
+
     def test_se_rejects_foreign_vr_session_and_ambiguous_root_builder(self):
         with patch.object(runner.native, 'processes', return_value=[{'name': 'SkyrimVR.exe', 'pid': 1}]):
             with self.assertRaisesRegex(runner.Blocked, 'Existing'): runner.preflight('Source')

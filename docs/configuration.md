@@ -67,6 +67,12 @@ launches. It never adopts a Steam-created game merely because path/time matches.
 The exact refusal remains in state/logs; ordinary recovery must wait for the
 foreign session to end rather than closing it or altering live files under it.
 
+Optional `"vr_shutdown": "console-qqq-grace-v1"` uses the shared owned-game
+quit and recovery path with a ten-second observation grace. Enable it only for
+VR. It preserves the existing guarded fallback after the grace and the
+default VR route when the setting is absent. See [per-run review](run-review.md)
+for the observations used to qualify this route.
+
 Optional `allow_steam_client_restart: true` requires an explicit `steam_exe` path.
 It authorizes one graceful `steam.exe -shutdown` only if the exact preflight
 client is still alive, holds our staged null-driver module, its executable and

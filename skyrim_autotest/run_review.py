@@ -50,6 +50,21 @@ def abandoned_inspect_timeout(args, error):
         provider_timeout_body('inspect', error), startup_snapshot=False, main_menu_read=False)
 
 
+def graceful_exit_summary(state):
+    record = state.get('gracefulGameExit')
+    if not state.get('game') or not isinstance(record, dict) or record.get('game') != state['game']:
+        return None
+    route = record.get('command')
+    if route not in ('qqq', 'window-close', 'menu-main-quit'):
+        return None
+    acknowledgement = record.get('requestAcknowledgement')
+    queued = (route == 'qqq' and isinstance(acknowledgement, dict)
+              and acknowledgement.get('command') == 'qqq' and acknowledgement.get('queued') is True)
+    gone = record.get('observedGone')
+    return {'route': route, 'requestAttempted': record.get('requestAttempted') is True,
+            'queueAcknowledged': True if queued else None, 'observedGone': gone if type(gone) is bool else None}
+
+
 def read_steps(path):
     """Summarize the retained tool log without copying arguments or response bodies."""
     phases = []
@@ -57,6 +72,7 @@ def read_steps(path):
     malformed = 0
     bridge_requests = 0
     bridge_starts = 0
+    window_close = []
     task_queue = {'waitingObservations': 0, 'readyObservations': 0, 'recoveredWaits': 0}
     waiting_for_queue = False
     abandoned_reads = Counter()
@@ -111,9 +127,11 @@ def read_steps(path):
                     response = row['result']
                     if response.get('started') is True and response.get('applied') is not False:
                         bridge_starts += 1
+                if kind == 'owned-game-window-close' and type(row.get('requested')) is bool and type(row.get('accepted')) is bool:
+                    window_close.append({'requested': row['requested'], 'accepted': row['accepted']})
     except (OSError, UnicodeError):
         return {'available': False, 'phases': [], 'toolErrors': [], 'bridgeLaunchRequests': None,
-                'bridgeStartAcknowledgements': None, 'malformedRows': None,
+                'bridgeStartAcknowledgements': None, 'ownedGameWindowClose': None, 'malformedRows': None,
                 'taskQueue': None, 'abandonedStartupReads': None, 'gatewayDispositions': None}
     joined = sum(gateway_requests[key] == 1 for key in resolved_gateways if key is not None)
     return {'available': True, 'phases': phases,
@@ -126,7 +144,7 @@ def read_steps(path):
                                     'dispatchedCompletionUnknown': dispatched_timeouts,
                                     'unresolved': sum(gateway_requests.values()) - joined},
             'bridgeLaunchRequests': bridge_requests, 'bridgeStartAcknowledgements': bridge_starts,
-            'malformedRows': malformed}
+            'ownedGameWindowClose': window_close, 'malformedRows': malformed}
 
 
 def summarize(state, steps_path):
@@ -164,7 +182,8 @@ def summarize(state, steps_path):
             'nativeExit': None if termination is None else {
                 'code': termination['exitCode'], 'hex': termination['exitCodeHex'],
                 'stage': termination.get('stage'),
-            }, 'windowsFault': state.get('windowsFault'), 'collectedGameFaults': collected_faults,
+            }, 'gracefulExit': graceful_exit_summary(state), 'windowsFault': state.get('windowsFault'),
+            'collectedGameFaults': collected_faults,
             'collectionComplete': collection, 'restored': restored,
             'execution': log, 'improvementCandidates': improvements}
 

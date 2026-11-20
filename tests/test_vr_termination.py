@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
 
-from skyrim_autotest import runner
+from skyrim_autotest import game_shutdown, runner
 
 
 FIXTURE = json.loads((Path(__file__).parent / 'fixtures/vr13b-exit-observations.json').read_bytes())
@@ -106,3 +106,39 @@ class VrTerminationTests(unittest.TestCase):
         self.assertEqual(self.session.state['scenarioResult'], 'passed')
         self.assertEqual(self.session.state['gameTermination']['kind'], 'forced_stop')
         self.assertEqual(self.session.state['reason'].count('0xC0000005'), 1)
+
+    def test_opted_in_cleanup_uses_shared_grace_before_any_window_close(self):
+        self.session.state['configuration']['vr_shutdown'] = 'console-qqq-grace-v1'
+        self.session.phase = Mock()
+        self.session.discover = Mock()
+        self.session.guard_shutdown = Mock(side_effect=[None, None, RuntimeError('after grace')])
+        with patch('skyrim_autotest.photography.cleanup'), \
+             patch.object(runner.native, 'alive', return_value=True), \
+             patch.object(game_shutdown, 'request_and_wait') as grace, \
+             patch.object(runner.native, 'close') as window:
+            with self.assertRaisesRegex(RuntimeError, 'after grace'):
+                self.session._cleanup()
+        grace.assert_called_once_with(self.session)
+        window.assert_not_called()
+
+    def test_console_quit_is_durable_and_recovery_cannot_resend_it(self):
+        self.session.guard_shutdown = Mock()
+        self.session.observe_game_exit = Mock()
+        saved = []
+        self.session.save.side_effect = lambda: saved.append(deepcopy(self.session.state['gracefulGameExit']))
+
+        def dispatch(*args, **kwargs):
+            self.assertTrue(saved[-1]['requestAttempted'])
+            return {'command': 'qqq', 'queued': True}
+
+        self.session.tool = Mock(side_effect=dispatch)
+        with patch.object(game_shutdown.native, 'identity', return_value=self.identity), \
+             patch.object(game_shutdown.native, 'alive', return_value=True), \
+             patch.object(game_shutdown, 'time') as clock:
+            clock.monotonic.side_effect = [10, 11, 13, 20, 20, 24, 24]
+            self.assertFalse(game_shutdown.request_and_wait(self.session))
+            self.assertFalse(game_shutdown.request_and_wait(self.session))
+        clock.sleep.assert_called_once_with(.2)
+        self.session.tool.assert_called_once_with('console', {'action': 'exec', 'command': 'qqq'},
+                                                 timeout=4, deadline=20)
+        self.assertEqual(self.session.state['gracefulGameExit']['status'], 'grace-expired')
