@@ -89,3 +89,11 @@ present. This exception requires the copied `plugins.txt` and `loadorder.txt`
 to match their cold pins. The record retains the exact pre- and post-boot bytes
 and the admitted disabled names. Root Builder, loader, process
 identity and static game inventory checks still apply.
+
+Owned SE run `20261120-235614-820c68` exercised this branch from executor
+revision `e7edb54`. It recorded 23 exact disabled registrations, verified
+the pre-game gate, and started Skyrim SE. The game later exited with code 0
+and all 464 file snapshots were restored. The downstream CLAW measurement
+failed independently on an empty diagnostic response. The live startup
+receipt SHA-256 is
+`53fadb040862e47422832ee51aac8e30c95fbbb9f4ac70a81478f831c5d53749`.
