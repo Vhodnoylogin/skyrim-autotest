@@ -16,8 +16,16 @@ ledgers can omit explicit blocks entirely.
 `execution.driver` summarizes protocol-2 file-driver publications, releases,
 status reads and acknowledged commands by phase. A command counts as
 acknowledged at most once, with a matching command and a sequence at or above
-its recorded publication. Control frames and command identifiers stay in the
-original ledger. Driver acceptance alone does not establish game consumption.
+its recorded publication. A uniquely identifiable publication without a matching
+receipt appears as `acknowledgement-unobserved`. Missing or ambiguous publication
+identity appears as `uncorrelated`. `execution.driverAcknowledgementTiming`
+reports the count and range of boot-clock milliseconds from publication to the
+first matching receipt with valid clocks, grouped by publication phase and
+whether the exact sequence or a later refresh was observed. It measures when
+Autotest observed the receipt, including polling delay and, for refreshes, time
+since the original write.
+Control frames and command identifiers stay in the original ledger. Driver
+acceptance alone does not establish game consumption.
 
 To review a run made with an earlier or frozen executor, point the current
 source at the retained run directory. This only reads the files.

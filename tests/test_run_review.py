@@ -141,9 +141,41 @@ class RunReviewTests(unittest.TestCase):
             {'phase': 'far', 'operation': 'release', 'count': 1},
             {'phase': 'far', 'operation': 'status', 'count': 3},
             {'phase': 'near', 'operation': 'acknowledged', 'count': 1},
+            {'phase': 'far', 'operation': 'acknowledgement-unobserved', 'count': 1},
         ])
+        self.assertEqual(review['execution']['driverAcknowledgementTiming'], [])
         for private in (a, b, 'private-geometry'):
             self.assertNotIn(private, json.dumps(review))
+
+    def test_driver_uses_first_timed_receipt_and_separates_ambiguous_writes(self):
+        good, duplicate = 'a' * 32, 'b' * 32
+
+        def write(command, sequence):
+            return {'kind': 'driver', 'action': 'publish', 'result': {
+                'protocolVersion': 2, 'published': True, 'publication': {
+                    'version': 2, 'command': command, 'sequence': sequence, 'publishedTickMs': 100}}}
+
+        def acknowledge(command, sequence, tick):
+            return {'kind': 'driver', 'action': 'status', 'result': {
+                'protocolVersion': 2, 'command': command, 'sequence': sequence,
+                'acknowledgedByDriver': True, 'observedTickMs': tick}}
+
+        self.append({'kind': 'phase', 'name': 'tracking'}, write(good, 10),
+                    acknowledge(good, 9, 105), acknowledge(good, 10, 99),
+                    acknowledge(good, 10, 114), acknowledge(good, 11, 125),
+                    write(duplicate, 12), acknowledge(duplicate, 12, 130), write(duplicate, 13),
+                    write('invalid', 14), write('c' * 32, 15), acknowledge('c' * 32, 16, 883))
+        log = summarize({}, self.ledger)['execution']
+        self.assertEqual(log['driver'], [
+            {'phase': 'tracking', 'operation': 'publish', 'count': 5},
+            {'phase': 'tracking', 'operation': 'status', 'count': 6},
+            {'phase': 'tracking', 'operation': 'uncorrelated', 'count': 3},
+            {'phase': 'tracking', 'operation': 'acknowledged', 'count': 2},
+        ])
+        self.assertEqual(log['driverAcknowledgementTiming'], [
+            {'phase': 'tracking', 'exactSequence': True, 'samples': 1, 'minMs': 14, 'maxMs': 14},
+            {'phase': 'tracking', 'exactSequence': False, 'samples': 1, 'minMs': 783, 'maxMs': 783},
+        ])
 
     def test_known_clean_run_does_not_manufacture_a_suggestion(self):
         self.append({'kind': 'mo2-launch', 'result': {'started': True, 'applied': True}})

@@ -14,6 +14,10 @@ HTTP_ERROR = re.compile(r'^HTTP ([45][0-9]{2})\b(?: api/tool/([^:\s]+):)?')
 DRIVER_COMMAND = re.compile(r'[a-f0-9]{32}')
 
 
+def driver_tick(value):
+    return value if type(value) is int and 0 <= value < 2**63 else None
+
+
 def record_driver(row, phase, counts, publications, acknowledgements):
     """Count file-driver writes and their matching acceptance receipts."""
     result = row.get('result')
@@ -23,18 +27,29 @@ def record_driver(row, phase, counts, publications, acknowledgements):
     if action in ('publish', 'release') and result.get('published') is True:
         counts[phase, action] += 1
         publication = result.get('publication')
+        valid = False
         if isinstance(publication, dict) and publication.get('version') == 2:
             command, sequence = publication.get('command'), publication.get('sequence')
             if (isinstance(command, str) and DRIVER_COMMAND.fullmatch(command)
                     and type(sequence) is int and 0 < sequence < 2**63):
-                publications.setdefault(command, []).append((phase, sequence))
+                tick = driver_tick(publication.get('publishedTickMs'))
+                publications.setdefault(command, []).append((phase, sequence, tick))
+                valid = True
+        if not valid:
+            counts[phase, 'uncorrelated'] += 1
     elif action == 'status':
         counts[phase, 'status'] += 1
     command, sequence = result.get('command'), result.get('sequence')
     if (action in ('publish', 'release', 'status') and result.get('acknowledgedByDriver') is True
             and isinstance(command, str) and command in publications
             and type(sequence) is int and 0 < sequence < 2**63):
-        acknowledgements[command] = max(acknowledgements.get(command, 0), sequence)
+        writes = publications[command]
+        if len(writes) == 1 and sequence >= writes[0][1]:
+            _, issued_sequence, published = writes[0]
+            observed = driver_tick(result.get('observedTickMs'))
+            delay = observed - published if observed is not None and published is not None and observed >= published else None
+            if command not in acknowledgements or acknowledgements[command] is None:
+                acknowledgements[command] = None if delay is None else (sequence == issued_sequence, delay)
 
 
 def provider_timeout_body(tool, error):
@@ -177,11 +192,24 @@ def read_steps(path):
     except (OSError, UnicodeError):
         return {'available': False, 'phases': [], 'failures': None, 'toolErrors': [], 'bridgeLaunchRequests': None,
                 'bridgeStartAcknowledgements': None, 'ownedGameWindowClose': None, 'malformedRows': None,
-                'taskQueue': None, 'abandonedStartupReads': None, 'gatewayDispositions': None, 'driver': None}
+                'taskQueue': None, 'abandonedStartupReads': None, 'gatewayDispositions': None,
+                'driver': None, 'driverAcknowledgementTiming': None}
     joined = sum(gateway_requests[key] == 1 for key in resolved_gateways if key is not None)
+    driver_timing = {}
     for command, writes in driver_publications.items():
-        if len(writes) == 1 and driver_acknowledgements.get(command, 0) >= writes[0][1]:
-            driver_counts[writes[0][0], 'acknowledged'] += 1
+        if len(writes) != 1:
+            for phase, _, _ in writes:
+                driver_counts[phase, 'uncorrelated'] += 1
+            continue
+        phase = writes[0][0]
+        if command not in driver_acknowledgements:
+            driver_counts[phase, 'acknowledgement-unobserved'] += 1
+            continue
+        driver_counts[phase, 'acknowledged'] += 1
+        timing = driver_acknowledgements[command]
+        if timing is not None:
+            exact_sequence, delay = timing
+            driver_timing.setdefault((phase, exact_sequence), []).append(delay)
     return {'available': True, 'phases': phases, 'failures': failures,
             'toolErrors': [{'phase': phase, 'tool': tool, 'httpStatus': status, 'count': count}
                            for (phase, tool, status), count in errors.items()],
@@ -193,6 +221,9 @@ def read_steps(path):
                                     'unresolved': sum(gateway_requests.values()) - joined},
             'driver': [{'phase': phase, 'operation': operation, 'count': count}
                        for (phase, operation), count in driver_counts.items()],
+            'driverAcknowledgementTiming': [{'phase': phase, 'exactSequence': exact, 'samples': len(delays),
+                                            'minMs': min(delays), 'maxMs': max(delays)}
+                                           for (phase, exact), delays in driver_timing.items()],
             'bridgeLaunchRequests': bridge_requests, 'bridgeStartAcknowledgements': bridge_starts,
             'ownedGameWindowClose': window_close, 'malformedRows': malformed}
 
