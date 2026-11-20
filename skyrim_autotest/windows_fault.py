@@ -91,7 +91,7 @@ def _read_application_events(start, end):
     query = (f"*[System[Provider[@Name='{_PROVIDER}'] and EventID=1000 and "
              f"TimeCreated[@SystemTime >= '{low}' and @SystemTime <= '{high}']]]")
     return subprocess.run([str(windows / 'System32' / 'wevtutil.exe'), 'qe', 'Application',
-                           f'/q:{query}', '/f:xml', '/e:Events', '/rd:true', f'/c:{_MAX_EVENTS}'],
+                           f'/q:{query}', '/f:xml', '/e:Events', '/uni:true', '/rd:true', f'/c:{_MAX_EVENTS}'],
                           check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                           timeout=3, creationflags=subprocess.CREATE_NO_WINDOW).stdout
 

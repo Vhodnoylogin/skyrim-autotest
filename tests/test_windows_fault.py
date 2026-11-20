@@ -12,7 +12,7 @@ from skyrim_autotest.runner import Session
 from skyrim_autotest.windows_fault import capture_windows_fault
 
 
-GAME = {'pid': 47, 'birth': 0x01DD78FD814F3382, 'path': r'D:\Test\SkyrimVR.exe'}
+GAME = {'pid': 47, 'birth': 0x01DD78FD814F3382, 'path': r'D:\Тест\SkyrimVR.exe'}
 EXIT = {'schemaVersion': 1, 'status': 'exited', 'handleRetained': True,
         'exitCodeAvailable': True, 'identityVerified': True, 'identity': GAME,
         'expectedIdentity': GAME, 'exitCode': 0xC0000005, 'exitCodeHex': '0xC0000005',
@@ -22,7 +22,7 @@ STATE = {'game': GAME, 'gameProcessObservations': [EXIT]}
 
 def _event(record=102979, **fields):
     time = fields.pop('time', '2026-11-20T14:44:40.4056357Z')
-    data = {'AppPath': r'd:\TEST\SKYRIMVR.EXE', 'ProcessId': '0x2f',
+    data = {'AppPath': r'd:\ТЕСТ\SKYRIMVR.EXE', 'ProcessId': '0x2f',
             'ProcessCreationTime': '0x1dd78fd814f3382', 'ExceptionCode': 'c0000005',
             'ModuleName': 'SkyrimVR.exe', 'FaultingOffset': '0000000000e3ed1d',
             'ModulePath': r'D:\private-hidden\SkyrimVR.exe', **fields}
@@ -34,7 +34,7 @@ def _event(record=102979, **fields):
 
 
 def _events(*events):
-    return ('<Events>' + ''.join(events) + '</Events>').encode()
+    return ('<Events>' + ''.join(events) + '</Events>').encode('utf-16')
 
 
 class WindowsFaultTests(unittest.TestCase):
