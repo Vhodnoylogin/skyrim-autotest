@@ -13,6 +13,12 @@ raised an exception or stopped with a block. It omits tracebacks and error
 messages. A historical exception can have an unknown exception type, and older
 ledgers can omit explicit blocks entirely.
 
+`execution.driver` summarizes protocol-2 file-driver publications, releases,
+status reads and acknowledged commands by phase. A command counts as
+acknowledged at most once, with a matching command and a sequence at or above
+its recorded publication. Control frames and command identifiers stay in the
+original ledger. Driver acceptance alone does not establish game consumption.
+
 To review a run made with an earlier or frozen executor, point the current
 source at the retained run directory. This only reads the files.
 

@@ -119,6 +119,32 @@ class RunReviewTests(unittest.TestCase):
             {'phase': 'wait-devbench', 'disposition': 'blocked', 'exceptionType': 'Blocked'},
         ])
 
+    def test_file_driver_receipts_follow_commands_and_keep_frames_private(self):
+        a, b = 'a' * 32, 'b' * 32
+        def event(action, **result):
+            return {'kind': 'driver', 'action': action, 'frame': {'left': 'private-geometry'},
+                    'result': {'protocolVersion': 2, **result}}
+
+        self.append({'kind': 'phase', 'name': 'near'},
+                    event('publish', published=True, publication={'version': 2, 'command': a, 'sequence': 11}),
+                    event('status', command=a, sequence=10, acknowledgedByDriver=True),
+                    event('status', command=a, sequence=11, acknowledgedByDriver=False),
+                    {'kind': 'phase', 'name': 'far'},
+                    event('release', published=True, publication={'version': 2, 'command': b, 'sequence': 16}),
+                    event('status', command=b, sequence=15, acknowledgedByDriver=True),
+                    event('status', command=a, sequence=12, acknowledgedByDriver=True),
+                    event('status', command=a, sequence=13, acknowledgedByDriver=True))
+        review = summarize({}, self.ledger)
+        self.assertEqual(review['execution']['driver'], [
+            {'phase': 'near', 'operation': 'publish', 'count': 1},
+            {'phase': 'near', 'operation': 'status', 'count': 2},
+            {'phase': 'far', 'operation': 'release', 'count': 1},
+            {'phase': 'far', 'operation': 'status', 'count': 3},
+            {'phase': 'near', 'operation': 'acknowledged', 'count': 1},
+        ])
+        for private in (a, b, 'private-geometry'):
+            self.assertNotIn(private, json.dumps(review))
+
     def test_known_clean_run_does_not_manufacture_a_suggestion(self):
         self.append({'kind': 'mo2-launch', 'result': {'started': True, 'applied': True}})
         normal = dict(self.exit, exitCode=0, exitCodeHex='0x00000000')

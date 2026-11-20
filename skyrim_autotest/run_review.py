@@ -11,6 +11,30 @@ from .readiness_reads import _abandoned_timeout
 
 
 HTTP_ERROR = re.compile(r'^HTTP ([45][0-9]{2})\b(?: api/tool/([^:\s]+):)?')
+DRIVER_COMMAND = re.compile(r'[a-f0-9]{32}')
+
+
+def record_driver(row, phase, counts, publications, acknowledgements):
+    """Count file-driver writes and their matching acceptance receipts."""
+    result = row.get('result')
+    action = row.get('action')
+    if not isinstance(result, dict) or result.get('protocolVersion') != 2:
+        return
+    if action in ('publish', 'release') and result.get('published') is True:
+        counts[phase, action] += 1
+        publication = result.get('publication')
+        if isinstance(publication, dict) and publication.get('version') == 2:
+            command, sequence = publication.get('command'), publication.get('sequence')
+            if (isinstance(command, str) and DRIVER_COMMAND.fullmatch(command)
+                    and type(sequence) is int and 0 < sequence < 2**63):
+                publications.setdefault(command, []).append((phase, sequence))
+    elif action == 'status':
+        counts[phase, 'status'] += 1
+    command, sequence = result.get('command'), result.get('sequence')
+    if (action in ('publish', 'release', 'status') and result.get('acknowledgedByDriver') is True
+            and isinstance(command, str) and command in publications
+            and type(sequence) is int and 0 < sequence < 2**63):
+        acknowledgements[command] = max(acknowledgements.get(command, 0), sequence)
 
 
 def provider_timeout_body(tool, error):
@@ -88,6 +112,9 @@ def read_steps(path):
     resolved_gateways = set()
     dispatched_timeouts = 0
     direct_abandonments = 0
+    driver_counts = Counter()
+    driver_publications = {}
+    driver_acknowledgements = {}
     try:
         with path.open(encoding='utf-8') as stream:
             for line in stream:
@@ -143,13 +170,18 @@ def read_steps(path):
                     response = row['result']
                     if response.get('started') is True and response.get('applied') is not False:
                         bridge_starts += 1
+                if kind == 'driver':
+                    record_driver(row, phase, driver_counts, driver_publications, driver_acknowledgements)
                 if kind == 'owned-game-window-close' and type(row.get('requested')) is bool and type(row.get('accepted')) is bool:
                     window_close.append({'requested': row['requested'], 'accepted': row['accepted']})
     except (OSError, UnicodeError):
         return {'available': False, 'phases': [], 'failures': None, 'toolErrors': [], 'bridgeLaunchRequests': None,
                 'bridgeStartAcknowledgements': None, 'ownedGameWindowClose': None, 'malformedRows': None,
-                'taskQueue': None, 'abandonedStartupReads': None, 'gatewayDispositions': None}
+                'taskQueue': None, 'abandonedStartupReads': None, 'gatewayDispositions': None, 'driver': None}
     joined = sum(gateway_requests[key] == 1 for key in resolved_gateways if key is not None)
+    for command, writes in driver_publications.items():
+        if len(writes) == 1 and driver_acknowledgements.get(command, 0) >= writes[0][1]:
+            driver_counts[writes[0][0], 'acknowledged'] += 1
     return {'available': True, 'phases': phases, 'failures': failures,
             'toolErrors': [{'phase': phase, 'tool': tool, 'httpStatus': status, 'count': count}
                            for (phase, tool, status), count in errors.items()],
@@ -159,6 +191,8 @@ def read_steps(path):
             'gatewayDispositions': {'abandonedBeforeStart': direct_abandonments + joined,
                                     'dispatchedCompletionUnknown': dispatched_timeouts,
                                     'unresolved': sum(gateway_requests.values()) - joined},
+            'driver': [{'phase': phase, 'operation': operation, 'count': count}
+                       for (phase, operation), count in driver_counts.items()],
             'bridgeLaunchRequests': bridge_requests, 'bridgeStartAcknowledgements': bridge_starts,
             'ownedGameWindowClose': window_close, 'malformedRows': malformed}
 
