@@ -99,6 +99,26 @@ class RunReviewTests(unittest.TestCase):
         self.assertEqual({row['area'] for row in review['improvementCandidates']}, {'transport', 'launch'})
         self.assertNotIn('private-', json.dumps(review))
 
+    def test_execution_failure_retains_phase_without_trace_or_cleanup(self):
+        self.append({'kind': 'phase', 'name': 'subject-measurement'},
+                    {'kind': 'exception', 'exceptionType': 'RuntimeError', 'trace': 'private-result'},
+                    {'kind': 'phase', 'name': 'stop-and-restore'},
+                    {'kind': 'cleanup-error', 'trace': 'private-cleanup'})
+        review = summarize({'result': 'failed', 'scenarioResult': 'failed', 'restored': True}, self.ledger)
+        self.assertEqual(review['execution']['failures'], [
+            {'phase': 'subject-measurement', 'disposition': 'failed', 'exceptionType': 'RuntimeError'},
+        ])
+        self.assertNotIn('private-', json.dumps(review))
+
+    def test_old_exception_and_new_block_keep_independent_observations(self):
+        self.append({'kind': 'exception', 'trace': 'private-result'},
+                    {'kind': 'phase', 'name': 'wait-devbench'},
+                    {'kind': 'execution-blocked', 'exceptionType': 'Blocked'})
+        self.assertEqual(summarize({}, self.ledger)['execution']['failures'], [
+            {'phase': None, 'disposition': 'failed', 'exceptionType': None},
+            {'phase': 'wait-devbench', 'disposition': 'blocked', 'exceptionType': 'Blocked'},
+        ])
+
     def test_known_clean_run_does_not_manufacture_a_suggestion(self):
         self.append({'kind': 'mo2-launch', 'result': {'started': True, 'applied': True}})
         normal = dict(self.exit, exitCode=0, exitCodeHex='0x00000000')

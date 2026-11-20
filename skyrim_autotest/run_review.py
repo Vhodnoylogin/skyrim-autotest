@@ -75,6 +75,7 @@ def graceful_exit_summary(state):
 def read_steps(path):
     """Summarize the retained tool log without copying arguments or response bodies."""
     phases = []
+    failures = []
     errors = Counter()
     malformed = 0
     bridge_requests = 0
@@ -105,6 +106,14 @@ def read_steps(path):
                 if kind == 'phase' and isinstance(row.get('name'), str):
                     phases.append(row['name'])
                     waiting_for_queue = False
+                if kind in ('exception', 'execution-blocked'):
+                    exception_type = row.get('exceptionType')
+                    failures.append({
+                        'phase': phase,
+                        'disposition': 'blocked' if kind == 'execution-blocked' else 'failed',
+                        'exceptionType': exception_type if isinstance(exception_type, str)
+                        and exception_type.isidentifier() else None,
+                    })
                 if kind == 'task-queue-not-ready':
                     task_queue['waitingObservations'] += 1
                     waiting_for_queue = True
@@ -137,11 +146,11 @@ def read_steps(path):
                 if kind == 'owned-game-window-close' and type(row.get('requested')) is bool and type(row.get('accepted')) is bool:
                     window_close.append({'requested': row['requested'], 'accepted': row['accepted']})
     except (OSError, UnicodeError):
-        return {'available': False, 'phases': [], 'toolErrors': [], 'bridgeLaunchRequests': None,
+        return {'available': False, 'phases': [], 'failures': None, 'toolErrors': [], 'bridgeLaunchRequests': None,
                 'bridgeStartAcknowledgements': None, 'ownedGameWindowClose': None, 'malformedRows': None,
                 'taskQueue': None, 'abandonedStartupReads': None, 'gatewayDispositions': None}
     joined = sum(gateway_requests[key] == 1 for key in resolved_gateways if key is not None)
-    return {'available': True, 'phases': phases,
+    return {'available': True, 'phases': phases, 'failures': failures,
             'toolErrors': [{'phase': phase, 'tool': tool, 'httpStatus': status, 'count': count}
                            for (phase, tool, status), count in errors.items()],
             'taskQueue': task_queue,

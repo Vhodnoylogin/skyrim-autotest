@@ -1919,9 +1919,10 @@ def run(profile, scenario_file, fault=None, restart_idle_mo2=False, order=None, 
             session.state['result'] = 'passed'
         except Blocked as e:
             session.state.update(result='blocked', reason=str(e))
+            session.log('execution-blocked', exceptionType=type(e).__name__)
         except Exception as e:
             session.state.update(result='failed', reason=str(e))
-            session.log('exception', trace=traceback.format_exc())
+            session.log('exception', exceptionType=type(e).__name__, trace=traceback.format_exc())
         finally:
             if scenario_started and 'result' in session.state:
                 session.state['scenarioResult'] = session.state['result']

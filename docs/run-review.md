@@ -8,6 +8,10 @@ The original logs remain the evidence for mod behavior and thread ownership.
 The `failedChecks` list shows failed assertion names in execution order. The
 original ledger retains their reason and observed values. A process exit or
 cleanup failure is reported through its own fields.
+The `execution.failures` list retains the last recorded phase when execution
+raised an exception or stopped with a block. It omits tracebacks and error
+messages. A historical exception can have an unknown exception type, and older
+ledgers can omit explicit blocks entirely.
 
 To review a run made with an earlier or frozen executor, point the current
 source at the retained run directory. This only reads the files.
