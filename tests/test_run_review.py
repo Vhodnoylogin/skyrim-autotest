@@ -39,6 +39,18 @@ class RunReviewTests(unittest.TestCase):
         self.assertEqual(review['checks'], {'passed': 1})
         self.assertEqual([row['area'] for row in review['improvementCandidates']], ['shutdown'])
 
+    def test_failed_checks_identify_scenario_assertions_without_raw_observations(self):
+        self.ledger.touch()
+        review = summarize({'checks': [
+            {'name': 'Relocation', 'result': 'failed', 'observation': 'raw-data'},
+            {'name': 'World ready', 'result': 'passed'},
+            {'result': 'failed'},
+            {'name': 'Provider response', 'result': 'failed', 'reason': 'raw-reason'},
+        ]}, self.ledger)
+        self.assertEqual(review['checks'], {'failed': 3, 'passed': 1})
+        self.assertEqual(review['failedChecks'], ['Relocation', 'Provider response'])
+        self.assertNotIn('raw-', json.dumps(review))
+
     def test_shutdown_summary_distinguishes_queue_receipt_window_close_and_exit(self):
         self.append({'kind': 'owned-game-window-close', 'requested': True, 'accepted': True,
                      'private': 'window details'})

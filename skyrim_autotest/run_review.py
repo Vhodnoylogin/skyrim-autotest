@@ -159,8 +159,11 @@ def summarize(state, steps_path):
     log = read_steps(Path(steps_path))
     termination = terminal_exit_observation(state.get('gameProcessObservations'), state.get('game'))
     collected_faults = collected_game_faults(state, Path(steps_path).parent, termination)
-    checks = Counter(row['result'] for row in (state.get('checks') or ())
-                     if isinstance(row, dict) and isinstance(row.get('result'), str))
+    check_rows = [row for row in (state.get('checks') or ())
+                  if isinstance(row, dict) and isinstance(row.get('result'), str)]
+    checks = Counter(row['result'] for row in check_rows)
+    failed_checks = [row['name'] for row in check_rows if row['result'] == 'failed'
+                     and isinstance(row.get('name'), str) and row['name']]
     collection = state.get('collectionComplete')
     restored = state.get('restored')
     improvements = []
@@ -186,6 +189,7 @@ def summarize(state, steps_path):
             'gameEdition': state.get('configuration', {}).get('game_edition', 'vr'),
             'result': state.get('result'), 'scenarioResult': state.get('scenarioResult'),
             'gameIdentityRecorded': bool(state.get('game')), 'checks': dict(checks),
+            'failedChecks': failed_checks,
             'nativeExit': None if termination is None else {
                 'code': termination['exitCode'], 'hex': termination['exitCodeHex'],
                 'stage': termination.get('stage'),

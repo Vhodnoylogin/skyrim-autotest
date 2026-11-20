@@ -5,6 +5,9 @@ results as an owned session runs. Its terminal report writes `run-review.json`
 alongside the original `result.json` and `steps.jsonl`. The review separates
 scenario checks, the exact native exit when available, collection and restoration.
 The original logs remain the evidence for mod behavior and thread ownership.
+The `failedChecks` list shows failed assertion names in execution order. The
+original ledger retains their reason and observed values. A process exit or
+cleanup failure is reported through its own fields.
 
 To review a run made with an earlier or frozen executor, point the current
 source at the retained run directory. This only reads the files.
