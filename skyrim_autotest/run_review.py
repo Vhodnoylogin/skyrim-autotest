@@ -8,7 +8,7 @@ import sys
 from .exit_projection import terminal_exit_observation
 
 
-HTTP_ERROR = re.compile(r'^HTTP ([45][0-9]{2})\b')
+HTTP_ERROR = re.compile(r'^HTTP ([45][0-9]{2})\b(?: api/tool/([^:\s]+):)?')
 
 
 def read_steps(path):
@@ -57,7 +57,7 @@ def read_steps(path):
                     http = HTTP_ERROR.match(error) if isinstance(error, str) else None
                     status = int(http.group(1)) if http else None
                     errors[(phase, row['tool'], status)] += 1
-                    if status in (502, 503, 504):
+                    if status in (502, 503, 504) and http.group(2) in (None, row['tool']):
                         gateway_requests[correlation] += 1
                 if kind == 'mo2-launch' and isinstance(row.get('result'), dict):
                     bridge_requests += 1

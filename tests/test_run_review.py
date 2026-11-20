@@ -92,6 +92,14 @@ class RunReviewTests(unittest.TestCase):
                     {'kind': 'common-readiness-abandoned-read', 'tool': 'gfx', 'clientRequestId': 'a'})
         self.assertEqual(summarize({}, self.ledger)['improvementCandidates'], [])
 
+    def test_forwarded_platform_error_does_not_count_as_an_extra_gateway_request(self):
+        error = 'HTTP 504 api/tool/inspect: engine busy'
+        self.append({'kind': 'tool-error', 'tool': 'inspect', 'error': error, 'clientRequestId': 'leaf'},
+                    {'kind': 'tool-error', 'tool': 'platform', 'error': error})
+        log = summarize({}, self.ledger)['execution']
+        self.assertEqual(len(log['toolErrors']), 2)
+        self.assertEqual(log['gatewayDispositions'], {'abandonedBeforeStart': 0, 'unresolved': 1})
+
     def test_missing_or_damaged_log_and_foreign_exit_remain_distinct(self):
         passport = {'game': dict(self.game, pid=99), 'gameProcessObservations': [self.exit]}
         missing = summarize(passport, self.ledger)
