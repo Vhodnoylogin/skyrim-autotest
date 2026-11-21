@@ -13,6 +13,13 @@ raised an exception or stopped with a block. It omits tracebacks and error
 messages. A historical exception can have an unknown exception type, and older
 ledgers can omit explicit blocks entirely.
 
+A scenario can log `scenario-gate` with `name`, `disposition`, `reasonCode` and
+Boolean `required`. The name and reason use short lowercase codes, and the
+disposition is `passed`, `failed`, `blocked` or `unavailable`. The review lists
+these records with the current phase in `execution.scenarioGates`. It retains
+the scenario's reported decision without copying diagnostic payloads or using
+the decision to change the recorded scenario result, native exit or restoration.
+
 `execution.driver` summarizes protocol-2 file-driver publications, releases,
 status reads and acknowledged commands by phase. A command counts as
 acknowledged at most once, with a matching command and a sequence at or above

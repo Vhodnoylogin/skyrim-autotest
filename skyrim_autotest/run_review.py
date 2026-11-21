@@ -14,6 +14,7 @@ from .readiness_reads import _abandoned_timeout
 
 HTTP_ERROR = re.compile(r'^HTTP ([45][0-9]{2})\b(?: api/tool/([^:\s]+):)?')
 DRIVER_COMMAND = re.compile(r'[a-f0-9]{32}')
+SCENARIO_GATE_CODE = re.compile(r'[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*')
 
 
 def driver_tick(value):
@@ -66,6 +67,16 @@ def native_sampling_window(row, phase):
         return None
     return {'phase': phase, 'name': name, **measured,
             'meetsDeclaredTiming': samples >= 2 and span >= minimum and 0 < gap <= maximum}
+
+
+def scenario_gate(row, phase):
+    name, code = row.get('name'), row.get('reasonCode')
+    disposition, required = row.get('disposition'), row.get('required')
+    if (disposition not in ('passed', 'blocked', 'failed', 'unavailable') or type(required) is not bool
+            or not all(isinstance(value, str) and len(value) <= 96 and SCENARIO_GATE_CODE.fullmatch(value)
+                       for value in (name, code))):
+        return None
+    return {'phase': phase, 'name': name, 'disposition': disposition, 'reasonCode': code, 'required': required}
 
 
 def provider_timeout_body(tool, error):
@@ -214,6 +225,7 @@ def read_steps(path, *, game=None, first_exit_at=None):
     driver_publications = {}
     driver_acknowledgements = {}
     sampling_windows = []
+    scenario_gates = []
     try:
         with path.open(encoding='utf-8') as stream:
             for line in stream:
@@ -282,6 +294,10 @@ def read_steps(path, *, game=None, first_exit_at=None):
                     window = native_sampling_window(row, phase)
                     if window is not None:
                         sampling_windows.append(window)
+                if kind == 'scenario-gate':
+                    gate = scenario_gate(row, phase)
+                    if gate is not None:
+                        scenario_gates.append(gate)
                 if (phase == 'stop-and-restore' and kind in ('tool', 'tool-error')
                         and row.get('tool') == 'console'
                         and row.get('args') == {'action': 'exec', 'command': 'qqq'}):
@@ -299,7 +315,8 @@ def read_steps(path, *, game=None, first_exit_at=None):
                 'bridgeStartAcknowledgements': None, 'ownedGameWindowClose': None, 'malformedRows': None,
                 'bridgeGameObservations': None, 'shutdownConsoleRequests': None,
                 'taskQueue': None, 'abandonedStartupReads': None, 'gatewayDispositions': None,
-                'driver': None, 'driverAcknowledgementTiming': None, 'nativeSamplingWindows': None}
+                'driver': None, 'driverAcknowledgementTiming': None, 'nativeSamplingWindows': None,
+                'scenarioGates': None}
     joined = sum(gateway_requests[key] == 1 for key in resolved_gateways if key is not None)
     driver_timing = {}
     for command, writes in driver_publications.items():
@@ -331,6 +348,7 @@ def read_steps(path, *, game=None, first_exit_at=None):
                                             'minMs': min(delays), 'maxMs': max(delays)}
                                            for (phase, exact), delays in driver_timing.items()],
             'nativeSamplingWindows': sampling_windows,
+            'scenarioGates': scenario_gates,
             'bridgeLaunchRequests': bridge_requests, 'bridgeStartAcknowledgements': bridge_starts,
             'bridgeGameObservations': bridge_observations,
             'shutdownConsoleRequests': console_quit,

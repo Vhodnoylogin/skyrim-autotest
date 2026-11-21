@@ -151,6 +151,39 @@ class RunReviewTests(unittest.TestCase):
             {'phase': 'wait-devbench', 'disposition': 'blocked', 'exceptionType': 'Blocked'},
         ])
 
+    def test_scenario_gate_keeps_reason_and_phase_without_changing_any_verdict(self):
+        gate = {'kind': 'scenario-gate', 'name': 'active-force-admission', 'disposition': 'blocked',
+                'reasonCode': 'passive-baseline-not-stationary', 'required': True}
+        self.append({'kind': 'phase', 'name': 'subject'}, {**gate, 'raw': 'private-data'},
+                    {'kind': 'phase', 'name': 'stop-and-restore'},
+                    {**gate, 'name': 'retirement', 'disposition': 'passed', 'reasonCode': 'retired', 'required': False})
+        clean = {**self.exit, 'exitCode': 0, 'exitCodeHex': '0x00000000'}
+        state = {'game': self.game, 'result': 'failed', 'scenarioResult': 'failed', 'restored': True,
+                 'collectionComplete': True, 'gameProcessObservations': [clean]}
+        review = summarize(state, self.ledger)
+        self.assertEqual(review['execution']['scenarioGates'], [
+            {'phase': 'subject', 'name': 'active-force-admission', 'disposition': 'blocked',
+             'reasonCode': 'passive-baseline-not-stationary', 'required': True},
+            {'phase': 'stop-and-restore', 'name': 'retirement', 'disposition': 'passed',
+             'reasonCode': 'retired', 'required': False},
+        ])
+        self.assertEqual((review['result'], review['scenarioResult'], review['restored']), ('failed', 'failed', True))
+        self.assertEqual(review['nativeExit']['code'], 0)
+        self.assertIsNone(summarize({'result': 'failed'}, self.ledger)['scenarioResult'])
+        self.assertNotIn('private-data', json.dumps(review))
+
+    def test_scenario_gate_requires_typed_disposition_reason_and_required_flag(self):
+        gate = {'kind': 'scenario-gate', 'name': 'admission', 'disposition': 'unavailable',
+                'reasonCode': 'missing-observation', 'required': False}
+        self.append(gate, *({**gate, **invalid} for invalid in (
+            {'required': 1}, {'disposition': 'unexpected'}, {'reasonCode': 'detail with spaces'},
+            {'reasonCode': None}, {'name': ''}, {'name': 'a' * 97},
+        )))
+        self.assertEqual(summarize({}, self.ledger)['execution']['scenarioGates'], [
+            {'phase': None, 'name': 'admission', 'disposition': 'unavailable',
+             'reasonCode': 'missing-observation', 'required': False},
+        ])
+
     def test_file_driver_receipts_follow_commands_and_keep_frames_private(self):
         a, b = 'a' * 32, 'b' * 32
         def event(action, **result):
@@ -420,6 +453,7 @@ class RunReviewTests(unittest.TestCase):
         passport = {'game': dict(self.game, pid=99), 'gameProcessObservations': [self.exit]}
         missing = summarize(passport, self.ledger)
         self.assertFalse(missing['execution']['available'])
+        self.assertIsNone(missing['execution']['scenarioGates'])
         self.assertIsNone(missing['execution']['bridgeGameObservations'])
         self.assertIsNone(missing['execution']['shutdownConsoleRequests'])
         self.assertIsNone(missing['nativeExit'])
