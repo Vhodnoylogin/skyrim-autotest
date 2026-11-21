@@ -102,3 +102,10 @@ cleanup, including archived runs without a saved grace record. The counters
 distinguish a positive queue receipt, an explicit negative receipt and an
 unknown result. A missing step ledger yields null. Native exit and restoration
 continue to come from their own observations.
+
+`execution.bridgeGameObservations` keeps observations linked to the launch's
+Bridge boot and record and to the exact game child. Launch operation state and
+the Bridge's reported game state occupy separate fields. The signed time offset
+compares when the Bridge observation was logged with the first verified native
+exit observation. It measures the order of observations. The native exit code
+remains independent of the Bridge report.

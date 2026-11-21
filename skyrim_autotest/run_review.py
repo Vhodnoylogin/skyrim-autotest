@@ -1,6 +1,8 @@
 """Collect bounded per-run executor evidence and suggest follow-up from it."""
 from collections import Counter
+from datetime import datetime
 import json
+import ntpath
 from pathlib import Path
 import re
 import sys
@@ -125,7 +127,71 @@ def graceful_exit_summary(state):
             'observedGone': gone if type(gone) is bool else None, 'waitObservation': observation}
 
 
-def read_steps(path):
+def first_exit_epoch(termination):
+    if termination is not None:
+        try:
+            first = datetime.fromisoformat(termination.get('firstExitObservedAtUtc'))
+            last = datetime.fromisoformat(termination.get('observedAtUtc'))
+            if first.tzinfo is not None and last.tzinfo is not None and first <= last:
+                return first.timestamp()
+        except (TypeError, ValueError, OverflowError, OSError):
+            pass
+    return None
+
+
+def bridge_launch_key(boot, record):
+    if isinstance(boot, str) and boot and isinstance(record, str) and record.startswith(boot + ':'):
+        return boot, record
+    return None
+
+
+def bridge_game_observation(row, phase, launches, game, first_exit_at):
+    """Project the recorded Bridge state independently of the native exit result."""
+    observation = row.get('observation')
+    if not isinstance(game, dict) or not isinstance(observation, dict) or observation.get('game') != game:
+        return None
+    operation = observation.get('operation')
+    if not isinstance(operation, dict) or operation.get('route') != '/run':
+        return None
+    boot, record = observation.get('serverBootId'), operation.get('id')
+    launch = operation.get('launch')
+    if (bridge_launch_key(boot, record) not in launches or operation.get('serverBootId') != boot
+            or not isinstance(launch, dict) or launch.get('operationRecordId') != record):
+        return None
+    children = launch.get('gameChildren')
+    if not isinstance(children, list) or not isinstance(game.get('path'), str):
+        return None
+    matches = [child for child in children if isinstance(child, dict)
+               and type(child.get('pid')) is int and child['pid'] == game.get('pid')
+               and type(child.get('creationTime')) is int and child['creationTime'] == game.get('birth')
+               and isinstance(child.get('path'), str) and ntpath.normcase(child['path']) == ntpath.normcase(game['path'])]
+    if len(matches) != 1:
+        return None
+    child = matches[0]
+    status, code = launch.get('gameExitStatus'), launch.get('gameExit')
+    if status == 'observed':
+        if (len(children) != 1 or child.get('alive') is not False or launch.get('gameAlive') is not False
+                or type(code) is not int or not 0 <= code <= 0xffffffff
+                or type(child.get('exit')) is not int or child['exit'] != code):
+            return None
+    elif status == 'running':
+        if (child.get('alive') is not True or launch.get('gameAlive') is not True
+                or child.get('exit') is not None or code is not None):
+            return None
+    elif status != 'unknown' or code is not None:
+        return None
+    op_state, terminal = operation.get('state'), operation.get('terminal')
+    if op_state not in ('accepted', 'running', 'succeeded', 'refused', 'failed') or type(terminal) is not bool:
+        return None
+    at = row.get('at')
+    offset = None
+    if first_exit_at is not None and type(at) in (int, float) and 0 <= at < 2**53:
+        offset = round(1000 * (at - first_exit_at))
+    return {'phase': phase, 'operationState': op_state, 'operationTerminal': terminal,
+            'gameExitStatus': status, 'gameExitCode': code, 'msFromFirstNativeExitObservation': offset}
+
+
+def read_steps(path, *, game=None, first_exit_at=None):
     """Summarize the retained tool log without copying arguments or response bodies."""
     phases = []
     failures = []
@@ -133,6 +199,8 @@ def read_steps(path):
     malformed = 0
     bridge_requests = 0
     bridge_starts = 0
+    bridge_launches = set()
+    bridge_observations = []
     window_close = []
     console_quit = {'acknowledged': 0, 'notQueued': 0, 'unknown': 0}
     task_queue = {'waitingObservations': 0, 'readyObservations': 0, 'recoveredWaits': 0}
@@ -201,6 +269,13 @@ def read_steps(path):
                     response = row['result']
                     if response.get('started') is True and response.get('applied') is not False:
                         bridge_starts += 1
+                        key = bridge_launch_key(response.get('serverBootId'), response.get('operationRecordId'))
+                        if key is not None:
+                            bridge_launches.add(key)
+                if kind in ('mo2-bridge-observation', 'private-vr-bridge-observation'):
+                    observation = bridge_game_observation(row, phase, bridge_launches, game, first_exit_at)
+                    if observation is not None:
+                        bridge_observations.append(observation)
                 if kind == 'driver':
                     record_driver(row, phase, driver_counts, driver_publications, driver_acknowledgements)
                 if kind == 'native-sampling-window':
@@ -222,7 +297,7 @@ def read_steps(path):
     except (OSError, UnicodeError):
         return {'available': False, 'phases': [], 'failures': None, 'toolErrors': [], 'bridgeLaunchRequests': None,
                 'bridgeStartAcknowledgements': None, 'ownedGameWindowClose': None, 'malformedRows': None,
-                'shutdownConsoleRequests': None,
+                'bridgeGameObservations': None, 'shutdownConsoleRequests': None,
                 'taskQueue': None, 'abandonedStartupReads': None, 'gatewayDispositions': None,
                 'driver': None, 'driverAcknowledgementTiming': None, 'nativeSamplingWindows': None}
     joined = sum(gateway_requests[key] == 1 for key in resolved_gateways if key is not None)
@@ -257,14 +332,16 @@ def read_steps(path):
                                            for (phase, exact), delays in driver_timing.items()],
             'nativeSamplingWindows': sampling_windows,
             'bridgeLaunchRequests': bridge_requests, 'bridgeStartAcknowledgements': bridge_starts,
+            'bridgeGameObservations': bridge_observations,
             'shutdownConsoleRequests': console_quit,
             'ownedGameWindowClose': window_close, 'malformedRows': malformed}
 
 
 def summarize(state, steps_path):
     """Keep scenario, OS exit and restoration facts visible in one terminal review."""
-    log = read_steps(Path(steps_path))
-    termination = terminal_exit_observation(state.get('gameProcessObservations'), state.get('game'))
+    game = state.get('game')
+    termination = terminal_exit_observation(state.get('gameProcessObservations'), game)
+    log = read_steps(Path(steps_path), game=game, first_exit_at=first_exit_epoch(termination))
     collected_faults = collected_game_faults(state, Path(steps_path).parent, termination)
     check_rows = [row for row in (state.get('checks') or ())
                   if isinstance(row, dict) and isinstance(row.get('result'), str)]

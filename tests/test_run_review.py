@@ -218,6 +218,68 @@ class RunReviewTests(unittest.TestCase):
         self.assertEqual(review['execution']['bridgeStartAcknowledgements'], 1)
         self.assertEqual(review['improvementCandidates'], [])
 
+    def bridge_receipts(self):
+        boot, launch_id = 'private-boot', 'private-boot:private-launch'
+        start = {'kind': 'mo2-launch', 'result': {'started': True, 'applied': True,
+                                                 'serverBootId': boot, 'operationRecordId': launch_id}}
+        child = {'pid': self.game['pid'], 'creationTime': self.game['birth'], 'path': self.game['path'],
+                 'alive': True, 'exit': None}
+        launch = {'operationRecordId': launch_id, 'gameChildren': [child],
+                  'gameAlive': True, 'gameExitStatus': 'running', 'gameExit': None}
+        operation = {'route': '/run', 'id': launch_id, 'serverBootId': boot,
+                     'state': 'succeeded', 'terminal': True, 'launch': launch}
+        observation = {'kind': 'private-vr-bridge-observation', 'at': 1795250649.8944087,
+                       'location': 'game-ended-manager-still-available',
+                       'observation': {'serverBootId': boot, 'game': self.game, 'operation': operation}}
+        return start, observation
+
+    def test_bridge_child_status_and_clock_are_independent_of_launch_and_native_exit(self):
+        start, running = self.bridge_receipts()
+        self.append(start, {'kind': 'phase', 'name': 'stop-and-restore'}, running)
+        exit_row = {**self.exit, 'firstExitObservedAtUtc': '2026-11-21T08:44:12.514Z',
+                    'observedAtUtc': '2026-11-21T08:44:22.722Z'}
+        state = {'game': self.game, 'gameProcessObservations': [exit_row]}
+        review = summarize(state, self.ledger)
+        expected = {'phase': 'stop-and-restore', 'operationState': 'succeeded', 'operationTerminal': True,
+                    'gameExitStatus': 'running', 'gameExitCode': None, 'msFromFirstNativeExitObservation': -2620}
+        self.assertEqual(review['execution']['bridgeGameObservations'], [expected])
+        self.assertEqual(review['nativeExit']['code'], 0xC0000005)
+        self.assertNotIn('private-', json.dumps(review))
+        self.assertNotIn(running['location'], json.dumps(review))
+        self.assertEqual(review['improvementCandidates'][0]['trigger'], 'verified-nonzero-exit')
+
+        running.update(kind='mo2-bridge-observation', at=1795250653.014)
+        launch = running['observation']['operation']['launch']
+        launch.update(gameExitStatus='observed', gameAlive=False, gameExit=0)
+        launch['gameChildren'][0].update(alive=False, exit=0)
+        self.append(running)
+        review = summarize(state, self.ledger)
+        self.assertEqual(review['execution']['bridgeGameObservations'], [expected, {
+            **expected, 'gameExitStatus': 'observed', 'gameExitCode': 0, 'msFromFirstNativeExitObservation': 500}])
+        self.assertEqual(review['nativeExit']['code'], 0xC0000005)
+        observations = summarize({'game': self.game}, self.ledger)['execution']['bridgeGameObservations']
+        self.assertIsNone(observations[0]['msFromFirstNativeExitObservation'])
+
+    def test_bridge_child_projection_requires_linked_launch_and_exact_child(self):
+        start, row = self.bridge_receipts()
+        self.append(row, start)
+        observation = row['observation']
+        operation, boot = observation['operation'], observation['serverBootId']
+        observation['serverBootId'] = 'other-boot'
+        self.append(row)
+        observation['serverBootId'] = boot
+        launch = operation['launch']
+        child = launch['gameChildren'][0]
+        for key, invalid in (('pid', self.game['pid'] + 1), ('creationTime', float(self.game['birth'])),
+                             ('path', 'Other.exe'), ('alive', 1)):
+            original = child[key]
+            child[key] = invalid
+            self.append(row)
+            child[key] = original
+        launch['gameChildren'].append(child)
+        self.append(row)
+        self.assertEqual(summarize({'game': self.game}, self.ledger)['execution']['bridgeGameObservations'], [])
+
     def test_native_window_retains_producer_shortfall_and_gap_independently(self):
         result = {'kind': 'native-sampling-window', 'name': 'contact-dwell', 'samples': 8,
                   'producerSpanNs': 1_499_969_400, 'minSpanNs': 1_500_000_000,
@@ -358,6 +420,7 @@ class RunReviewTests(unittest.TestCase):
         passport = {'game': dict(self.game, pid=99), 'gameProcessObservations': [self.exit]}
         missing = summarize(passport, self.ledger)
         self.assertFalse(missing['execution']['available'])
+        self.assertIsNone(missing['execution']['bridgeGameObservations'])
         self.assertIsNone(missing['execution']['shutdownConsoleRequests'])
         self.assertIsNone(missing['nativeExit'])
         self.ledger.write_text('invalid\n42\n', encoding='utf-8')
