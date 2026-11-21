@@ -79,6 +79,29 @@ def scenario_gate(row, phase):
     return {'phase': phase, 'name': name, 'disposition': disposition, 'reasonCode': code, 'required': required}
 
 
+def native_papyrus_refusal(args, result):
+    """Recognize a provider refusal inside a successfully returned typed call."""
+    if (not isinstance(args, dict) or args.get('action') != 'call'
+            or not isinstance(result, dict) or result.get('called') is not True
+            or result.get('returnedType') != 'string' or result.get('error') or result.get('isError')):
+        return None
+    script, function = args.get('script'), args.get('function')
+    if not all(isinstance(name, str) and len(name) <= 96 and name.isidentifier() for name in (script, function)):
+        return None
+    raw = result.get('returned')
+    if not isinstance(raw, str) or len(raw) > 16384 or not raw.lstrip().startswith('{'):
+        return None
+    try:
+        reply = json.loads(raw)
+    except (json.JSONDecodeError, RecursionError):
+        return None
+    version, reason = reply.get('schemaVersion'), reply.get('reason')
+    if (reply.get('status') == 'refused' and type(version) is int and version > 0
+            and isinstance(reason, str) and len(reason) <= 96 and SCENARIO_GATE_CODE.fullmatch(reason)):
+        return script, function, reason
+    return None
+
+
 def world_observer_availability(row, phase, counts):
     args, result = row.get('args'), row.get('result')
     if (not isinstance(args, dict) or args.get('kind') != 'world_observer'
@@ -283,6 +306,7 @@ def read_steps(path, *, game=None, first_exit_at=None):
     driver_acknowledgements = {}
     sampling_windows = []
     scenario_gates = []
+    native_refusals = Counter()
     observer_availability = Counter()
     capture_receipts = []
     capture_operation_intervals = []
@@ -358,6 +382,10 @@ def read_steps(path, *, game=None, first_exit_at=None):
                     gate = scenario_gate(row, phase)
                     if gate is not None:
                         scenario_gates.append(gate)
+                if kind == 'tool' and row.get('tool') == 'papyrus':
+                    refusal = native_papyrus_refusal(row.get('args'), row.get('result'))
+                    if refusal is not None:
+                        native_refusals[(phase, *refusal)] += 1
                 if kind == 'tool' and row.get('tool') == 'inspect':
                     world_observer_availability(row, phase, observer_availability)
                 if kind == 'tool' and row.get('tool') == 'capture':
@@ -386,7 +414,8 @@ def read_steps(path, *, game=None, first_exit_at=None):
                 'bridgeGameObservations': None, 'shutdownConsoleRequests': None,
                 'taskQueue': None, 'abandonedStartupReads': None, 'gatewayDispositions': None,
                 'driver': None, 'driverAcknowledgementTiming': None, 'nativeSamplingWindows': None,
-                'scenarioGates': None, 'worldObserverAvailability': None, 'captureReceipts': None,
+                'scenarioGates': None, 'nativePapyrusRefusals': None,
+                'worldObserverAvailability': None, 'captureReceipts': None,
                 'captureOperationIntervals': None}
     joined = sum(gateway_requests[key] == 1 for key in resolved_gateways if key is not None)
     driver_timing = {}
@@ -420,6 +449,9 @@ def read_steps(path, *, game=None, first_exit_at=None):
                                            for (phase, exact), delays in driver_timing.items()],
             'nativeSamplingWindows': sampling_windows,
             'scenarioGates': scenario_gates,
+            'nativePapyrusRefusals': [{'phase': phase, 'script': script, 'function': function,
+                                      'reasonCode': reason, 'count': count}
+                                     for (phase, script, function, reason), count in native_refusals.items()],
             'worldObserverAvailability': [
                 {'phase': phase, 'domain': domain, 'status': status, 'requested': requested, 'count': count}
                 for (phase, domain, status, requested), count in observer_availability.items()],
@@ -460,6 +492,9 @@ def summarize(state, steps_path):
     if log['available'] and log['malformedRows']:
         improvements.append({'area': 'evidence', 'trigger': 'malformed-log-row',
                              'suggestion': 'Check the steps log writer and retain the incomplete raw log.'})
+    if log['nativePapyrusRefusals']:
+        improvements.append({'area': 'native-provider', 'trigger': 'typed-papyrus-refusal',
+                             'suggestion': 'Use the provider reason code when diagnosing the failed scenario phase.'})
     if log['available'] and any(not row['meetsDeclaredTiming'] for row in log['nativeSamplingWindows']):
         improvements.append({'area': 'sampling', 'trigger': 'declared-native-window-timing-missed',
                              'suggestion': 'Use the source-clock span and largest gap to review sampling cadence.'})

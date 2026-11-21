@@ -51,6 +51,29 @@ class RunReviewTests(unittest.TestCase):
         self.assertEqual(review['failedChecks'], ['Relocation', 'Provider response'])
         self.assertNotIn('raw-', json.dumps(review))
 
+    def test_recognizes_typed_papyrus_refusal_without_copying_provider_payload(self):
+        request = {'kind': 'tool', 'tool': 'papyrus',
+                   'args': {'action': 'call', 'script': 'DiagnosticWitness', 'function': 'Read',
+                            'args': ['private-argument']}}
+        refused = {'schemaVersion': 1, 'status': 'refused', 'reason': 'thread-mismatch', 'actor': 'private-actor'}
+
+        def row(reply, **overrides):
+            return {**request, 'result': {'called': True, 'returnedType': 'string',
+                                          'returned': json.dumps(reply), **overrides}}
+
+        self.append({'kind': 'phase', 'name': 'read-writer'}, row(refused), row(refused),
+                    row({**refused, 'status': 'collecting'}), row({**refused, 'reason': 'private prose'}),
+                    row({**refused, 'schemaVersion': True}), row(refused, called=False),
+                    row(refused, returnedType='int'), row(refused, returned='{'))
+        review = summarize({'result': 'failed', 'restored': True}, self.ledger)
+        self.assertEqual(review['execution']['nativePapyrusRefusals'], [
+            {'phase': 'read-writer', 'script': 'DiagnosticWitness', 'function': 'Read',
+             'reasonCode': 'thread-mismatch', 'count': 2},
+        ])
+        self.assertEqual(review['execution']['toolErrors'], [])
+        self.assertEqual([row['trigger'] for row in review['improvementCandidates']], ['typed-papyrus-refusal'])
+        self.assertNotIn('private', json.dumps(review))
+
     def test_shutdown_summary_distinguishes_queue_receipt_window_close_and_exit(self):
         self.append({'kind': 'owned-game-window-close', 'requested': True, 'accepted': True,
                      'private': 'window details'})

@@ -20,6 +20,13 @@ these records with the current phase in `execution.scenarioGates`. It retains
 the scenario's reported decision without copying diagnostic payloads or using
 the decision to change the recorded scenario result, native exit or restoration.
 
+`execution.nativePapyrusRefusals` counts completed typed Papyrus calls whose
+versioned JSON return explicitly reports `status: "refused"` and a short
+`reason` code. It retains the phase, script, function and reason code without
+copying call arguments or the native response payload. Normal polling and
+transport errors retain their existing dispositions. The scenario verdict
+still comes from the scenario.
+
 `execution.worldObserverAvailability` counts the declared physics and render
 statuses of successful schema-1 World Observer snapshots by phase. The
 `requested` flag distinguishes a requested physics observation from the
