@@ -34,6 +34,12 @@ window_frames.exe --pid PID --image ABSOLUTE_EXE --out NEW_DIRECTORY --size 1920
   stream only on exit code 0 with `status: "completed"` and a file size equal
   to the complete frame count times crop height times row stride.
 
+If the final GPU readback is still drawing at the duration deadline, the
+helper closes the capture and retains the completed frames. The manifest sets
+`omittedTrailingGpuFrame` to that last frame's `systemRelativeTime100ns` and
+`receiptQpc` instead of `null`. That frame has no bytes or entry in `frames`.
+A capture still fails when it has zero complete frames or hits another error.
+
 `systemRelativeTime100ns` retains the system-relative time reported by WGC.
 QPC fields retain raw local ticks at the declared frequency. These are
 compositor capture observations. Windows can omit intermediate presents.

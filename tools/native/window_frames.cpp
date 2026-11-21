@@ -17,6 +17,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -144,6 +145,7 @@ struct Capture {
     Tick frequency = 0, start = 0, end = 0;
     std::int32_t source_width = 0, source_height = 0;
     std::vector<Frame> frames;
+    std::optional<Frame> omitted_trailing_gpu_frame;
     const char* completion = nullptr;
 };
 
@@ -227,6 +229,11 @@ void capture_window(const Options& options, HANDLE process, Capture& capture) {
             Sleep(1);
             result = context->Map(staging.get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped);
         }
+        // A pending map at the duration bound has no pixels to retain.
+        if (result == DXGI_ERROR_WAS_STILL_DRAWING) {
+            capture.omitted_trailing_gpu_frame = evidence;
+            break;
+        }
         check_hresult(result);
         const auto* data = static_cast<const char*>(mapped.pData);
         for (std::uint32_t row = 0; row < height; ++row)
@@ -266,7 +273,15 @@ void write_capture(const Options& options, const fs::path& actual_image, std::ui
             << ",\"qpcFrequency\":" << capture.frequency << ",\"sourceSize\":{\"width\":" << capture.source_width
             << ",\"height\":" << capture.source_height << "},\"crop\":{\"x\":" << x << ",\"y\":" << y
             << ",\"width\":" << width << ",\"height\":" << height
-            << "},\"pixelFormat\":\"B8G8R8A8_UNORM\",\"rowStrideBytes\":" << std::uint64_t(width) * 4 << ",\"frames\":[";
+            << "},\"pixelFormat\":\"B8G8R8A8_UNORM\",\"rowStrideBytes\":" << std::uint64_t(width) * 4
+            << ",\"omittedTrailingGpuFrame\":";
+        if (const auto& omitted = capture.omitted_trailing_gpu_frame) {
+            out << "{\"systemRelativeTime100ns\":" << omitted->source_time
+                << ",\"receiptQpc\":" << omitted->receipt_qpc << '}';
+        } else {
+            out << "null";
+        }
+        out << ",\"frames\":[";
         for (std::size_t i = 0; i < capture.frames.size(); ++i) {
             const auto& frame = capture.frames[i];
             out << (i == 0 ? "\n" : ",\n") << "{\"index\":" << i << ",\"offsetBytes\":" << i * std::uint64_t(width) * height * 4
