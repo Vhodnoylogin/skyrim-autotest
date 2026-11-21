@@ -64,7 +64,8 @@ class RunReviewTests(unittest.TestCase):
         self.append({'kind': 'phase', 'name': 'read-writer'}, row(refused), row(refused),
                     row({**refused, 'status': 'collecting'}), row({**refused, 'reason': 'private prose'}),
                     row({**refused, 'schemaVersion': True}), row(refused, called=False),
-                    row(refused, returnedType='int'), row(refused, returned='{'))
+                    row(refused, returnedType='int'), row(refused, returned='{'),
+                    row(refused, returned='{"schemaVersion":' + '1' * 5000 + '}'))
         review = summarize({'result': 'failed', 'restored': True}, self.ledger)
         self.assertEqual(review['execution']['nativePapyrusRefusals'], [
             {'phase': 'read-writer', 'script': 'DiagnosticWitness', 'function': 'Read',

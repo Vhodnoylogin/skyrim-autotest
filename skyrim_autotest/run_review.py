@@ -93,7 +93,7 @@ def native_papyrus_refusal(args, result):
         return None
     try:
         reply = json.loads(raw)
-    except (json.JSONDecodeError, RecursionError):
+    except (ValueError, RecursionError):
         return None
     version, reason = reply.get('schemaVersion'), reply.get('reason')
     if (reply.get('status') == 'refused' and type(version) is int and version > 0
