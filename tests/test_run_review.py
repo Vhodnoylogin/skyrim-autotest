@@ -246,6 +246,25 @@ class RunReviewTests(unittest.TestCase):
             {'phase': None, 'domain': 'physics', 'status': 'available', 'requested': True, 'count': 1},
         ])
 
+    def test_observer_reference_3d_keeps_the_loaded_actor_and_unloaded_fixture_separate(self):
+        player = {'identity': {'form': '0x00000014'}, 'status': 'available', 'loaded3D': True}
+        fixture = {'identity': {'form': '0xFF000871'}, 'status': 'available', 'loaded3D': False}
+        extra = {**fixture, 'identity': {'form': '0xFF000872'}}
+        args = {'kind': 'world_observer', 'action': 'snapshot', 'refs': ['0x14', '0xff000871']}
+        result = {'schemaVersion': 1, 'ok': True, 'phase': 'skse_main_thread_task', 'refs': [player, fixture, extra]}
+        receipt = {'kind': 'tool', 'tool': 'inspect', 'args': args, 'result': result}
+        self.append({'kind': 'phase', 'name': 'fixture'}, receipt, receipt,
+                    {**receipt, 'result': {**result, 'refs': [fixture, fixture]}},
+                    {**receipt, 'result': {**result, 'refs': [
+                        {**fixture, 'loaded3D': 1}, {**player, 'status': 'unavailable'}]}},
+                    {'kind': 'phase', 'name': 'later'},
+                    {**receipt, 'result': {**result, 'refs': [{**fixture, 'loaded3D': True}]}})
+        self.assertEqual(summarize({}, self.ledger)['execution']['worldObserverReference3D'], [
+            {'phase': 'fixture', 'reference': '0x00000014', 'loaded3D': True, 'count': 2},
+            {'phase': 'fixture', 'reference': '0xFF000871', 'loaded3D': False, 'count': 2},
+            {'phase': 'later', 'reference': '0xFF000871', 'loaded3D': True, 'count': 1},
+        ])
+
     def test_capture_receipts_preserve_flags_without_disclosing_names_or_certifying_images(self):
         args = {'kind': 'native', 'checkpointId': 'private-checkpoint'}
         native = {'kind': 'screenshot', 'provider': 'native', 'checkpointId': 'private-checkpoint',
@@ -585,6 +604,7 @@ class RunReviewTests(unittest.TestCase):
         self.assertFalse(missing['execution']['available'])
         self.assertIsNone(missing['execution']['captureReceipts'])
         self.assertIsNone(missing['execution']['worldObserverAvailability'])
+        self.assertIsNone(missing['execution']['worldObserverReference3D'])
         self.assertIsNone(missing['execution']['scenarioGates'])
         self.assertIsNone(missing['execution']['bridgeGameObservations'])
         self.assertIsNone(missing['execution']['shutdownConsoleRequests'])

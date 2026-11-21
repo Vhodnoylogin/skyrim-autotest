@@ -109,6 +109,12 @@ The review matches the requested script, function and timeout. It records
 the dispatch while completion and the effect in game remain unknown.
 This classification leaves execution and recovery behavior unchanged.
 
+`execution.worldObserverReference3D` counts explicit available reference
+observations by phase and FormID. This distinguishes a loaded player from
+a fixture that is available to the observer and still lacks 3D. Only a
+typed boolean for the requested reference is counted. These are observation
+counts. A load deadline and proof of actor continuity remain scenario checks.
+
 For a retained nonzero exit on Windows the terminal report also reads a bounded
 Application Error Event 1000 window around the first observed exit. A match
 requires the same executable path, PID, process creation time and exception

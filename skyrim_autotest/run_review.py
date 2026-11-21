@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import sys
 
+from .actor_domain import form
 from .exit_projection import terminal_exit_observation
 from .collected_fault import collected_game_faults
 from .readiness_reads import _abandoned_timeout
@@ -102,7 +103,7 @@ def native_papyrus_refusal(args, result):
     return None
 
 
-def world_observer_availability(row, phase, counts):
+def world_observer_availability(row, phase, counts, reference_counts):
     args, result = row.get('args'), row.get('result')
     if (not isinstance(args, dict) or args.get('kind') != 'world_observer'
             or args.get('action', 'snapshot') != 'snapshot' or not isinstance(result, dict)
@@ -114,6 +115,31 @@ def world_observer_availability(row, phase, counts):
         status = entry.get('status') if isinstance(entry, dict) else None
         if status in ('available', 'partial', 'unavailable'):
             counts[phase, domain, status, domain == 'physics' and 'physics' in args] += 1
+
+    requested, observed = args.get('refs'), result.get('refs')
+    if not isinstance(requested, list) or not isinstance(observed, list):
+        return
+    try:
+        requested_forms = {form(reference) for reference in requested}
+    except ValueError:
+        return
+    loaded = {}
+    for entry in observed:
+        identity = entry.get('identity') if isinstance(entry, dict) else None
+        if not isinstance(identity, dict):
+            continue
+        try:
+            reference = form(identity.get('form'))
+        except ValueError:
+            continue
+        if reference not in requested_forms:
+            continue
+        if reference in loaded:
+            return
+        loaded[reference] = (entry.get('loaded3D') if entry.get('status') == 'available' else None)
+    for reference, present in loaded.items():
+        if type(present) is bool:
+            reference_counts[phase, reference, present] += 1
 
 
 def capture_receipt(row, phase):
@@ -308,6 +334,7 @@ def read_steps(path, *, game=None, first_exit_at=None):
     scenario_gates = []
     native_refusals = Counter()
     observer_availability = Counter()
+    observer_references = Counter()
     capture_receipts = []
     capture_operation_intervals = []
     try:
@@ -387,7 +414,7 @@ def read_steps(path, *, game=None, first_exit_at=None):
                     if refusal is not None:
                         native_refusals[(phase, *refusal)] += 1
                 if kind == 'tool' and row.get('tool') == 'inspect':
-                    world_observer_availability(row, phase, observer_availability)
+                    world_observer_availability(row, phase, observer_availability, observer_references)
                 if kind == 'tool' and row.get('tool') == 'capture':
                     captured = capture_receipt(row, phase)
                     if captured is not None:
@@ -415,7 +442,7 @@ def read_steps(path, *, game=None, first_exit_at=None):
                 'taskQueue': None, 'abandonedStartupReads': None, 'gatewayDispositions': None,
                 'driver': None, 'driverAcknowledgementTiming': None, 'nativeSamplingWindows': None,
                 'scenarioGates': None, 'nativePapyrusRefusals': None,
-                'worldObserverAvailability': None, 'captureReceipts': None,
+                'worldObserverAvailability': None, 'worldObserverReference3D': None, 'captureReceipts': None,
                 'captureOperationIntervals': None}
     joined = sum(gateway_requests[key] == 1 for key in resolved_gateways if key is not None)
     driver_timing = {}
@@ -455,6 +482,9 @@ def read_steps(path, *, game=None, first_exit_at=None):
             'worldObserverAvailability': [
                 {'phase': phase, 'domain': domain, 'status': status, 'requested': requested, 'count': count}
                 for (phase, domain, status, requested), count in observer_availability.items()],
+            'worldObserverReference3D': [
+                {'phase': phase, 'reference': reference, 'loaded3D': present, 'count': count}
+                for (phase, reference, present), count in observer_references.items()],
             'captureReceipts': capture_receipts,
             'captureOperationIntervals': capture_operation_intervals,
             'bridgeLaunchRequests': bridge_requests, 'bridgeStartAcknowledgements': bridge_starts,
