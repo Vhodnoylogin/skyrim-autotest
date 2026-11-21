@@ -93,6 +93,27 @@ def world_observer_availability(row, phase, counts):
             counts[phase, domain, status, domain == 'physics' and 'physics' in args] += 1
 
 
+def capture_receipt(row, phase):
+    args, result = row.get('args'), row.get('result')
+    if (not isinstance(args, dict) or args.get('action', 'capture') not in ('capture', 'screenshot')
+            or not isinstance(result, dict) or result.get('kind') != 'screenshot' or result.get('ok') is not True):
+        return None
+    flags = {key: result.get(key) for key in ('ok', 'sceneMismatch', 'inconclusive', 'uiExcluded')}
+    checkpoint = result.get('checkpointId')
+    if (not all(type(value) is bool for value in flags.values()) or not isinstance(checkpoint, str)
+            or not checkpoint or args.get('checkpointId', checkpoint) != checkpoint):
+        return None
+    requested, provider = args.get('kind', 'auto'), result.get('provider')
+    if (not isinstance(provider, str) or not provider or provider in ('auto', 'providers', 'extensions')
+            or requested not in ('auto', provider)):
+        return None
+    if provider == 'native' and requested == 'auto' and args.get('allowNative') is not True:
+        return None
+    elapsed = result.get('captureElapsedMs')
+    return {'phase': phase, 'method': 'native' if provider == 'native' else 'extension', **flags,
+            'captureElapsedMs': elapsed if type(elapsed) is int and elapsed >= 0 else None}
+
+
 def provider_timeout_body(tool, error):
     prefix = f'HTTP 504 api/tool/{tool}: '
     if not error.startswith(prefix):
@@ -241,6 +262,7 @@ def read_steps(path, *, game=None, first_exit_at=None):
     sampling_windows = []
     scenario_gates = []
     observer_availability = Counter()
+    capture_receipts = []
     try:
         with path.open(encoding='utf-8') as stream:
             for line in stream:
@@ -315,6 +337,10 @@ def read_steps(path, *, game=None, first_exit_at=None):
                         scenario_gates.append(gate)
                 if kind == 'tool' and row.get('tool') == 'inspect':
                     world_observer_availability(row, phase, observer_availability)
+                if kind == 'tool' and row.get('tool') == 'capture':
+                    captured = capture_receipt(row, phase)
+                    if captured is not None:
+                        capture_receipts.append(captured)
                 if (phase == 'stop-and-restore' and kind in ('tool', 'tool-error')
                         and row.get('tool') == 'console'
                         and row.get('args') == {'action': 'exec', 'command': 'qqq'}):
@@ -333,7 +359,7 @@ def read_steps(path, *, game=None, first_exit_at=None):
                 'bridgeGameObservations': None, 'shutdownConsoleRequests': None,
                 'taskQueue': None, 'abandonedStartupReads': None, 'gatewayDispositions': None,
                 'driver': None, 'driverAcknowledgementTiming': None, 'nativeSamplingWindows': None,
-                'scenarioGates': None, 'worldObserverAvailability': None}
+                'scenarioGates': None, 'worldObserverAvailability': None, 'captureReceipts': None}
     joined = sum(gateway_requests[key] == 1 for key in resolved_gateways if key is not None)
     driver_timing = {}
     for command, writes in driver_publications.items():
@@ -369,6 +395,7 @@ def read_steps(path, *, game=None, first_exit_at=None):
             'worldObserverAvailability': [
                 {'phase': phase, 'domain': domain, 'status': status, 'requested': requested, 'count': count}
                 for (phase, domain, status, requested), count in observer_availability.items()],
+            'captureReceipts': capture_receipts,
             'bridgeLaunchRequests': bridge_requests, 'bridgeStartAcknowledgements': bridge_starts,
             'bridgeGameObservations': bridge_observations,
             'shutdownConsoleRequests': console_quit,

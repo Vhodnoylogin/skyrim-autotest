@@ -27,6 +27,13 @@ default status in a reference or node snapshot. These counts describe the
 domains in the recorded responses. Actual contacts and captured images need
 their own evidence.
 
+`execution.captureReceipts` lists successful typed single-image capture replies
+by phase and method (`native` or `extension`). It keeps the reply's flags and
+typed `captureElapsedMs`. This elapsed time measures the capture operation.
+Image exposure timing and rendered contents require evidence from the capture
+artifact and its provider. The review omits reply frame numbers, identifiers,
+provider names and file paths.
+
 `execution.driver` summarizes protocol-2 file-driver publications, releases,
 status reads and acknowledged commands by phase. A command counts as
 acknowledged at most once, with a matching command and a sequence at or above

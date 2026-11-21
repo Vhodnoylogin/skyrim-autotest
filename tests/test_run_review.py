@@ -222,6 +222,47 @@ class RunReviewTests(unittest.TestCase):
             {'phase': None, 'domain': 'physics', 'status': 'available', 'requested': True, 'count': 1},
         ])
 
+    def test_capture_receipts_preserve_flags_without_disclosing_names_or_certifying_images(self):
+        args = {'kind': 'native', 'checkpointId': 'private-checkpoint'}
+        native = {'kind': 'screenshot', 'provider': 'native', 'checkpointId': 'private-checkpoint',
+                  'ok': True, 'sceneMismatch': False, 'inconclusive': True, 'uiExcluded': False,
+                  'captureElapsedMs': 277, 'frame': 9379, 'path': 'private-path.png'}
+        receipt = {'kind': 'tool', 'tool': 'capture', 'args': args, 'result': native}
+        extension = {**native, 'provider': 'private-provider', 'sceneMismatch': True,
+                     'uiExcluded': True, 'captureElapsedMs': False}
+        self.append({'kind': 'phase', 'name': 'photos'}, receipt,
+                    {'kind': 'phase', 'name': 'comparison'},
+                    {**receipt, 'args': {**args, 'kind': 'private-provider'}, 'result': extension})
+        review = summarize({'result': 'failed', 'scenarioResult': 'passed'}, self.ledger)
+        self.assertEqual(review['execution']['captureReceipts'], [
+            {'phase': 'photos', 'method': 'native', 'ok': True, 'sceneMismatch': False,
+             'inconclusive': True, 'uiExcluded': False, 'captureElapsedMs': 277},
+            {'phase': 'comparison', 'method': 'extension', 'ok': True, 'sceneMismatch': True,
+             'inconclusive': True, 'uiExcluded': True, 'captureElapsedMs': None},
+        ])
+        self.assertEqual((review['result'], review['scenarioResult']), ('failed', 'passed'))
+        self.assertNotIn('private-', json.dumps(review))
+        self.assertNotIn('9379', json.dumps(review))
+
+    def test_capture_receipts_require_matching_typed_single_image_reply(self):
+        result = {'kind': 'screenshot', 'provider': 'native', 'checkpointId': 'capture',
+                  'ok': True, 'sceneMismatch': False, 'inconclusive': True, 'uiExcluded': False}
+        receipt = {'kind': 'tool', 'tool': 'capture', 'args': {'kind': 'native'}, 'result': result}
+        self.append({**receipt, 'args': {'kind': 'auto', 'allowNative': True}},
+                    {**receipt, 'kind': 'tool-error'}, {**receipt, 'tool': 'inspect'},
+                    *({**receipt, 'args': args} for args in (
+                        {'kind': 'native', 'action': 'status'}, {'kind': 'auto'},
+                        {'kind': 'providers'}, {'kind': 'native', 'checkpointId': 'different'},
+                    )),
+                    *({**receipt, 'result': {**result, **invalid}} for invalid in (
+                        {'ok': False}, {'ok': 1}, {'kind': 'burst'}, {'sceneMismatch': 0},
+                        {'provider': 'different-provider'}, {'checkpointId': None},
+                    )))
+        self.assertEqual(summarize({}, self.ledger)['execution']['captureReceipts'], [
+            {'phase': None, 'method': 'native', 'ok': True, 'sceneMismatch': False,
+             'inconclusive': True, 'uiExcluded': False, 'captureElapsedMs': None},
+        ])
+
     def test_file_driver_receipts_follow_commands_and_keep_frames_private(self):
         a, b = 'a' * 32, 'b' * 32
         def event(action, **result):
@@ -491,6 +532,7 @@ class RunReviewTests(unittest.TestCase):
         passport = {'game': dict(self.game, pid=99), 'gameProcessObservations': [self.exit]}
         missing = summarize(passport, self.ledger)
         self.assertFalse(missing['execution']['available'])
+        self.assertIsNone(missing['execution']['captureReceipts'])
         self.assertIsNone(missing['execution']['worldObserverAvailability'])
         self.assertIsNone(missing['execution']['scenarioGates'])
         self.assertIsNone(missing['execution']['bridgeGameObservations'])
