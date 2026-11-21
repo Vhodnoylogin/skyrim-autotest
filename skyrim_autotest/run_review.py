@@ -134,6 +134,7 @@ def read_steps(path):
     bridge_requests = 0
     bridge_starts = 0
     window_close = []
+    console_quit = {'acknowledged': 0, 'notQueued': 0, 'unknown': 0}
     task_queue = {'waitingObservations': 0, 'readyObservations': 0, 'recoveredWaits': 0}
     waiting_for_queue = False
     abandoned_reads = Counter()
@@ -206,11 +207,22 @@ def read_steps(path):
                     window = native_sampling_window(row, phase)
                     if window is not None:
                         sampling_windows.append(window)
+                if (phase == 'stop-and-restore' and kind in ('tool', 'tool-error')
+                        and row.get('tool') == 'console'
+                        and row.get('args') == {'action': 'exec', 'command': 'qqq'}):
+                    result = row.get('result')
+                    queued = None
+                    if (kind == 'tool' and isinstance(result, dict) and result.get('command') == 'qqq'
+                            and not (result.get('error') or result.get('isError'))):
+                        queued = result.get('queued')
+                    disposition = 'acknowledged' if queued is True else 'notQueued' if queued is False else 'unknown'
+                    console_quit[disposition] += 1
                 if kind == 'owned-game-window-close' and type(row.get('requested')) is bool and type(row.get('accepted')) is bool:
                     window_close.append({'requested': row['requested'], 'accepted': row['accepted']})
     except (OSError, UnicodeError):
         return {'available': False, 'phases': [], 'failures': None, 'toolErrors': [], 'bridgeLaunchRequests': None,
                 'bridgeStartAcknowledgements': None, 'ownedGameWindowClose': None, 'malformedRows': None,
+                'shutdownConsoleRequests': None,
                 'taskQueue': None, 'abandonedStartupReads': None, 'gatewayDispositions': None,
                 'driver': None, 'driverAcknowledgementTiming': None, 'nativeSamplingWindows': None}
     joined = sum(gateway_requests[key] == 1 for key in resolved_gateways if key is not None)
@@ -245,6 +257,7 @@ def read_steps(path):
                                            for (phase, exact), delays in driver_timing.items()],
             'nativeSamplingWindows': sampling_windows,
             'bridgeLaunchRequests': bridge_requests, 'bridgeStartAcknowledgements': bridge_starts,
+            'shutdownConsoleRequests': console_quit,
             'ownedGameWindowClose': window_close, 'malformedRows': malformed}
 
 

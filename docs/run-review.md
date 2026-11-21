@@ -96,3 +96,9 @@ are separate observations. Historical ledgers may have no window close
 receipts. A complete shutdown bracket reports the elapsed wait and whether
 the game was seen gone by the recorded deadline. Use the native exit code
 to determine whether that exit succeeded.
+
+`execution.shutdownConsoleRequests` counts recorded `qqq` calls during
+cleanup, including archived runs without a saved grace record. The counters
+distinguish a positive queue receipt, an explicit negative receipt and an
+unknown result. A missing step ledger yields null. Native exit and restoration
+continue to come from their own observations.

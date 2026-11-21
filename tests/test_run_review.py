@@ -69,6 +69,38 @@ class RunReviewTests(unittest.TestCase):
         grace['game'] = dict(self.game, birth=999)
         self.assertIsNone(summarize(state, self.ledger)['gracefulExit'])
 
+    def test_archived_shutdown_console_receipt_preserves_scenario_exit_and_restoration(self):
+        self.append({'kind': 'phase', 'name': 'stop-and-restore'},
+                    {'kind': 'tool', 'tool': 'console', 'args': {'action': 'exec', 'command': 'qqq'},
+                     'result': {'capturing': False, 'command': 'qqq', 'queued': True, 'raw': 'private-data'}})
+        state = {'game': self.game, 'result': 'failed', 'scenarioResult': 'passed',
+                 'gameProcessObservations': [self.exit], 'restored': True}
+        review = summarize(state, self.ledger)
+        self.assertEqual(review['execution']['shutdownConsoleRequests'],
+                         {'acknowledged': 1, 'notQueued': 0, 'unknown': 0})
+        self.assertIsNone(review['gracefulExit'])
+        self.assertEqual((review['result'], review['scenarioResult'], review['restored']), ('failed', 'passed', True))
+        self.assertEqual(review['nativeExit']['hex'], '0xC0000005')
+        self.assertNotIn('private-data', json.dumps(review))
+
+    def test_shutdown_console_receipts_require_exact_request_phase_and_typed_response(self):
+        args = {'action': 'exec', 'command': 'qqq'}
+        request = {'kind': 'tool', 'tool': 'console', 'args': args}
+        receipt = {'command': 'qqq', 'queued': True}
+        self.append({**request, 'result': receipt},
+                    {'kind': 'phase', 'name': 'stop-and-restore'},
+                    {**request, 'args': {**args, 'command': 'other'}, 'result': receipt},
+                    {**request, 'args': {**args, 'action': 'help'}, 'result': receipt},
+                    {**request, 'result': {'command': 'qqq', 'queued': False}},
+                    {**request, 'result': {'command': 'qqq', 'queued': 1}},
+                    {**request, 'result': {'command': 'other', 'queued': True}},
+                    {**request, 'result': {**receipt, 'isError': True}},
+                    {**request, 'kind': 'tool-error', 'error': 'HTTP 504', 'result': receipt},
+                    {'kind': 'phase', 'name': 'archive'},
+                    {**request, 'result': receipt})
+        self.assertEqual(summarize({}, self.ledger)['execution']['shutdownConsoleRequests'],
+                         {'acknowledged': 0, 'notQueued': 1, 'unknown': 4})
+
     def test_quit_wait_duration_requires_a_consistent_finished_bracket(self):
         self.ledger.touch()
         grace = {'game': self.game, 'command': 'qqq', 'requestAttempted': True, 'observedGone': True,
@@ -326,6 +358,7 @@ class RunReviewTests(unittest.TestCase):
         passport = {'game': dict(self.game, pid=99), 'gameProcessObservations': [self.exit]}
         missing = summarize(passport, self.ledger)
         self.assertFalse(missing['execution']['available'])
+        self.assertIsNone(missing['execution']['shutdownConsoleRequests'])
         self.assertIsNone(missing['nativeExit'])
         self.ledger.write_text('invalid\n42\n', encoding='utf-8')
         damaged = summarize(dict(passport, restored=False), self.ledger)
