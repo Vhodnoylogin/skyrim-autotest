@@ -114,6 +114,28 @@ def capture_receipt(row, phase):
             'captureElapsedMs': elapsed if type(elapsed) is int and elapsed >= 0 else None}
 
 
+def capture_operation_interval(row, phase):
+    timing = row.get('captureOperationInterval')
+    if not isinstance(timing, dict) or type(timing.get('schemaVersion')) is not int or timing['schemaVersion'] != 1:
+        return None
+    status = timing.get('status')
+    clock_fields = {}
+    if status == 'measured':
+        ticks = {key: timing.get(key) for key in ('qpcFrequency', 'requestQpc', 'responseQpc')}
+        if (timing.get('clock') != 'windows-qpc'
+                or any(type(value) is not int or not 0 <= value < 2**63 for value in ticks.values())
+                or ticks['qpcFrequency'] == 0 or ticks['requestQpc'] > ticks['responseQpc']):
+            return None
+        clock_fields = {'clock': 'windows-qpc', **ticks}
+    elif status != 'unavailable':
+        return None
+    outcome = 'request-error' if row['kind'] == 'tool-error' else 'reply'
+    result = row.get('result')
+    if outcome == 'reply' and isinstance(result, dict) and (result.get('ok') is False or result.get('isError') or result.get('error')):
+        outcome = 'rejected-reply'
+    return {'phase': phase, 'status': status, 'outcome': outcome, **clock_fields}
+
+
 def provider_timeout_body(tool, error):
     prefix = f'HTTP 504 api/tool/{tool}: '
     if not error.startswith(prefix):
@@ -263,6 +285,7 @@ def read_steps(path, *, game=None, first_exit_at=None):
     scenario_gates = []
     observer_availability = Counter()
     capture_receipts = []
+    capture_operation_intervals = []
     try:
         with path.open(encoding='utf-8') as stream:
             for line in stream:
@@ -341,6 +364,10 @@ def read_steps(path, *, game=None, first_exit_at=None):
                     captured = capture_receipt(row, phase)
                     if captured is not None:
                         capture_receipts.append(captured)
+                if kind in ('tool', 'tool-error') and row.get('tool') == 'capture':
+                    interval = capture_operation_interval(row, phase)
+                    if interval is not None:
+                        capture_operation_intervals.append(interval)
                 if (phase == 'stop-and-restore' and kind in ('tool', 'tool-error')
                         and row.get('tool') == 'console'
                         and row.get('args') == {'action': 'exec', 'command': 'qqq'}):
@@ -359,7 +386,8 @@ def read_steps(path, *, game=None, first_exit_at=None):
                 'bridgeGameObservations': None, 'shutdownConsoleRequests': None,
                 'taskQueue': None, 'abandonedStartupReads': None, 'gatewayDispositions': None,
                 'driver': None, 'driverAcknowledgementTiming': None, 'nativeSamplingWindows': None,
-                'scenarioGates': None, 'worldObserverAvailability': None, 'captureReceipts': None}
+                'scenarioGates': None, 'worldObserverAvailability': None, 'captureReceipts': None,
+                'captureOperationIntervals': None}
     joined = sum(gateway_requests[key] == 1 for key in resolved_gateways if key is not None)
     driver_timing = {}
     for command, writes in driver_publications.items():
@@ -396,6 +424,7 @@ def read_steps(path, *, game=None, first_exit_at=None):
                 {'phase': phase, 'domain': domain, 'status': status, 'requested': requested, 'count': count}
                 for (phase, domain, status, requested), count in observer_availability.items()],
             'captureReceipts': capture_receipts,
+            'captureOperationIntervals': capture_operation_intervals,
             'bridgeLaunchRequests': bridge_requests, 'bridgeStartAcknowledgements': bridge_starts,
             'bridgeGameObservations': bridge_observations,
             'shutdownConsoleRequests': console_quit,

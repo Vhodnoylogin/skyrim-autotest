@@ -263,6 +263,33 @@ class RunReviewTests(unittest.TestCase):
              'inconclusive': True, 'uiExcluded': False, 'captureElapsedMs': None},
         ])
 
+    def test_capture_operation_intervals_keep_errors_without_assigning_exposure(self):
+        timing = {'schemaVersion': 1, 'status': 'measured', 'clock': 'windows-qpc',
+                  'qpcFrequency': 10000000, 'requestQpc': 2000000, 'responseQpc': 5000000}
+        receipt = {'kind': 'tool', 'tool': 'capture', 'captureOperationInterval': timing,
+                   'clientRequestId': 'private-request', 'result': {'frame': 9379, 'ok': True}}
+        self.append({'kind': 'phase', 'name': 'photos'}, receipt,
+                    {**receipt, 'kind': 'tool-error', 'error': 'HTTP 404 api/tool/capture: private-details'},
+                    {**receipt, 'result': {'ok': False}},
+                    {**receipt, 'captureOperationInterval': {'schemaVersion': 1, 'status': 'unavailable'}},
+                    {**receipt, 'tool': 'inspect'},
+                    {**receipt, 'captureOperationInterval': None},
+                    *({**receipt, 'captureOperationInterval': {**timing, **invalid}} for invalid in (
+                        {'schemaVersion': True}, {'qpcFrequency': 0}, {'requestQpc': True},
+                        {'responseQpc': 1}, {'responseQpc': 2**63}, {'clock': 'private-clock'},
+                        {'status': 'estimated'},
+                    )))
+        review = summarize({'result': 'failed', 'scenarioResult': 'passed'}, self.ledger)
+        clocks = {key: timing[key] for key in ('clock', 'qpcFrequency', 'requestQpc', 'responseQpc')}
+        self.assertEqual(review['execution']['captureOperationIntervals'], [
+            {'phase': 'photos', 'status': 'measured', 'outcome': outcome, **clocks}
+            for outcome in ('reply', 'request-error', 'rejected-reply')
+        ] + [{'phase': 'photos', 'status': 'unavailable', 'outcome': 'reply'}])
+        self.assertEqual(review['execution']['captureReceipts'], [])
+        self.assertEqual((review['result'], review['scenarioResult']), ('failed', 'passed'))
+        self.assertNotIn('private-', json.dumps(review))
+        self.assertNotIn('9379', json.dumps(review))
+
     def test_file_driver_receipts_follow_commands_and_keep_frames_private(self):
         a, b = 'a' * 32, 'b' * 32
         def event(action, **result):

@@ -133,6 +133,28 @@ def request(port, route, body=None, token=None, timeout=12):
         raise HTTPResponseError(e.code, route, detail, diagnostics) from None
 
 
+def start_capture_interval():
+    try:
+        return native.qpc_frequency(), native.qpc_ticks()
+    except OSError:
+        return None
+
+
+def finish_capture_interval(start):
+    unavailable = {'schemaVersion': 1, 'status': 'unavailable'}
+    if start is None:
+        return unavailable
+    frequency, request_qpc = start
+    try:
+        response_qpc = native.qpc_ticks()
+    except OSError:
+        return unavailable
+    if not 0 <= request_qpc <= response_qpc:
+        return unavailable
+    return {'schemaVersion': 1, 'status': 'measured', 'clock': 'windows-qpc',
+            'qpcFrequency': frequency, 'requestQpc': request_qpc, 'responseQpc': response_qpc}
+
+
 def set_ini(text, section, key, value):
     pattern = re.compile(r'(?ms)^\[' + re.escape(section) + r'\]\r?\n(.*?)(?=^\[|\Z)')
     match = pattern.search(text)
@@ -715,21 +737,31 @@ class Session:
         omitted_flags = official_menu and 'includeFlags' in args
         if omitted_flags:
             args = {key: value for key, value in args.items() if key != 'includeFlags'}
+        measure_capture = (name == 'capture' and isinstance(args, dict)
+                           and args.get('kind') not in ('providers', 'extensions')
+                           and args.get('action') != 'status')
+        diagnostics = {}
         started = time.monotonic()
         request_id = uuid.uuid4().hex
         try:
-            result = request(self.state['port'], f'api/tool/{name}', args, timeout=bounded_timeout(timeout))
+            request_timeout = bounded_timeout(timeout)
+            capture_start = start_capture_interval() if measure_capture else None
+            try:
+                result = request(self.state['port'], f'api/tool/{name}', args, timeout=request_timeout)
+            finally:
+                if measure_capture:
+                    diagnostics['captureOperationInterval'] = finish_capture_interval(capture_start)
         except Exception as error:
             if isinstance(error, HTTPResponseError):
                 error.client_request_id = request_id
             self.log('tool-error', tool=name, args=args, clientRequestId=request_id,
-                     error=str(error), elapsedMs=int((time.monotonic() - started) * 1000))
+                     error=str(error), elapsedMs=int((time.monotonic() - started) * 1000), **diagnostics)
             raise
         if official_menu and isinstance(result, dict):
             result = dict(result, menuObservationContract='official-menu-blockedBy')
             if omitted_flags:
                 result['adapterWarnings'] = ['includeFlags unavailable in official DevBench; conservative menu names and blockedBy are used']
-        self.log('tool', tool=name, args=args, result=result, clientRequestId=request_id)
+        self.log('tool', tool=name, args=args, result=result, clientRequestId=request_id, **diagnostics)
         if isinstance(result, dict) and (result.get('isError') or result.get('error')):
             raise ToolError(name, args, result, client_request_id=request_id)
         return result

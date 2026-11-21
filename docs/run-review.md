@@ -34,6 +34,20 @@ Image exposure timing and rendered contents require evidence from the capture
 artifact and its provider. The review omits reply frame numbers, identifiers,
 provider names and file paths.
 
+`execution.captureOperationIntervals` lists the executor's client-side timing
+for owned DevBench screenshot or burst requests. Each timing record on the
+original `tool` or `tool-error` row brackets the request and its blocking wait
+and response read, after the executor's health and deadline checks. Provider
+discovery and burst-status polls have no timing record here. `requestQpc` and
+`responseQpc` are raw Windows QueryPerformanceCounter ticks and `qpcFrequency`
+is ticks per second. Compare them only to native observations known to share
+the same Windows host, boot and clock frequency. The interval ends when the
+client returns or raises. A timeout or asynchronous burst reply leaves later
+provider completion unknown, and these bounds never identify image exposure.
+The review preserves request errors, rejected replies and unavailable clock
+data without changing any verdict. Older ledgers without timing records have
+no interval entries.
+
 `execution.driver` summarizes protocol-2 file-driver publications, releases,
 status reads and acknowledged commands by phase. A command counts as
 acknowledged at most once, with a matching command and a sequence at or above
