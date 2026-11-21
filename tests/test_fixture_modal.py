@@ -98,6 +98,81 @@ class FixtureModalTests(unittest.TestCase):
             self.assertIsNone(classify_startup_modal(session,{**modal,'buttons':['Continue']}))
         with patch.object(session,'tool',return_value={'playerLoaded':True,'cell':{'editorId':'Other'}}):
             self.assertIsNone(classify_startup_modal(session,modal))
+
+    def se_realm(self, recheck=None, closed=None, acknowledgement=None):
+        # Retained TEST SE 20261121-130225-219d96 menu and scene replies.
+        body = 'You find yourself someplace unknown... Somewhere outside of time and space.'
+        blocked_by = [{'name': 'MessageBoxMenu', 'hint': 'menu action=describe to read it, then menu action=accept '
+                                                        'index=N (close does not dismiss a message box)'}]
+        modal = {'bodyText': body, 'buttons': ['Begin'], 'cancelIndex': -1,
+                 'messageBoxOpen': True, 'blockedBy': blocked_by}
+        session = FakeSession(body, modal['buttons'])
+        session.state.update(configuration={'game_edition': 'se'}, newGameStarted=True,
+                             characterCreationCompleted=True)
+        calls = []
+
+        def tool(name, args):
+            calls.append((name, args))
+            if name == 'inspect' and args == {'kind': 'scene'}:
+                return {'playerLoaded': True, 'cell': {'editorId': 'RealmLorkhan', 'formId': '0x0701A5C6'}}
+            if name != 'menu':
+                raise AssertionError('SE Realm modal requires no Papyrus UI beyond the native description')
+            if args['action'] == 'list':
+                if session.accepts:
+                    return closed if closed is not None else {'messageBoxOpen': False, 'openMenus': ['HUD Menu']}
+                return {'messageBoxOpen': True, 'openMenus': ['HUD Menu', 'Cursor Menu', 'MessageBoxMenu']}
+            if args['action'] == 'describe':
+                count = calls.count((name, args))
+                return {**modal, **recheck} if count > 1 and recheck else modal
+            if args == {'action': 'accept', 'index': 0}:
+                session.accepts.append(args)
+                return acknowledgement if acknowledgement is not None else {**args, 'queued': True}
+            raise AssertionError(args)
+
+        session.tool = tool
+        return session, calls
+
+    def test_se_realm_uses_exact_native_description_and_verified_closure(self):
+        session, calls = self.se_realm()
+        with patch('skyrim_autotest.vr_probe.log_modal_queue', side_effect=AssertionError('VR diagnostic used in SE')):
+            self.assertTrue(guard_fixture_modal(session))
+        self.assertEqual(calls, [
+            ('menu', {'action': 'list'}), ('menu', {'action': 'describe'}), ('inspect', {'kind': 'scene'}),
+            ('menu', {'action': 'describe'}), ('menu', {'action': 'accept', 'index': 0}), ('menu', {'action': 'list'}),
+        ])
+        self.assertTrue(session.state['realmStartupAcknowledged'])
+
+    def test_se_realm_refuses_changed_or_closed_target_before_answer(self):
+        for change in ({'buttons': ['Continue']}, {'buttons': ['Begin', 'Cancel']},
+                       {'cancelIndex': 0}, {'messageBoxOpen': False}, {'bodyText': 'Different notice'}):
+            with self.subTest(change=change):
+                session, _ = self.se_realm(recheck=change)
+                with self.assertRaisesRegex(AssertionError, 'no answer sent'):
+                    guard_fixture_modal(session)
+                self.assertEqual(session.accepts, [])
+
+    def test_se_realm_does_not_treat_acknowledgement_or_incomplete_menu_as_closure(self):
+        for closed in ({'openMenus': []}, {'messageBoxOpen': False, 'openMenus': ['MessageBoxMenu']}):
+            with self.subTest(closed=closed):
+                session, _ = self.se_realm(closed=closed)
+                with patch('skyrim_autotest.vr_probe.time.monotonic', side_effect=[0, 0, 4]), \
+                     patch('skyrim_autotest.vr_probe.time.sleep'):
+                    with self.assertRaisesRegex(AssertionError, 'did not close'):
+                        guard_fixture_modal(session)
+                self.assertEqual(session.accepts, [{'action': 'accept', 'index': 0}])
+                self.assertNotIn('realmStartupAcknowledged', session.state)
+
+    def test_se_realm_refuses_unconfirmed_or_wrong_ack_now_without_repeating(self):
+        for reply in ({'queued': True}, {'action': 'accept', 'index': False, 'queued': True},
+                      {'action': 'accept', 'index': 0, 'queued': False}):
+            with self.subTest(reply=reply):
+                session, calls = self.se_realm(acknowledgement=reply)
+                with self.assertRaisesRegex(AssertionError, 'lacks a matching queue confirmation'):
+                    guard_fixture_modal(session)
+                self.assertEqual(session.accepts, [{'action': 'accept', 'index': 0}])
+                self.assertEqual(calls[-1], ('menu', {'action': 'accept', 'index': 0}))
+                self.assertNotIn('realmStartupAcknowledged', session.state)
+
     def queue(self, ids, body='Speech Broker на связи'):
         return {'available':True,'depth':len(ids),
                 'queued':[{'id':i,'bodyText':body,'buttons':['OK']} for i in ids]}

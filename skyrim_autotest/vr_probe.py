@@ -206,6 +206,23 @@ def classify_startup_modal(session, modal):
     return None
 
 
+def accept_se_realm_modal(session, modal):
+    """Answer the already classified SE Realm notice through its native menu."""
+    fresh = session.tool('menu', {'action': 'describe'})
+    if (fresh != modal or fresh.get('messageBoxOpen') is not True
+            or modal.get('messageBoxOpen') is not True or type(fresh.get('cancelIndex')) is not int):
+        raise AssertionError('SE Realm startup modal changed or is unavailable; no answer sent')
+    session.log('startup-modal-native-answer-routing', foregroundRequired=False,
+                route='owned SE DevBench menu describe and native accept')
+    response = session.tool('menu', {'action': 'accept', 'index': 0})
+    session.log('startup-modal-button-request', action='deferred native menu answer', index=0,
+                body=modal['bodyText'], response=response, acceptedAsClosureProof=False)
+    if (not isinstance(response, dict) or response.get('action') != 'accept'
+            or type(response.get('index')) is not int or response['index'] != 0
+            or response.get('queued') is not True):
+        raise AssertionError('SE Realm native answer lacks a matching queue confirmation; no repeat')
+
+
 def guard_fixture_modal(session):
     """A startup message can arrive after the first load-ready observation."""
     menus = session.tool('menu', {'action': 'list'})
@@ -222,11 +239,25 @@ def guard_fixture_modal(session):
         if classification is None:
             raise AssertionError('Fixture is gated by an unclassified modal: ' + json.dumps(modal))
         session.log('startup-modal-classified', classification=classification)
-        before = accept_known_vr_modal(session, modal, answered_ids)
+        se_realm = (classification == 'realm-new-game-begin'
+                    and getattr(session, 'state', {}).get('configuration', {}).get('game_edition') == 'se')
+        if se_realm:
+            accept_se_realm_modal(session, modal)
+            before = None
+        else:
+            before = accept_known_vr_modal(session, modal, answered_ids)
         end = time.monotonic() + 3
         while time.monotonic() < end:
-            if not session.tool('menu', {'action': 'list'}).get('messageBoxOpen'):
-                log_modal_queue(session, 'startup-modal-native-queue-after')
+            current = session.tool('menu', {'action': 'list'})
+            if se_realm:
+                open_menus = current.get('openMenus')
+                closed = (current.get('messageBoxOpen') is False and isinstance(open_menus, list)
+                          and 'MessageBoxMenu' not in open_menus)
+            else:
+                closed = not current.get('messageBoxOpen')
+            if closed:
+                if not se_realm:
+                    log_modal_queue(session, 'startup-modal-native-queue-after')
                 session.log('fixture-modal-cleared', body=modal['bodyText'])
                 if hasattr(session, 'state'):
                     session.state['lastClosedStartupModal'] = {'bodyText': modal['bodyText'],
@@ -234,7 +265,7 @@ def guard_fixture_modal(session):
                 if classification == 'realm-new-game-begin':
                     session.state['realmStartupAcknowledged'] = True
                 return True
-            if before.get('available'):
+            if before is not None and before.get('available'):
                 after = log_modal_queue(session, 'startup-modal-native-queue-after')
                 if after.get('available'):
                     old_ids = [x['id'] for x in before['queued']]
@@ -250,7 +281,8 @@ def guard_fixture_modal(session):
             time.sleep(.1)
         else:
             following = session.tool('menu', {'action': 'describe'})
-            log_modal_queue(session, 'startup-modal-native-queue-after')
+            if not se_realm:
+                log_modal_queue(session, 'startup-modal-native-queue-after')
             session.log('startup-modal-button-not-resolved', before=modal, after=following)
             raise AssertionError('Recognized fixture modal did not close: ' + json.dumps(following))
     raise AssertionError('Recognized startup notification queue exceeded bounded handling')
