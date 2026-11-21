@@ -79,6 +79,20 @@ def scenario_gate(row, phase):
     return {'phase': phase, 'name': name, 'disposition': disposition, 'reasonCode': code, 'required': required}
 
 
+def world_observer_availability(row, phase, counts):
+    args, result = row.get('args'), row.get('result')
+    if (not isinstance(args, dict) or args.get('kind') != 'world_observer'
+            or args.get('action', 'snapshot') != 'snapshot' or not isinstance(result, dict)
+            or type(result.get('schemaVersion')) is not int or result['schemaVersion'] != 1
+            or result.get('ok') is not True or result.get('phase') != 'skse_main_thread_task'):
+        return
+    for domain in ('physics', 'render'):
+        entry = result.get(domain)
+        status = entry.get('status') if isinstance(entry, dict) else None
+        if status in ('available', 'partial', 'unavailable'):
+            counts[phase, domain, status, domain == 'physics' and 'physics' in args] += 1
+
+
 def provider_timeout_body(tool, error):
     prefix = f'HTTP 504 api/tool/{tool}: '
     if not error.startswith(prefix):
@@ -226,6 +240,7 @@ def read_steps(path, *, game=None, first_exit_at=None):
     driver_acknowledgements = {}
     sampling_windows = []
     scenario_gates = []
+    observer_availability = Counter()
     try:
         with path.open(encoding='utf-8') as stream:
             for line in stream:
@@ -298,6 +313,8 @@ def read_steps(path, *, game=None, first_exit_at=None):
                     gate = scenario_gate(row, phase)
                     if gate is not None:
                         scenario_gates.append(gate)
+                if kind == 'tool' and row.get('tool') == 'inspect':
+                    world_observer_availability(row, phase, observer_availability)
                 if (phase == 'stop-and-restore' and kind in ('tool', 'tool-error')
                         and row.get('tool') == 'console'
                         and row.get('args') == {'action': 'exec', 'command': 'qqq'}):
@@ -316,7 +333,7 @@ def read_steps(path, *, game=None, first_exit_at=None):
                 'bridgeGameObservations': None, 'shutdownConsoleRequests': None,
                 'taskQueue': None, 'abandonedStartupReads': None, 'gatewayDispositions': None,
                 'driver': None, 'driverAcknowledgementTiming': None, 'nativeSamplingWindows': None,
-                'scenarioGates': None}
+                'scenarioGates': None, 'worldObserverAvailability': None}
     joined = sum(gateway_requests[key] == 1 for key in resolved_gateways if key is not None)
     driver_timing = {}
     for command, writes in driver_publications.items():
@@ -349,6 +366,9 @@ def read_steps(path, *, game=None, first_exit_at=None):
                                            for (phase, exact), delays in driver_timing.items()],
             'nativeSamplingWindows': sampling_windows,
             'scenarioGates': scenario_gates,
+            'worldObserverAvailability': [
+                {'phase': phase, 'domain': domain, 'status': status, 'requested': requested, 'count': count}
+                for (phase, domain, status, requested), count in observer_availability.items()],
             'bridgeLaunchRequests': bridge_requests, 'bridgeStartAcknowledgements': bridge_starts,
             'bridgeGameObservations': bridge_observations,
             'shutdownConsoleRequests': console_quit,

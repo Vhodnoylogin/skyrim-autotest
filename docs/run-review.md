@@ -20,6 +20,13 @@ these records with the current phase in `execution.scenarioGates`. It retains
 the scenario's reported decision without copying diagnostic payloads or using
 the decision to change the recorded scenario result, native exit or restoration.
 
+`execution.worldObserverAvailability` counts the declared physics and render
+statuses of successful schema-1 World Observer snapshots by phase. The
+`requested` flag distinguishes a requested physics observation from the
+default status in a reference or node snapshot. These counts describe the
+domains in the recorded responses. Actual contacts and captured images need
+their own evidence.
+
 `execution.driver` summarizes protocol-2 file-driver publications, releases,
 status reads and acknowledged commands by phase. A command counts as
 acknowledged at most once, with a matching command and a sequence at or above

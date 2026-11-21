@@ -184,6 +184,44 @@ class RunReviewTests(unittest.TestCase):
              'reasonCode': 'missing-observation', 'required': False},
         ])
 
+    def test_observer_availability_keeps_source_domain_separate_from_successful_snapshot(self):
+        args = {'kind': 'world_observer', 'action': 'snapshot'}
+        unavailable = {'status': 'unavailable', 'reason': 'private-data'}
+        result = {'schemaVersion': 1, 'ok': True, 'phase': 'skse_main_thread_task', 'quality': 'complete',
+                  'physics': unavailable, 'render': unavailable}
+        receipt = {'kind': 'tool', 'tool': 'inspect', 'args': args, 'result': result}
+        self.append({'kind': 'phase', 'name': 'world'}, receipt, receipt,
+                    {**receipt, 'args': {'kind': 'world_observer', 'physics': {'refs': ['0x14']}},
+                     'result': {**result, 'quality': 'partial', 'physics': {'status': 'partial'}}},
+                    {'kind': 'phase', 'name': 'subject'}, receipt)
+        state = {'result': 'passed', 'scenarioResult': 'passed', 'restored': True}
+        review = summarize(state, self.ledger)
+        self.assertEqual(review['execution']['worldObserverAvailability'], [
+            {'phase': 'world', 'domain': 'physics', 'status': 'unavailable', 'requested': False, 'count': 2},
+            {'phase': 'world', 'domain': 'render', 'status': 'unavailable', 'requested': False, 'count': 3},
+            {'phase': 'world', 'domain': 'physics', 'status': 'partial', 'requested': True, 'count': 1},
+            {'phase': 'subject', 'domain': 'physics', 'status': 'unavailable', 'requested': False, 'count': 1},
+            {'phase': 'subject', 'domain': 'render', 'status': 'unavailable', 'requested': False, 'count': 1},
+        ])
+        self.assertEqual((review['result'], review['scenarioResult']), ('passed', 'passed'))
+        self.assertEqual(review['improvementCandidates'], [])
+        self.assertNotIn('private-data', json.dumps(review))
+
+    def test_observer_availability_accepts_only_typed_successful_snapshot_domains(self):
+        args = {'kind': 'world_observer', 'physics': {'refs': ['0x14']}}
+        result = {'schemaVersion': 1, 'ok': True, 'phase': 'skse_main_thread_task',
+                  'physics': {'status': 'available'}, 'render': {'status': 'wrong'}}
+        receipt = {'kind': 'tool', 'tool': 'inspect', 'args': args, 'result': result}
+        self.append(receipt, {**receipt, 'kind': 'tool-error'}, {**receipt, 'tool': 'papyrus'},
+                    {**receipt, 'args': {**args, 'action': 'capabilities'}},
+                    *({**receipt, 'result': {**result, **invalid}} for invalid in (
+                        {'schemaVersion': True}, {'schemaVersion': 2}, {'ok': 1}, {'ok': False},
+                        {'phase': 'unverified_phase'}, {'physics': []},
+                    )))
+        self.assertEqual(summarize({}, self.ledger)['execution']['worldObserverAvailability'], [
+            {'phase': None, 'domain': 'physics', 'status': 'available', 'requested': True, 'count': 1},
+        ])
+
     def test_file_driver_receipts_follow_commands_and_keep_frames_private(self):
         a, b = 'a' * 32, 'b' * 32
         def event(action, **result):
@@ -453,6 +491,7 @@ class RunReviewTests(unittest.TestCase):
         passport = {'game': dict(self.game, pid=99), 'gameProcessObservations': [self.exit]}
         missing = summarize(passport, self.ledger)
         self.assertFalse(missing['execution']['available'])
+        self.assertIsNone(missing['execution']['worldObserverAvailability'])
         self.assertIsNone(missing['execution']['scenarioGates'])
         self.assertIsNone(missing['execution']['bridgeGameObservations'])
         self.assertIsNone(missing['execution']['shutdownConsoleRequests'])
