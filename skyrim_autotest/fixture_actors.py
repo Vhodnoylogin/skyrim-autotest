@@ -206,6 +206,24 @@ def _pose(backend, ref):
     return xyz, float(angle % 360)
 
 
+def _qualify_persistent_identity(backend):
+    from .runner import request
+    descriptor = request(backend.s.state["port"], "api/tools", timeout=min(3, backend.remaining()))
+    backend.remaining()
+    tools = descriptor.get("tools") if isinstance(descriptor, dict) else None
+    rows = [row for row in tools if isinstance(row, dict) and row.get("name") == "npc_persistence"] \
+        if isinstance(tools, list) else []
+    schema = rows[0].get("inputSchema") if len(rows) == 1 else None
+    fields = schema.get("properties") if isinstance(schema, dict) else None
+    expected = {"action": "string", "reference": "string", "base": "string", "timeoutMs": "integer"}
+    if (not isinstance(fields, dict) or schema.get("type") != "object" or
+            any(not isinstance(fields.get(key), dict) or fields[key].get("type") != kind
+                for key, kind in expected.items())):
+        raise BindingError("Live npc_persistence identity descriptor is missing, ambiguous or incompatible")
+    backend.s.log("interactive-fixture-persistence-api-qualified", tool="npc_persistence", action="identity",
+                  basis="Current DevBench tool registry request schema")
+
+
 def _persistent_identity(backend, spec, observation, expected=None):
     """Actual native persistence and VM object correspondence, never an argument echo."""
     raw = backend.call("npc_persistence", {"action": "identity", **spec,
@@ -239,8 +257,8 @@ def create(session, request, deadline, policy):
         for entry in fixtures.values():
             require_fixture(session, {"reference": entry.get("reference"), "base": entry.get("base")})
     bounded_deadline(deadline)
-    if (request.get("persistentForOwnedSave") is True and
-            native_settings(session.state.get("configuration", {})).get("npcPersistence") is not True):
+    persistent = request.get("persistentForOwnedSave", False)
+    if (persistent and native_settings(session.state.get("configuration", {})).get("npcPersistence") is not True):
         raise BindingError("Persistent NPC creation requires the frozen npcPersistence opt-in")
     if not isinstance(session.state.get("id"), str) or not session.state["id"]:
         raise BindingError("Fixture creation requires an exact current run id")
@@ -256,6 +274,8 @@ def create(session, request, deadline, policy):
         if not gameplay_ready(scene, menus):
             raise BindingError("Fixture mutation requires actual current gameplay/menu readiness")
     ready()
+    if persistent:
+        _qualify_persistent_identity(backend)
     _qualify(backend)
     base = request["base"]
     rows = backend.call("inspect", {"kind": "refs", "formId": base}).get("refs", [])
@@ -309,7 +329,6 @@ def create(session, request, deadline, policy):
     try:
         save()  # Durable intent precedes the first mutation, including a lost ACK.
         stable_world()
-        persistent = request.get("persistentForOwnedSave", False)
         returned = invoke("PlaceAtMe", [{"form": base}, 1, persistent, False], PLAYER["reference"])
         ref = actor_domain.returned_form(returned)
         if (int(ref, 16) >> 24 != 0xFF or ref in prior_refs or ref in [value.get("reference") for value in records.values()]):

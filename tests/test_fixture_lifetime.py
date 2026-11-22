@@ -1,9 +1,10 @@
 """Continuation observes the live fixture; old FormIDs never drive later cleanup."""
 from pathlib import Path
 import tempfile
+import time
 import unittest
-from unittest.mock import patch
-from skyrim_autotest import scenarios, runner, vr_probe
+from unittest.mock import Mock, patch
+from skyrim_autotest import fixture_actors, scenarios, runner, vr_probe
 
 class FixtureLifetimeTests(unittest.TestCase):
     class Session:
@@ -63,5 +64,46 @@ class FixtureLifetimeTests(unittest.TestCase):
         self.assertFalse(runner.changes_reference_world('papyrus',{'action':'call','script':'ObjectReference','function':'ApplyHavokImpulse'}))
         self.assertTrue(runner.changes_reference_world('console',{'action':'exec','command':'bat unknown-script'}))
         self.assertTrue(runner.changes_reference_world('papyrus',{'action':'call','script':'Game','function':'LoadGame'}))
+
+class PersistentFixtureAdmissionTests(unittest.TestCase):
+    def test_live_missing_or_malformed_identity_api_refuses_before_fixture_intent(self):
+        base = '0x000A2C91'
+        policy = {'schemaVersion': 1, 'fixtureActorBases': [base], 'allowedRaceForms': [],
+                  'bindings': [{'id': 'read-race', 'script': 'Actor', 'function': 'GetRace',
+                                'scope': 'member', 'params': [], 'returnType': 'race', 'effect': 'read',
+                                'actorSelf': True, 'actorArgs': [], 'raceArgs': [], 'completion': 'native-return'}]}
+        types = {'action': 'string', 'reference': 'string', 'base': 'string', 'timeoutMs': 'integer'}
+        valid = {'name': 'npc_persistence', 'inputSchema': {'type': 'object',
+                 'properties': {key: {'type': kind} for key, kind in types.items()}}}
+        invalid = {'name': 'npc_persistence', 'inputSchema': {'type': 'object',
+                   'properties': {**valid['inputSchema']['properties'], 'reference': {'type': 'integer'}}}}
+        cases = [(True, [], False), (True, [invalid], False), (True, [valid, valid], False),
+                 (True, [valid], True), (False, [], True)]
+        for persistent, tools, admitted in cases:
+            with self.subTest(persistent=persistent, tools=tools):
+                session = Mock()
+                session.state = {'id': 'current-run', 'port': 8920, 'game': {'pid': 41}, 'configuration': {
+                    'native_session': {'nativeBindings': policy, 'npcPersistence': True}}}
+                session.tool.side_effect = [
+                    {'playerLoaded': True, 'cell': {'editorId': 'QASmoke'}},
+                    {'messageBoxOpen': False, 'openMenus': [], 'menuStates': []}]
+                request = {'tag': 'wolf', 'base': base, 'forwardGameUnits': 100, 'rightGameUnits': 0,
+                           'persistentForOwnedSave': persistent}
+                with (patch.object(fixture_actors, '_owned'),
+                      patch.object(fixture_actors, '_qualify', side_effect=RuntimeError('fixture metadata reached')),
+                      patch.object(fixture_actors, '_native_call') as mutation,
+                      patch.object(runner, 'request', return_value={'tools': tools}) as registry):
+                    error = RuntimeError if admitted else fixture_actors.BindingError
+                    message = 'fixture metadata reached' if admitted else 'npc_persistence.*identity'
+                    with self.assertRaisesRegex(error, message):
+                        fixture_actors.create(session, request, time.monotonic() + 10, policy)
+                if persistent:
+                    registry.assert_called_once_with(8920, 'api/tools', timeout=3)
+                else:
+                    registry.assert_not_called()
+                mutation.assert_not_called()
+                session.save.assert_not_called()
+                self.assertFalse(session.state.get('interactiveActorFixtures'))
+
 
 if __name__=='__main__':unittest.main()
